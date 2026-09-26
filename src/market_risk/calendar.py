@@ -10,7 +10,8 @@
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Iterable
+import math
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -217,10 +218,26 @@ def oas_o6_v3r1(o1: dt.date, bond_cal: BondCalendar) -> dt.date:
     return oas_o1_to_o6_sequence(o1, bond_cal)[-1]
 
 
+def _is_missing(value: float | None) -> bool:
+    return value is None or math.isnan(value)
+
+
+def valued_observation_dates(observations: Mapping[dt.date, float | None]) -> list[dt.date]:
+    """FRED 观测中有数值的日期，升序。值为 "."（已转为 None/NaN）的行不算观测（SPEC 5.6 第8条）。"""
+    return sorted(d for d, v in observations.items() if not _is_missing(v))
+
+
+def oas_o1_v2m(base_date: dt.date, observation_dates: Iterable[dt.date]) -> dt.date | None:
+    """O1（v2-M）：基准日之前（不含基准日）最新的一个有数值观测；没有时返回 None。"""
+    earlier = [d for d in observation_dates if d < base_date]
+    return max(earlier) if earlier else None
+
+
 def oas_o6_v2m(o1: dt.date, observation_dates: Iterable[dt.date]) -> dt.date | None:
     """O6（v2-M）：按 FRED 实际返回的观测列表，从 O1 往前数第5个观测（月末周末观测计入）。
 
-    observation_dates 必须包含 O1；O1 之前的观测不足5个时返回 None（由调用方记待补）。
+    observation_dates 只应包含有数值的观测（见 valued_observation_dates），且必须包含 O1；
+    O1 之前的观测不足5个时返回 None（由调用方记待补）。
     """
     obs = sorted(set(observation_dates))
     if o1 not in obs:
@@ -236,6 +253,32 @@ def o1_lag_stock_days(o1: dt.date, base_date: dt.date) -> int:
     return count_trading_days_after(o1, base_date)
 
 
+def rate_window_observations(
+    values: Mapping[dt.date, float | None], window_days: Iterable[dt.date]
+) -> tuple[dict[dt.date, float], list[dt.date]]:
+    """把财政部逐日数值限定到20日窗口（只按股票交易日，SPEC 5.6 第9条）。
+
+    返回 (窗口内的有效数值, 被排除的日期)。被排除的是位于窗口日期范围内、
+    财政部有数值但股市休市的日子（如 2026-04-03），由调用方写入 data_notes。
+    窗口内股市开市但财政部无数值的日子（债市休市）直接缺失，不插值。
+    """
+    days = sorted(window_days)
+    if not days:
+        return {}, []
+    day_set = set(days)
+    included: dict[dt.date, float] = {}
+    excluded: list[dt.date] = []
+    for d in sorted(values):
+        v = values[d]
+        if not (days[0] <= d <= days[-1]) or _is_missing(v):
+            continue
+        if d in day_set:
+            included[d] = float(v)  # type: ignore[arg-type]
+        else:
+            excluded.append(d)
+    return included, excluded
+
+
 # ---------------------------------------------------------------------------
 # 汇总
 # ---------------------------------------------------------------------------
@@ -244,13 +287,13 @@ def o1_lag_stock_days(o1: dt.date, base_date: dt.date) -> int:
 def compute_date_references(
     base_date: dt.date,
     bond_cal: BondCalendar,
-    oas_observation_dates: Iterable[dt.date] | None = None,
+    oas_observations: Mapping[dt.date, float | None] | None = None,
     three_segment_offset: int = 45,
 ) -> DateReferences:
     """计算基准日的全部日期参照。
 
-    oas_observation_dates：FRED 实际返回的 OAS 观测日期（只含有数值的观测）；
-    为 None 时 v2-M 的 O6 无法确定，记为 None。
+    oas_observations：FRED 实际返回的 OAS 观测（日期 → 数值，"." 已转为 None/NaN）；
+    只有有数值的行算观测。为 None 时 v2-M 的 O1/O6 无法确定，记为 None。
     休市日列表的范围为 min(T−20, O6) 至基准日。
     """
     if not is_stock_trading_day(base_date):
@@ -264,7 +307,13 @@ def compute_date_references(
     o1 = oas_o1(base_date, bond_cal)
     sequence = oas_o1_to_o6_sequence(o1, bond_cal)
     o6_v3 = sequence[-1]
-    o6_v2 = None if oas_observation_dates is None else oas_o6_v2m(o1, oas_observation_dates)
+    o1_v2: dt.date | None = None
+    o6_v2: dt.date | None = None
+    if oas_observations is not None:
+        valued = valued_observation_dates(oas_observations)
+        o1_v2 = oas_o1_v2m(base_date, valued)
+        if o1_v2 is not None:
+            o6_v2 = oas_o6_v2m(o1_v2, valued)
 
     span_start = min(t20, o6_v3)
     weekdays = _weekdays(span_start, base_date)
@@ -281,6 +330,7 @@ def compute_date_references(
         window_days=window_days,
         oas_o1=o1,
         oas_o6_v3r1=o6_v3,
+        oas_o1_v2m=o1_v2,
         oas_o6_v2m=o6_v2,
         oas_o1_to_o6_sequence=tuple(sequence),
         o1_lag_stock_days=o1_lag_stock_days(o1, base_date),
@@ -295,7 +345,13 @@ def compute_date_references(
 
 
 def o6_difference_note(refs: DateReferences) -> str | None:
-    """两种 O6 不同时，说明原因（SPEC 5.2）。"""
+    """两种口径的 O1 或 O6 不同时，说明原因（SPEC 5.2）。"""
+    if refs.oas_o1_v2m is not None and refs.oas_o1_v2m != refs.oas_o1:
+        return (
+            f"两种口径的 O1 不同：v3-R1 要求基准日之前最近一个债市营业日 {refs.oas_o1}，"
+            f"FRED 在基准日之前最新的有数值观测为 {refs.oas_o1_v2m}（v2-M 采用），"
+            "说明 FRED 在该营业日缺少数值或数据滞后。"
+        )
     if refs.oas_o6_v2m is None or refs.oas_o6_v2m == refs.oas_o6_v3r1:
         return None
     return (

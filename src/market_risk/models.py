@@ -23,7 +23,8 @@ class DateReferences:
     window_days: tuple[dt.date, ...]           # 20日窗口内的全部股票交易日
     oas_o1: dt.date                            # 基准日之前最近一个债市营业日
     oas_o6_v3r1: dt.date                       # O1 之前第5个债市营业日
-    oas_o6_v2m: dt.date | None                 # 按 FRED 观测列表往前数第5个；无列表时为 None
+    oas_o1_v2m: dt.date | None                 # 基准日之前最新的有数值观测；无列表时为 None
+    oas_o6_v2m: dt.date | None                 # 从 v2-M 的 O1 往前数第5个有数值观测
     oas_o1_to_o6_sequence: tuple[dt.date, ...]  # 从 O1 往前的债市营业日：O1, O1−1, …, O6
     o1_lag_stock_days: int                     # O1 之后（不含）至基准日（含）的股票交易日个数
     three_segment_query_start: dt.date         # T−45

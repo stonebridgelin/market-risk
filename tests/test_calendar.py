@@ -106,8 +106,8 @@ def test_o6_v2m_counts_month_end_weekend_observation(bond_cal_2025h2):
     assert mcal.oas_o6_v2m(o1, obs) == D(2025, 8, 29)
     assert mcal.oas_o6_v3r1(o1, bond_cal_2025h2) == D(2025, 8, 28)
 
-    refs = mcal.compute_date_references(D(2025, 9, 8), bond_cal_2025h2, obs)
-    assert refs.oas_o1 == o1
+    refs = mcal.compute_date_references(D(2025, 9, 8), bond_cal_2025h2, dict.fromkeys(obs, 2.8))
+    assert refs.oas_o1 == refs.oas_o1_v2m == o1
     assert refs.oas_o6_v2m == D(2025, 8, 29)
     assert refs.oas_o6_v3r1 == D(2025, 8, 28)
     note = mcal.o6_difference_note(refs)
@@ -115,7 +115,7 @@ def test_o6_v2m_counts_month_end_weekend_observation(bond_cal_2025h2):
 
 
 def test_o6_v2m_same_as_v3r1_gives_no_note(bond_cal_2025h2):
-    obs = sorted(bond_cal_2025h2.days)
+    obs = dict.fromkeys(bond_cal_2025h2.days, 2.9)
     refs = mcal.compute_date_references(D(2025, 10, 31), bond_cal_2025h2, obs)
     assert refs.oas_o6_v2m == refs.oas_o6_v3r1 == D(2025, 10, 23)
     assert mcal.o6_difference_note(refs) is None
@@ -126,6 +126,125 @@ def test_o6_v2m_insufficient_and_missing_o1():
     assert mcal.oas_o6_v2m(D(2025, 9, 4), obs) is None
     with pytest.raises(mcal.CalendarError):
         mcal.oas_o6_v2m(D(2025, 9, 5), obs)
+
+
+# ---- SPEC 5.6 第8条：FRED 返回 "." 的行不算观测 ----
+
+
+def _weekday_obs(start: dt.date, end: dt.date, missing: set[dt.date]) -> dict:
+    """构造 FRED 观测：每个工作日一行，missing 中的日期值为 None（即 "."）。"""
+    obs: dict[dt.date, float | None] = {}
+    cur = start
+    while cur <= end:
+        if cur.weekday() < 5:
+            obs[cur] = None if cur in missing else 2.9
+        cur += dt.timedelta(days=1)
+    return obs
+
+
+def test_fred_dot_row_is_not_o1(bond_cal_2025h2):
+    """基准日 2025-10-14：FRED 在 10-13 返回 "."，v2-M 的 O1 应为 10-10，不得取 10-13。"""
+    obs = _weekday_obs(D(2025, 9, 25), D(2025, 10, 14), {D(2025, 10, 13)})
+    refs = mcal.compute_date_references(D(2025, 10, 14), bond_cal_2025h2, obs)
+    assert refs.oas_o1_v2m == D(2025, 10, 10)
+    assert refs.oas_o1 == D(2025, 10, 10)
+    assert mcal.o1_lag_stock_days(refs.oas_o1_v2m, refs.base_date) == 2
+
+
+def test_fred_dot_row_skipped_in_o6_v2m(bond_cal_2025h2):
+    """基准日 2025-10-17：O1=10-16，v2-M 的 O6 为 10-08（跳过 10-13），与 v3-R1 相同。"""
+    obs = _weekday_obs(D(2025, 9, 25), D(2025, 10, 17), {D(2025, 10, 13)})
+    refs = mcal.compute_date_references(D(2025, 10, 17), bond_cal_2025h2, obs)
+    assert refs.oas_o1 == refs.oas_o1_v2m == D(2025, 10, 16)
+    assert refs.oas_o6_v2m == D(2025, 10, 8)
+    assert refs.oas_o6_v3r1 == D(2025, 10, 8)
+    assert mcal.o6_difference_note(refs) is None
+
+
+def test_valued_observation_dates_filters_none_and_nan():
+    obs = {D(2025, 10, 10): 2.9, D(2025, 10, 13): None, D(2025, 10, 14): float("nan")}
+    assert mcal.valued_observation_dates(obs) == [D(2025, 10, 10)]
+    assert mcal.oas_o1_v2m(D(2025, 10, 10), [D(2025, 10, 10)]) is None
+
+
+def test_o1_difference_is_reported(bond_cal_2025h2):
+    """FRED 在 O1 当天缺值（数据滞后）：v2-M 的 O1 回退到更早观测，并说明原因。"""
+    obs = _weekday_obs(D(2025, 10, 1), D(2025, 10, 31), {D(2025, 10, 30), D(2025, 10, 31)})
+    refs = mcal.compute_date_references(D(2025, 10, 31), bond_cal_2025h2, obs)
+    assert refs.oas_o1 == D(2025, 10, 30)
+    assert refs.oas_o1_v2m == D(2025, 10, 29)
+    assert refs.oas_o6_v2m == D(2025, 10, 22)
+    note = mcal.o6_difference_note(refs)
+    assert note is not None and "O1 不同" in note
+
+
+def test_no_valued_observation_before_base(bond_cal_2025h2):
+    refs = mcal.compute_date_references(D(2025, 10, 31), bond_cal_2025h2, {})
+    assert refs.oas_o1_v2m is None and refs.oas_o6_v2m is None
+
+
+# ---- SPEC 5.6 第9条：股市休市、债市开市（2026-04-03）----
+
+
+@pytest.fixture(scope="module")
+def bond_cal_2026_spring():
+    return mcal.bond_calendar_from_holidays(load_holidays(), D(2026, 2, 1), D(2026, 5, 29))
+
+
+def test_good_friday_2026_is_stock_holiday_bond_open(bond_cal_2026_spring):
+    assert not mcal.is_stock_trading_day(D(2026, 4, 3))
+    assert bond_cal_2026_spring.is_business_day(D(2026, 4, 3))
+    assert D(2026, 4, 3) in load_holidays().bond_early_closes
+
+
+def test_window_2026_04_24_excludes_good_friday(bond_cal_2026_spring):
+    refs = mcal.compute_date_references(D(2026, 4, 24), bond_cal_2026_spring)
+    assert (refs.window_start, refs.window_end) == (D(2026, 3, 27), D(2026, 4, 24))
+    assert len(refs.window_days) == 20
+    assert D(2026, 4, 3) not in refs.window_days
+    assert refs.stock_holidays_in_window == (D(2026, 4, 3),)
+    assert refs.bond_holidays_in_window == ()
+
+
+def test_rate_window_excludes_treasury_value_on_stock_holiday(bond_cal_2026_spring):
+    """基准日 2026-04-24：利率窗口不得包含 04-03 的财政部数值。"""
+    refs = mcal.compute_date_references(D(2026, 4, 24), bond_cal_2026_spring)
+    treasury = dict.fromkeys(sorted(bond_cal_2026_spring.days), 4.2)
+    treasury[D(2026, 4, 3)] = 9.99  # 若被计入，会成为窗口最高值
+    included, excluded = mcal.rate_window_observations(treasury, refs.window_days)
+    assert D(2026, 4, 3) not in included
+    assert excluded == [D(2026, 4, 3)]
+    assert len(included) == 20
+    assert max(included.values()) == 4.2
+
+
+def test_rate_window_bond_holiday_is_missing_not_filled(bond_cal_2025h2, appendix_a_yields):
+    refs = mcal.compute_date_references(D(2025, 10, 31), bond_cal_2025h2)
+    included, excluded = mcal.rate_window_observations(appendix_a_yields, refs.window_days)
+    assert D(2025, 10, 13) not in included
+    assert len(included) == 19
+    assert excluded == []
+    assert max(included.values()) == 4.18  # H=4.18（2025-10-06）
+    assert mcal.rate_window_observations(appendix_a_yields, []) == ({}, [])
+
+
+def test_v3r1_o6_counts_good_friday_2026(bond_cal_2026_spring):
+    """v3-R1 按债市营业日计数，包含 04-03：基准日 2026-04-13 的 O6 正好是 04-03。"""
+    refs = mcal.compute_date_references(D(2026, 4, 13), bond_cal_2026_spring)
+    assert refs.oas_o1 == D(2026, 4, 10)
+    assert refs.oas_o6_v3r1 == D(2026, 4, 3)
+    # v2-M：FRED 若在 04-03 无数值，只数有数值的观测，O6 顺延到 04-02
+    obs = _weekday_obs(D(2026, 3, 16), D(2026, 4, 13), {D(2026, 4, 3)})
+    refs2 = mcal.compute_date_references(D(2026, 4, 13), bond_cal_2026_spring, obs)
+    assert refs2.oas_o6_v2m == D(2026, 4, 2)
+    assert refs2.oas_o6_v3r1 == D(2026, 4, 3)
+
+
+def test_o1_on_good_friday_2026(bond_cal_2026_spring):
+    """基准日 2026-04-06：v3-R1 的 O1 为 04-03（债市营业日），滞后1个股票交易日。"""
+    refs = mcal.compute_date_references(D(2026, 4, 6), bond_cal_2026_spring)
+    assert refs.oas_o1 == D(2026, 4, 3)
+    assert refs.o1_lag_stock_days == 1
 
 
 def test_o1_sequence_requires_business_day(bond_cal_2025h2):
