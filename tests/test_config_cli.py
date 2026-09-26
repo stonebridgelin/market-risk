@@ -75,6 +75,19 @@ def test_cli_dates():
     assert payload["is_early_close"] is True
 
 
+def test_format_snapshot_summary():
+    from conftest import load_sample_raw
+
+    from market_risk.cli import format_snapshot_summary
+    from market_risk.data.snapshot import build_snapshot
+
+    text = format_snapshot_summary(build_snapshot(load_sample_raw("2025-10-31")))
+    assert any(line.startswith("SPY") and "682.06" in line for line in text.splitlines())
+    assert "2025-10-10(653.02<Lc 657.41@2025-09-12)" in text
+    assert "H=4.18（2025-10-06）" in text
+    assert "数据说明" in text
+
+
 def test_cli_dates_rejects_bad_input():
     runner = CliRunner()
     assert runner.invoke(app, ["dates", "--date", "2025-11-27"]).exit_code == 1

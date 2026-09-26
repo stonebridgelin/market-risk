@@ -35,6 +35,55 @@ def parse_sop_appendix_a(sop_path: Path = SOP_PATH) -> dict[dt.date, float]:
     return result
 
 
+SAMPLE_DATES = ("2025-08-29", "2025-09-26", "2025-10-31", "2025-11-28")
+
+
+def load_sample_raw(date_str: str, breadth: dict | None = None):
+    """读取阶段2联网保存的离线原始数据（tests/fixtures/raw/<日期>/）。"""
+    from market_risk.data.raw_io import load_raw_inputs
+
+    return load_raw_inputs(FIXTURES / "raw" / date_str, breadth)
+
+
+def synthetic_raw(
+    base: dt.date,
+    close_overrides: dict[str, dict[dt.date, float]] | None = None,
+    treasury_overrides: dict[dt.date, float | None] | None = None,
+    oas_overrides: dict[dt.date, float | None] | None = None,
+    start: dt.date | None = None,
+    mode: str = "backtest",
+):
+    """合成原始数据：ETF 收盘价恒为 100，财政部数值为工作日 4.00，OAS 为每日 3.00，VIX 为 15。"""
+    from market_risk import calendar as mcal
+    from market_risk.data.snapshot import RawInputs
+
+    start = start or base - dt.timedelta(days=420)
+    days = mcal.stock_trading_days(start, base)
+    closes = {}
+    for sym in ("SPY", "QQQ", "RSP", "HYG", "LQD"):
+        c = dict.fromkeys(days, 100.0)
+        c.update((close_overrides or {}).get(sym, {}))
+        closes[sym] = c
+    weekdays = [base - dt.timedelta(days=i) for i in range(100)]
+    weekdays = [d for d in weekdays if d.weekday() < 5]
+    treasury = dict.fromkeys(weekdays, 4.00)
+    treasury.update(treasury_overrides or {})
+    oas = dict.fromkeys(weekdays, 3.00)
+    oas.update(oas_overrides or {})
+    return RawInputs(
+        base_date=base,
+        closes=closes,
+        vix_fred=dict.fromkeys(days, 15.0),
+        vix_cboe=None,
+        treasury={d: v for d, v in treasury.items() if v is not None},
+        treasury_coverage_start=base - dt.timedelta(days=99),
+        oas=oas,
+        oas_vintage=None,
+        breadth={},
+        mode=mode,
+    )
+
+
 @pytest.fixture(scope="session")
 def appendix_a_yields() -> dict[dt.date, float]:
     return parse_sop_appendix_a()

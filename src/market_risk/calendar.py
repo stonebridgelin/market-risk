@@ -319,7 +319,10 @@ def compute_date_references(
     weekdays = _weekdays(span_start, base_date)
     trading = set(stock_trading_days(span_start, base_date))
     stock_holidays = tuple(d for d in weekdays if d not in trading)
-    bond_holidays = tuple(bond_cal.holidays_between(span_start, base_date))
+    # 每日模式下财政部可能尚未发布基准日数值，此时覆盖范围止于前一日，不把基准日误列为休市
+    bond_holidays = tuple(
+        bond_cal.holidays_between(span_start, min(base_date, bond_cal.coverage_end))
+    )
 
     return DateReferences(
         base_date=base_date,
@@ -334,6 +337,7 @@ def compute_date_references(
         oas_o6_v2m=o6_v2,
         oas_o1_to_o6_sequence=tuple(sequence),
         o1_lag_stock_days=o1_lag_stock_days(o1, base_date),
+        o1_v2m_lag_stock_days=None if o1_v2 is None else o1_lag_stock_days(o1_v2, base_date),
         three_segment_query_start=shift_trading_days(base_date, -three_segment_offset),
         outcome_window_start=shift_trading_days(base_date, 1),
         outcome_window_end=shift_trading_days(base_date, OUTCOME_WINDOW_DAYS),

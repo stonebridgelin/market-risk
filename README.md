@@ -25,7 +25,12 @@ uv sync
 uv run market-risk dates --date 2025-11-28
 ```
 
-其余命令（`fetch`、`score`、`validate`、`samples`）在后续阶段实现。
+```bash
+uv run market-risk fetch --date 2025-11-28            # 下载并显示核对摘要（缓存于 data/cache/）
+uv run market-risk fetch --date 2025-11-28 --refresh  # 忽略缓存重新下载
+```
+
+其余命令（`score`、`validate`、`samples` 等）在后续阶段实现。存储目录见 [`docs/STORAGE.md`](docs/STORAGE.md)。
 
 ## 测试
 
