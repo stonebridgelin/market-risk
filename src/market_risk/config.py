@@ -52,11 +52,9 @@ class Settings:
     vix_series: str
     cboe_vix_history_url: str
     treasury_fallback_series: str
-    cache_dir: Path
+    storage_root: Path
     max_retries: int
     backoff_seconds: float
-    output_dir: Path
-    breadth_csv: Path
     near_threshold: NearThreshold
 
 
@@ -102,11 +100,9 @@ def load_settings(path: Path = DEFAULT_SETTINGS_PATH, root: Path = PROJECT_ROOT)
             vix_series=str(raw["vix"]["series"]),
             cboe_vix_history_url=str(raw["vix"]["cboe_history_url"]),
             treasury_fallback_series=str(raw["treasury"]["fallback_series"]),
-            cache_dir=_resolve(raw["cache"]["dir"], root),
-            max_retries=int(raw["cache"]["max_retries"]),
-            backoff_seconds=float(raw["cache"]["backoff_seconds"]),
-            output_dir=_resolve(raw["output"]["dir"], root),
-            breadth_csv=_resolve(raw["manual"]["breadth_csv"], root),
+            storage_root=_resolve(str(raw["storage"]["root"]), root).resolve(),
+            max_retries=int(raw["network"]["max_retries"]),
+            backoff_seconds=float(raw["network"]["backoff_seconds"]),
             near_threshold=NearThreshold(
                 close_vs_ma_pct=float(nt["close_vs_ma_pct"]),
                 ma5_vs_ma50_pct=float(nt["ma5_vs_ma50_pct"]),

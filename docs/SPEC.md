@@ -44,6 +44,8 @@
 
 ## 3. 项目结构
 
+> **`data/`、`output/` 的目录设计已由 `docs/STORAGE.md` 第2节替代**（`output/` 取消，分析结果写入 `results/`；新增 `data/materials/`、`data/legacy/`、`db/`、`reports/`、`src/market_risk/storage/`）。所有路径统一由 `storage/paths.py` 生成。下图其余部分仍然有效。
+
 ```
 market-risk/
 ├── pyproject.toml
@@ -266,10 +268,12 @@ market-risk/
 
 ## 7. 输出（`report.py`）
 
-每次运行在 `output/{基准日}/` 下生成：
+> **输出位置已由 `docs/STORAGE.md` 替代**：每次运行写入独立的运行目录 `results/<对象>/<框架>/<年>/<日期>/run_…/`，逐日数据等当次实际使用的数据放在其中的 `inputs/` 子目录，另有 `meta.json`、`three_segment.csv`。下列文件内容要求不变。
+
+每次运行在运行目录下生成：
 
 1. `dates.json`：`DateReferences` 全部内容。
-2. `daily_data.csv`：T−45 至基准日的逐日数据（SPY/QQQ/RSP/HYG/LQD 收盘价、各均线、VIX、财政部10年期、OAS），缺失处留空。
+2. `inputs/daily_data.csv`：T−45 至基准日的逐日数据（SPY/QQQ/RSP/HYG/LQD 收盘价、各均线、VIX、财政部10年期、OAS），缺失处留空。
 3. `snapshot.json`：`MarketSnapshot`（不含逐日序列）。
 4. `scores.json`：两个版本的 `ScoreResult`，以及三环节完整遍历记录。
 5. `prompt.md`：按 `templates/prompt_backtest.md.j2` 生成的完整 prompt，结构与 SOP 第11.1节一致。变化如下：
@@ -284,7 +288,7 @@ market-risk/
 - VIX 与 18、20、25 的差距在 ±1 以内；g 与 20%、30% 的差距在 ±3 个百分点以内；
 - ΔOAS 与 5、20 的差距在 ±3bp 以内；y 与 H 的差距在 2bp 以内。
 
-另外维护 `output/history.csv`：每运行一个基准日追加或更新一行（基准日、两个版本的五项分数与总分、阶段、贴近门槛摘要、运行时间、代码的 git commit）。
+~~另外维护 `output/history.csv`~~：**已取消**（2026-09-26 确认），其功能由数据库 `runs`、`totals` 表和 `reports/` 覆盖，见 `docs/STORAGE.md`。
 
 ---
 
@@ -377,6 +381,9 @@ uv run market-risk samples --year 2026               # 按 SOP 9.2 列出每月�
 - 期望分数：两个版本均为0
 
 - 另需：用 `docs/SOP.md` 附录A核对财政部数据；`market-risk score --date 2025-11-28 --s5fi 58.44 --s5tw 76.73` 能完整生成第7节的全部输出；`ruff check` 通过；测试覆盖率 ≥ 85%（网络请求部分可排除）。
+
+### 阶段4.5：存储（数据库、资料、标签、统计）
+- 内容与验收见 `docs/STORAGE.md` 第9节。
 
 ### 阶段5：收尾
 - 完善 `README.md`（安装、申请 FRED key、录入广度、各命令示例、输出说明、常见问题）。

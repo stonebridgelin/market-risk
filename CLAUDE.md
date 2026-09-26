@@ -9,4 +9,7 @@
 6. 修改代码后运行 `uv run pytest` 与 `uv run ruff check`，全部通过才能提交。
 7. 回归样本的期望值来自人工核对，不得为了通过测试而修改期望值；出现差异时报告给用户。
 8. 核心逻辑写成输入输出清晰的纯函数，不依赖全局状态（为以后接入 LangChain Agent 预留）。
-9. 本机 git 不在 PATH 中，路径为 `C:\Execute\Git\bin`；在 PowerShell 中先执行 `$env:PATH = "C:\Execute\Git\bin;$env:PATH"`。
+9. 存储设计以 `docs/STORAGE.md` 为准：所有路径一律由 `src/market_risk/storage/paths.py` 生成，不在其他地方拼接路径字符串；
+   每次运行保留独立目录，不覆盖；测试只能写入临时目录，不得写入真实的 `results/`、`data/`、`db/`、`reports/`。
+10. 结果标签隔离：`scoring/`、`report.py` 中生成 prompt 的部分、`data/snapshot.py` 不得读取 `outcomes`（标签文件与标签表）。
+11. 本机 git 不在 PATH 中，路径为 `C:\Execute\Git\bin`；在 PowerShell 中先执行 `$env:PATH = "C:\Execute\Git\bin;$env:PATH"`。

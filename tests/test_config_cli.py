@@ -24,7 +24,8 @@ def test_load_settings_defaults():
     assert s.moving_averages == (5, 10, 20, 30, 50, 200)
     assert s.d1_includes_t_minus_20 is True
     assert s.three_segment_query_offset == 45
-    assert s.cache_dir == PROJECT_ROOT / "data" / "cache"
+    assert s.storage_root == PROJECT_ROOT.resolve()
+    assert s.max_retries == 3
     assert s.near_threshold.oas_bp == 3
 
 

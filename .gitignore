@@ -1,9 +1,12 @@
 # 密钥
 .env
 
-# 数据缓存与输出
+# 可重新下载的接口缓存、可由 results/ 重建的数据库（见 docs/STORAGE.md）
 data/cache/
-output/
+db/
+
+# 截图（可选，不提交）
+data/materials/**/screenshots/
 
 # Python
 __pycache__/
