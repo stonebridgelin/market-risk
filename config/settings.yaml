@@ -1,0 +1,49 @@
+# market-risk 运行配置
+# 注意：评分规则本身（门槛数值）写在 scoring/v2m.py、scoring/v3r1.py 中，按 SOP 第7节冻结，不在此处配置。
+
+symbols:
+  scored: [SPY, QQQ, RSP]      # 参与计分的 ETF
+  reference: [HYG, LQD]        # 仅作参考
+
+moving_averages: [5, 10, 20, 30, 50, 200]   # 简单均线周期，基于不复权 Close
+
+prices:
+  lookback_calendar_days: 420  # 基准日往前至少下载的自然日数
+
+three_segment:
+  # SPEC 5.6 第1条：候选 d1 是否包含 T−20。程序同时按两种口径计算，此开关决定计分采用哪一种
+  d1_includes_t_minus_20: true
+  query_start_offset: 45       # 三环节查询起点 T−45（股票交易日）
+
+oas:
+  series: BAMLH0A0HYM2
+  verify_vintage: true         # SPEC 5.6 第3条：用 ALFRED 版本数据核验 O1 的发布时点
+
+vix:
+  series: VIXCLS
+  # SPEC 5.6 第7条：FRED 缺失时的官方备用源
+  cboe_history_url: https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv
+
+treasury:
+  fallback_series: DGS10       # 主源失败时的备用源
+
+cache:
+  dir: data/cache
+  max_retries: 3
+  backoff_seconds: 1.0
+
+output:
+  dir: output
+
+manual:
+  breadth_csv: data/manual/breadth.csv
+
+# SPEC 第7节：贴近门槛的读数
+near_threshold:
+  close_vs_ma_pct: 1.0         # 收盘价与 MA20/MA50 差距 ±1%
+  ma5_vs_ma50_pct: 0.5         # MA5 与 MA50 差距 ±0.5%
+  breadth_pts: 2.0             # F、W、L 与 40、50 差距 ±2 个百分点
+  vix_pts: 1.0                 # VIX 与 18、20、25 差距 ±1
+  vix_change_pts: 3.0          # g 与 20%、30% 差距 ±3 个百分点
+  oas_bp: 3                    # ΔOAS 与 5、20 差距 ±3bp
+  yield_bp: 2                  # y 与 H 差距 2bp 以内

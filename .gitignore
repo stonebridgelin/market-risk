@@ -1,0 +1,21 @@
+# 密钥
+.env
+
+# 数据缓存与输出
+data/cache/
+output/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.idea/
