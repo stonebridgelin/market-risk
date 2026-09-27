@@ -49,6 +49,7 @@ class Settings:
     three_segment_query_offset: int
     oas_series: str
     oas_revision_check: bool
+    oas_long_history_source: str
     vix_series: str
     cboe_vix_history_url: str
     treasury_fallback_series: str
@@ -83,6 +84,13 @@ def _resolve(path_str: str, root: Path) -> Path:
     return p if p.is_absolute() else root / p
 
 
+def _long_history(value: Any) -> str:
+    v = str(value).lower()
+    if v not in {"none", "tradingview"}:
+        raise ConfigError(f"oas.long_history_source 只能是 none 或 tradingview：{value!r}")
+    return v
+
+
 def load_settings(path: Path = DEFAULT_SETTINGS_PATH, root: Path = PROJECT_ROOT) -> Settings:
     """读取 settings.yaml。相对路径以 root 为基准解析。"""
     raw = _read_yaml(path)
@@ -97,6 +105,7 @@ def load_settings(path: Path = DEFAULT_SETTINGS_PATH, root: Path = PROJECT_ROOT)
             three_segment_query_offset=int(raw["three_segment"]["query_start_offset"]),
             oas_series=str(raw["oas"]["series"]),
             oas_revision_check=bool(raw["oas"]["revision_check"]),
+            oas_long_history_source=_long_history(raw["oas"].get("long_history_source", "none")),
             vix_series=str(raw["vix"]["series"]),
             cboe_vix_history_url=str(raw["vix"]["cboe_history_url"]),
             treasury_fallback_series=str(raw["treasury"]["fallback_series"]),

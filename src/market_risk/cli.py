@@ -212,3 +212,90 @@ def fetch(
             f"  - {s.source}:{s.key} {s.data_start}至{s.data_end} {s.rows}行 "
             f"{'缓存' if s.from_cache else '下载'}于 {s.downloaded_at_utc}"
         )
+
+
+# ---------------------------------------------------------------------------
+# 阶段4：score / validate / samples
+# ---------------------------------------------------------------------------
+
+
+def _record_breadth(paths: StoragePaths, day: dt.date, s5fi: float | None, s5tw: float | None) -> None:
+    """命令行传入的广度读数同时写入 data/manual/breadth.csv（SPEC 6.5）。"""
+    from market_risk.data.breadth import BreadthError, make_reading, upsert_breadth
+
+    if s5fi is None and s5tw is None:
+        return
+    if s5fi is None or s5tw is None:
+        raise typer.BadParameter(f"{day} 的 S5FI 与 S5TW 需要同时提供")
+    try:
+        upsert_breadth(paths.breadth_csv, make_reading(day, s5fi, s5tw, "score 命令录入"))
+    except BreadthError as exc:
+        typer.echo(f"错误：{exc}（如需修改，请用 breadth add --overwrite）", err=True)
+        raise typer.Exit(code=1) from exc
+
+
+@app.command()
+def score(
+    date: Annotated[str | None, typer.Option("--date", help="基准日；daily 模式默认为今天（美东）")] = None,
+    s5fi: Annotated[float | None, typer.Option("--s5fi", help="基准日 S5FI（百分数）")] = None,
+    s5tw: Annotated[float | None, typer.Option("--s5tw", help="基准日 S5TW（百分数）")] = None,
+    s5fi_t5: Annotated[float | None, typer.Option("--s5fi-t5", help="5个交易日前 S5FI")] = None,
+    s5tw_t5: Annotated[float | None, typer.Option("--s5tw-t5", help="5个交易日前 S5TW")] = None,
+    mode: Annotated[str, typer.Option("--mode", help="backtest 或 daily")] = "backtest",
+    refresh: Annotated[bool, typer.Option("--refresh", help="忽略缓存，强制重新下载")] = False,
+) -> None:  # pragma: no cover - 联网；离线部分见 pipeline 测试
+    """下载数据、计算两个版本的评分，生成运行目录下的全部输出。"""
+    from market_risk.data.cache import today_new_york
+    from market_risk.data.fetch import fetch_raw_inputs
+    from market_risk.pipeline import run_scoring
+    from market_risk.storage.runs import git_info
+
+    if mode not in {"backtest", "daily"}:
+        raise typer.BadParameter("--mode 只能是 backtest 或 daily")
+    if date is None and mode != "daily":
+        raise typer.BadParameter("回测模式必须提供 --date")
+    base = _parse_date(date) if date else today_new_york()
+    settings = load_settings()
+    paths = StoragePaths(settings.storage_root)
+    _record_breadth(paths, base, s5fi, s5tw)
+    _record_breadth(paths, mcal.shift_trading_days(base, -5), s5fi_t5, s5tw_t5)
+    raw = fetch_raw_inputs(base, settings, paths, get_fred_api_key(), mode, refresh)
+    outcome = run_scoring(raw, settings, paths, git_info(settings.storage_root), load_holidays())
+    _print_outcome(outcome)
+
+
+def _print_outcome(outcome: Any) -> None:
+    typer.echo(f"运行目录：{outcome.run_dir}")
+    typer.echo(f"运行状态：{outcome.status}；{outcome.official_note}")
+    for r in outcome.results:
+        dims = "、".join(f"{d.name}{d.score if d.score is not None else '待补'}" for d in r.dimensions)
+        total = r.total if r.total is not None else f"{r.total_range[0]}–{r.total_range[1]}"
+        typer.echo(f"{r.version}：{dims}；总分 {total}；{r.stage or '范围跨越阶段'}；"
+                   f"明确恶化={dict(r.clear_deterioration)['大盘明确恶化']}")
+        for f in (*r.review_flags, *r.notes):
+            typer.echo(f"  {f}")
+    for m in outcome.messages:
+        typer.echo(f"提示：{m}")
+
+
+@app.command()
+def validate() -> None:
+    """用 tests/fixtures 中的历史样本比对程序值与截图值（离线）。"""
+    from market_risk.data.tradingview import format_table
+    from market_risk.validation import validate_all
+
+    checks = validate_all(load_settings())
+    rows = [[c.sample, c.item, c.screenshot, c.program, c.diff, "一致" if c.ok else "不一致"] for c in checks]
+    typer.echo(format_table(["样本", "项目", "截图", "程序", "差值", "结果"], rows))
+    bad = [c for c in checks if not c.ok]
+    typer.echo(f"\n共 {len(checks)} 项，一致 {len(checks) - len(bad)}，不一致 {len(bad)}。")
+    if bad:
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def samples(year: Annotated[int, typer.Option("--year", help="年份")]) -> None:
+    """按 SOP 9.2 列出每月最后一个周五（休市则取当月最后一个交易日）。"""
+    for d in mcal.monthly_sample_dates(year):
+        note = "" if d.weekday() == 4 else "（最后一个周五休市，取当月最后一个交易日）"
+        typer.echo(f"{d}（周{'一二三四五六日'[d.weekday()]}）{note}")

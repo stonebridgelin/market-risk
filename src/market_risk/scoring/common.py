@@ -52,6 +52,14 @@ def pct_change(v: Decimal, v0: Decimal) -> Decimal:
     return (v / v0 - 1) * 100
 
 
+def fixed2(x: Decimal | int | float | None) -> str:
+    """展示用：固定两位小数（价格、百分数），四舍五入。"""
+    if x is None:
+        return "缺失"
+    d = x if isinstance(x, Decimal) else Decimal(repr(x))
+    return str(d.quantize(CENT, rounding=ROUND_HALF_UP))
+
+
 def show(x: Decimal | int | float | None) -> str:
     """展示用：整数原样显示，其余保留两位小数。"""
     if x is None:

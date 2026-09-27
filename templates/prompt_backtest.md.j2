@@ -1,0 +1,125 @@
+{#- 按 SOP 第11.1节模板生成；SPEC 第7节的修改：第三节改为"数据说明"；第五节由程序填充；
+    三环节附程序完整遍历表，要求不联网、只用提供的数据独立复核；第六至八节规则全文从 docs/SOP.md 原样读取。
+    mode=daily 时按 SOP 11.2 调整。本模板不得引用结果标签。 -#}
+{% if mode == "daily" -%}
+# 美股大盘风险评分（每日前瞻）：v2-M 与 v3-R1 并行
+{%- else -%}
+# 美股大盘风险评分历史回测：v2-M 与 v3-R1 并行
+{%- endif %}
+
+## 角色与任务
+你是重视证据、熟悉市场结构的量化风险研究助手。评估{{ base_date }}（{{ weekday }}）收盘后（美东18:30）的市场风险状态，并分别用规则A（v2-M）和规则B（v3-R1）打分。只测试评分规则，不涉及持仓、交易建议或点位预测。先列数字、日期、计算式，再给分数。两套规则固定不变，不得根据该日期之后的行情修改。
+
+{% if mode == "daily" -%}
+## 一、数据隔离
+1. 只使用{{ base_date }}收盘后已公布的数据，即本 prompt 提供的数据。
+2. **不得联网**，不得凭记忆补齐任何数据；不知道的数据直接说明。
+3. 本 prompt 中的数值由程序从接口取得并计算，请只用这些数据独立复核程序的计算与判定。
+4. 全文使用绝对日期和美东时间。未触发条件不等于市场安全。
+{%- else -%}
+## 一、回测隔离
+1. 只能使用{{ base_date }}美东18:30时已公布、且描述{{ base_date }}或更早状态的信息。
+2. 不搜索、使用、提及或暗示此后发生的行情、事件或数据，包括你训练数据中可能知道的内容。
+3. **不得联网**。只使用本 prompt 提供的数据独立复核，不得查询任何外部数据（包括历史收盘价）。
+4. 不知道的数据直接说明，不得凭记忆补齐。
+5. 本 prompt 不附图表，所有数值为文字数据，不存在图表中的后续K线、最新价标记线或被撑开的纵轴问题。
+6. 若意识到判断可能受到已知后续走势影响，标注"存在事后信息影响"，且不得据此改变分数。
+7. 不计算基准日之后的风险事件标签。
+8. 全文使用绝对日期和美东时间。未触发条件不等于市场安全。
+{%- endif %}
+
+## 二、时点口径（收盘后分析）
+- ETF收盘价与均线、S5FI、S5TW：以基准日常规交易收盘为准{% if is_early_close %}（{{ base_date }} 为提前收盘日，以提前收盘价为准）{% endif %}。
+- VIX：基准日官方收盘值，与5个交易日前官方收盘值比较。
+- 10年期收益率：财政部基准日官方数值。
+- OAS：只用分析时点已发布的观测，O1为基准日前一个债券市场营业日。
+
+## 三、数据说明
+本 prompt 不附截图，全部数据由程序通过接口取得，并已截断到{{ base_date }}（含），不含任何之后的数据：
+- ETF 日线：Yahoo Finance 不复权收盘价（Close，非 Adj Close）；均线（MA5/MA20/MA50/MA200）为程序对收盘价计算的简单移动平均。
+- VIX：FRED VIXCLS（缺失时用 Cboe 官方 VIX_History.csv，下文注明）。
+- 10年期收益率：美国财政部 Daily Treasury Par Yield Curve Rates 的 10 Yr 列。
+- OAS：FRED BAMLH0A0HYM2（两位小数）。
+- S5FI、S5TW：{{ breadth_source }}。
+- 三环节：附程序的完整遍历表与逐日收盘价，请只用这些数据独立复核，**不要联网查询**。
+
+## 四、日期对照
+基准日：{{ base_date }}（{{ weekday }}）
+5个交易日前：{{ refs.t_minus_5 }}
+20个交易日前：{{ refs.t_minus_20 }}
+过去20个交易日窗口：{{ refs.window_start }}至{{ refs.window_end }}
+OAS（规则B，v3-R1）：O1={{ refs.oas_o1 }}；O6={{ refs.oas_o6_v3r1 }}（从O1往前依次为 {{ v3r1_sequence }}）
+OAS（规则A，v2-M）：O1={{ refs.oas_o1_v2m or "无" }}；O6={{ refs.oas_o6_v2m or "无" }}（O1 滞后基准日 {{ refs.o1_v2m_lag_stock_days }} 个股票交易日）
+期间休市日：{{ holidays_text }}
+{% if mode == "daily" %}本日是否为本周最后一个交易日：{{ "是（计入检验样本）" if refs.is_last_trading_day_of_week else "否" }}
+{% endif %}
+
+## 五、数据核对行
+价格（程序计算，截至{{ base_date }}收盘）：
+| 标的 | 收盘 | MA5 | MA20 | MA50 | MA200 |
+|---|---|---|---|---|---|
+{% for e in etfs -%}
+| {{ e.symbol }} | {{ e.close }} | {{ e.ma5 }} | {{ e.ma20 }} | {{ e.ma50 }} | {{ e.ma200 }} |
+{% endfor %}
+均线为精确值四舍五入到两位小数后展示。
+SPY在{{ refs.window_start }}至{{ refs.window_end }}的最高收盘价：{{ spy_window_max }}（规则A需要）。
+
+三环节核验（规则A需要）：以下为程序的完整遍历记录（d1 候选为 {{ d1_scope }}；Lc 为 d1 之前20个交易日的最低收盘价）。请用下方逐日收盘价独立复核，**不得联网**。
+| 标的 | d1 | d1收盘 | Lc | Lc日期 | 第一步 d1<Lc | 满足 d1<d2≤Lc 的 d2 | 第三步 基准日<d1 | 完成 |
+|---|---|---|---|---|---|---|---|---|
+{% for t in traces -%}
+| {{ t.symbol }} | {{ t.d1 }} | {{ t.d1_close }} | {{ t.lc }} | {{ t.lc_date }} | {{ "是" if t.step1 else "否" }} | {{ t.d2_text }} | {{ "是" if t.step3 else "否" }} | {{ "是" if t.completed else "否" }} |
+{% endfor %}
+{{ three_segment_conclusion }}
+
+{{ refs.three_segment_query_start }}至{{ base_date }}的逐日收盘价：
+| 日期 | SPY | QQQ | RSP |
+|---|---|---|---|
+{% for row in daily_closes -%}
+| {{ row.date }} | {{ row.SPY }} | {{ row.QQQ }} | {{ row.RSP }} |
+{% endfor %}
+
+广度：S5FI {{ breadth.f }}%；S5TW {{ breadth.w }}%。5个交易日前（{{ refs.t_minus_5 }}）读数：{{ breadth.t5 }}。
+
+VIX：{{ base_date }}官方收盘 {{ vix }}；5个交易日前（{{ refs.t_minus_5 }}）官方收盘 {{ vix_t5 }}。
+
+利率（财政部官方10年期par yield，%）：
+{% for y in yields -%}
+- {{ y.date }}：{{ y.value }}{% if y.note %}（{{ y.note }}）{% endif %}
+{% endfor %}
+评分只用财政部官方数值。
+
+OAS：
+- 规则B（v3-R1）：O1={{ refs.oas_o1 }}：{{ oas.o1_v3 }}%；O6={{ refs.oas_o6_v3r1 }}：{{ oas.o6_v3 }}%（FRED 公布的两位小数）
+- 规则A（v2-M）：O1={{ refs.oas_o1_v2m or "无" }}：{{ oas.o1_v2 }}%；O6={{ refs.oas_o6_v2m or "无" }}：{{ oas.o6_v2 }}%
+- 计算口径：按FRED公布的两位小数数值计算，不推测未公布的小数位；等号边界按规则原文执行。
+- {{ oas.note }}
+
+不计分参考：HYG/LQD {{ base_date }}收盘比值 {{ hyg_lqd }}
+
+{% if data_notes -%}
+数据说明（程序记录）：
+{% for n in data_notes -%}
+- {{ n }}
+{% endfor %}
+{% endif -%}
+对缺失字段，请先判断其所有可能取值是否都不改变该维度结果；若是，可给确定分数并说明理由；否则记"待补"。
+
+## 六、共同规则
+{{ rules_71 }}
+
+## 七、规则A：v2-M
+{{ rules_72 }}
+
+## 八、规则B：v3-R1
+{{ rules_73 }}
+
+## 九、输出格式
+1. 数据核验表：数值、观测日期、来源、冲突、缺失、疑似未来信息及排除方式
+2. 逐维度对照表：列出每个维度的计算过程，再分别给出规则A与规则B的分数；两者不同时说明原因
+3. 两个版本的总分与阶段（或已确定分数与理论范围）
+4. 两个版本的"大盘明确恶化"证据链，逐项写"是/否/无法核验"
+5. 未计分但可观察的事实（只列数据）
+6. 数据质量记录：规则版本、数据版本、未解决问题；不评论{{ base_date }}之后的走势
+{% if mode == "daily" %}7. 本日是否为本周最后一个交易日（是则计入检验样本）
+{% endif %}
