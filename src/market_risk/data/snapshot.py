@@ -11,7 +11,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from market_risk import calendar as mcal
-from market_risk.config import MarketHolidays
+from market_risk.config import DataDecision, MarketHolidays
 from market_risk.data.cboe import resolve_vix
 from market_risk.indicators import (
     InsufficientDataError,
@@ -58,6 +58,8 @@ class RawInputs:
     sources: tuple[SourceInfo, ...] = ()
     notes: tuple[str, ...] = ()
     mode: str = "backtest"
+    decisions: tuple[DataDecision, ...] = ()     # 已裁定日期表（config/data_decisions.yaml）
+    oas_symbol: str = "BAMLH0A0HYM2"
 
 
 @dataclass
@@ -107,8 +109,12 @@ def build_snapshot(
     vix_fred = truncate(raw.vix_fred, base)
     vix_cboe = None if raw.vix_cboe is None else truncate(raw.vix_cboe, base)
     treasury = _valued(truncate(raw.treasury, base))
-    oas = truncate(raw.oas, base)
-    oas_vintage = None if raw.oas_vintage is None else truncate(raw.oas_vintage, base)
+    # 已裁定日期表：exclude 的 OAS 观测两个版本都不计入；keep 的不再提示"需人工判断"
+    oas_decisions = {d.date: d for d in raw.decisions if d.symbol == raw.oas_symbol}
+    oas_excluded = {d for d, x in oas_decisions.items() if x.decision == "exclude"}
+    oas = {d: v for d, v in truncate(raw.oas, base).items() if d not in oas_excluded}
+    oas_vintage = None if raw.oas_vintage is None else {
+        d: v for d, v in truncate(raw.oas_vintage, base).items() if d not in oas_excluded}
     breadth = {d: r for d, r in raw.breadth.items() if d <= base}
 
     # ---- 2. 日期参照 ----
@@ -164,6 +170,12 @@ def build_snapshot(
     breadth_t5 = breadth.get(refs.t_minus_5)
     if breadth_now is None:
         notes.add(f"缺少基准日 {base} 的 S5FI、S5TW 读数")
+    for reading, labels in ((breadth_now, {"S5FI": "F", "S5TW": "W"}), (breadth_t5, {"S5FI": "F5", "S5TW": "W5"})):
+        for field_name in reading.stale_fields if reading is not None else ():
+            notes.add(
+                f"疑似陈旧值：{labels[field_name]}（{field_name} {reading.date}）与前一交易日完全相同，"  # type: ignore[union-attr]
+                "保留原值（逐日回测将做敏感性检验）"
+            )
 
     # ---- 5. VIX（FRED → Cboe，SPEC 5.6 第7条）----
     vix, vix_notes = resolve_vix(base, vix_fred, vix_cboe)
@@ -202,14 +214,22 @@ def build_snapshot(
 
     # 债市休市日的 OAS 观测（SPEC 5.6 第10条）：沿用值排除；与前一观测不同的保留并报告
     span_start = min(d for d in (refs.oas_o6_v3r1, refs.oas_o6_v2m) if d is not None)
+    for d in sorted(oas_excluded):
+        if span_start <= d < base and d in raw.oas:
+            notes.add(f"OAS {d} 按已裁定日期表排除，两个版本都不计入（{oas_decisions[d].reason}；"
+                      f"裁定于 {oas_decisions[d].decided_on}）")
     for h_obs in mcal.bond_holiday_observations(oas, bond_cal):
         if not (span_start <= h_obs.date < base):
             continue
+        decided = oas_decisions.get(h_obs.date)
         if h_obs.carried_forward:
             notes.add(
                 f"OAS {h_obs.date}（债市休市日）为沿用值 {h_obs.value}"
                 f"（同 {h_obs.previous_date}），v2-M 不计为观测"
             )
+        elif decided is not None and decided.decision == "keep":
+            notes.add(f"OAS {h_obs.date}（债市休市日）数值 {h_obs.value} 与前一观测不同，按已裁定日期表保留"
+                      f"（{decided.reason}；裁定于 {decided.decided_on}）")
         else:
             notes.add(
                 f"【需人工判断】OAS {h_obs.date} 为债市休市日，但 FRED 数值 {h_obs.value} "

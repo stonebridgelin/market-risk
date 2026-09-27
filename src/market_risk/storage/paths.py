@@ -199,6 +199,14 @@ class StoragePaths:
     def tv_crosscheck_md(self) -> Path:
         return self.reports_dir / "tradingview_crosscheck.md"
 
+    @property
+    def holiday_audit_md(self) -> Path:
+        return self.reports_dir / "holiday_calendar_audit.md"
+
+    @property
+    def tv_quality_md(self) -> Path:
+        return self.reports_dir / "tradingview_data_quality.md"
+
     def tv_compare_md(self, symbol: str) -> Path:
         if not _TV_SYMBOL_RE.match(symbol):
             raise PathError(f"TradingView 标的名不合法：{symbol!r}")

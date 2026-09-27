@@ -124,6 +124,19 @@ uv run market-risk tv compare --symbol BAMLH0A0HYM2
 - `tv validate [--symbol S5FI]` 按 manifest 重新校验；原始文件被改动时会报错（sha256）。
 - OAS 长历史（`oas.long_history_source: tradingview`）已于 2026-09-27 开启（`tv compare` 787 天重叠、0 处不一致）：只有 FRED API 取不到的日期（早于三年）才使用 TradingView 数据，并在数据说明中注明。
 
+### 4.6.1 数据审计
+
+```bash
+uv run market-risk tv quality
+```
+
+```bash
+uv run market-risk audit calendar --write
+```
+
+- `tv quality`：广度指标早期数据质量检查（单值K线阶段、跳变、节假日数据、疑似陈旧值），写 `reports/tradingview_data_quality.md`。
+- `audit calendar`：补齐 `config/holidays.yaml`（加 `--write` 才写入），与 SIFMA 常见规则对照，并列出债市休市日 OAS 数值不同的日期，写 `reports/holiday_calendar_audit.md`。裁定结果登记到 `config/data_decisions.yaml`。
+
 ### 4.7 正式记录、资料、标签
 
 ```bash

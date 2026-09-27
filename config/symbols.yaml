@@ -147,3 +147,89 @@
   unit: percent
   calendar: bond
   inception: 1996-12-31   # FRED 序列起点
+
+# ---- reference：广度指标（2026-09-26 导出，只保存，不参与计算）----
+- symbol: NDTW
+  tv_symbol: INDEX:NDTW
+  name: 纳斯达克100成分股站上20日均线比例
+  category: breadth
+  usage: reference
+  unit: percent
+  inception: 2008-10-31   # TradingView 导出的最早日期
+- symbol: NDFI
+  tv_symbol: INDEX:NDFI
+  name: 纳斯达克100成分股站上50日均线比例
+  category: breadth
+  usage: reference
+  unit: percent
+  inception: 2008-12-16   # TradingView 导出的最早日期
+- symbol: NDTH
+  tv_symbol: INDEX:NDTH
+  name: 纳斯达克100成分股站上200日均线比例
+  category: breadth
+  usage: reference
+  unit: percent
+  inception: 2009-06-08   # TradingView 导出的最早日期；用户已在 TradingView 确认此前无数据，为数据起点
+- symbol: NCTW
+  tv_symbol: INDEX:NCTW
+  name: 纳斯达克综合成分股站上20日均线比例
+  category: breadth
+  usage: reference
+  unit: percent
+  inception: 2018-12-07   # TradingView 导出的最早日期；已知缺口：2024-10-02
+- symbol: NCFI
+  tv_symbol: INDEX:NCFI
+  name: 纳斯达克综合成分股站上50日均线比例
+  category: breadth
+  usage: reference
+  unit: percent
+  inception: 2018-12-07   # TradingView 导出的最早日期；已知缺口：2024-10-02
+- symbol: NCTH
+  tv_symbol: INDEX:NCTH
+  name: 纳斯达克综合成分股站上200日均线比例
+  category: breadth
+  usage: reference
+  unit: percent
+  inception: 2018-12-07   # TradingView 导出的最早日期；已知缺口：2024-10-02
+- symbol: MMTW
+  tv_symbol: INDEX:MMTW
+  name: 全市场股票站上20日均线比例
+  category: breadth
+  usage: reference
+  unit: percent
+  inception: 2008-07-09   # TradingView 导出的最早日期
+- symbol: MMFI
+  tv_symbol: INDEX:MMFI
+  name: 全市场股票站上50日均线比例
+  category: breadth
+  usage: reference
+  unit: percent
+  inception: 2008-05-01   # TradingView 导出的最早日期
+- symbol: MMTH
+  tv_symbol: INDEX:MMTH
+  name: 全市场股票站上200日均线比例
+  category: breadth
+  usage: reference
+  unit: percent
+  inception: 2002-01-02   # TradingView 导出的最早日期；已知缺口：2002-06-04、2002-08-12、2004-05-17、2007-04-13
+- symbol: R2TW
+  tv_symbol: INDEX:R2TW
+  name: 罗素2000成分股站上20日均线比例
+  category: breadth
+  usage: reference
+  unit: percent
+  inception: 2013-10-14   # TradingView 导出的最早日期
+- symbol: R2FI
+  tv_symbol: INDEX:R2FI
+  name: 罗素2000成分股站上50日均线比例
+  category: breadth
+  usage: reference
+  unit: percent
+  inception: 2013-10-14   # TradingView 导出的最早日期
+- symbol: R2TH
+  tv_symbol: INDEX:R2TH
+  name: 罗素2000成分股站上200日均线比例
+  category: breadth
+  usage: reference
+  unit: percent
+  inception: 2013-10-14   # TradingView 导出的最早日期

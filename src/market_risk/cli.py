@@ -25,8 +25,9 @@ official_app = typer.Typer(help="正式记录（official.json）")
 material_app = typer.Typer(help="资料管理")
 breadth_app = typer.Typer(help="广度读数录入")
 outcome_app = typer.Typer(help="风险事件标签（结果窗口结束后）")
+audit_app = typer.Typer(help="数据审计（休市日历、债市休市日 OAS）")
 for sub, name in ((tv_app, "tv"), (official_app, "official"), (material_app, "material"),
-                  (breadth_app, "breadth"), (outcome_app, "outcome")):
+                  (breadth_app, "breadth"), (outcome_app, "outcome"), (audit_app, "audit")):
     app.add_typer(sub, name=name)
 
 MATERIAL_TYPES_HELP = ("tiger_ai_background", "chatgpt_response", "claude_review", "notes", "screenshot", "other")
@@ -252,6 +253,14 @@ def tv_compare(
     typer.echo(f"已写入 {report.path}")
 
 
+@tv_app.command("quality")
+def tv_quality() -> None:
+    """广度指标的早期数据质量检查（只报告），写 reports/tradingview_data_quality.md。"""
+    report = services.tv_quality(_ctx())
+    typer.echo(report.text)
+    typer.echo(f"已写入 {report.path}")
+
+
 @tv_app.command("crosscheck")
 def tv_crosscheck(
     refresh: Annotated[bool, typer.Option("--refresh", help="忽略接口缓存")] = False,
@@ -378,6 +387,19 @@ def outcome_add(
     result = _call(services.outcome_add, _ctx(), _parse_date(date), spx, qqq, _opt_date(event_date),
                    spx_peak, qqq_peak)
     typer.echo("已录入：" + format_outcome(result))
+
+
+@audit_app.command("calendar")
+def audit_calendar(
+    start_year: Annotated[int, typer.Option("--start-year", help="holidays.yaml 的起始年份")] = 2008,
+    oas_start_year: Annotated[int, typer.Option("--oas-start-year", help="OAS 清单的起始年份")] = 1997,
+    write: Annotated[bool, typer.Option("--write", help="写入 config/holidays.yaml")] = False,
+) -> None:  # pragma: no cover - 联网（下载财政部年度数据）
+    """补齐休市日历并与 SIFMA 常见规则对照；列出债市休市日 OAS 数值不同的日期，写 reports/holiday_calendar_audit.md。"""
+    report = _call(services.audit_calendar, _ctx(), start_year, oas_start_year, write)
+    typer.echo(report.text)
+    written = f" 与 {report.yaml_path}" if report.yaml_path else "（未写 holidays.yaml，加 --write 写入）"
+    typer.echo(f"已写入 {report.path}{written}")
 
 
 # ---------------------------------------------------------------------------

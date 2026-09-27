@@ -551,6 +551,21 @@ def read_processed(paths: StoragePaths, symbol: str) -> dict[dt.date, float]:
         }
 
 
+def read_processed_bars(paths: StoragePaths, symbol: str) -> dict[dt.date, Bar]:
+    """读取清洗结果的完整K线（开高低收；缺失为 None），用于数据质量检查。"""
+    path = paths.tv_processed_file(symbol)
+    if not path.exists():
+        return {}
+    with path.open(encoding="utf-8", newline="") as f:
+        return {
+            dt.date.fromisoformat(r["date"]): Bar(
+                dt.date.fromisoformat(r["date"]), _number(r.get("open")), _number(r.get("high")),
+                _number(r.get("low")), _number(r.get("close")), _number(r.get("volume")),
+            )
+            for r in csv.DictReader(f) if r["close"]
+        }
+
+
 # ---------------------------------------------------------------------------
 # 导入
 # ---------------------------------------------------------------------------

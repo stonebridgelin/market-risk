@@ -177,6 +177,46 @@ class SymbolInfo:
     tolerance: float = 0.005           # 交叉校验容差
 
 
+DEFAULT_DECISIONS_PATH = PROJECT_ROOT / "config" / "data_decisions.yaml"
+_DECISIONS = {"exclude", "keep"}
+
+
+@dataclass(frozen=True)
+class DataDecision:
+    """已裁定日期表中的一条（config/data_decisions.yaml）。"""
+
+    date: dt.date
+    symbol: str
+    decision: str          # exclude / keep
+    reason: str
+    decided_on: dt.date
+
+
+def load_data_decisions(path: Path = DEFAULT_DECISIONS_PATH) -> tuple[DataDecision, ...]:
+    """读取已裁定日期表；文件不存在时返回空。同一日期与标的只能裁定一次。"""
+    if not path.exists():
+        return ()
+    with path.open(encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or []
+    if not isinstance(raw, list):
+        raise ConfigError(f"{path} 顶层应为列表")
+    out: list[DataDecision] = []
+    seen: set[tuple[dt.date, str]] = set()
+    for i, item in enumerate(raw, start=1):
+        try:
+            d = DataDecision(_one_date(item["date"], "date"), str(item["symbol"]), str(item["decision"]),
+                             str(item.get("reason", "")), _one_date(item["decided_on"], "decided_on"))
+        except (KeyError, TypeError) as exc:
+            raise ConfigError(f"{path} 第{i}条格式错误：{exc}") from exc
+        if d.decision not in _DECISIONS:
+            raise ConfigError(f"{path} 第{i}条：decision 应为 {sorted(_DECISIONS)}")
+        if (d.date, d.symbol) in seen:
+            raise ConfigError(f"{path} 中 {d.symbol} {d.date} 重复裁定")
+        seen.add((d.date, d.symbol))
+        out.append(d)
+    return tuple(out)
+
+
 def _one_date(value: Any, field: str) -> dt.date:
     return next(iter(_date_set([value], field)))
 

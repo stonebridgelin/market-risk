@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 
-from market_risk.config import Settings
+from market_risk.config import Settings, load_data_decisions
 from market_risk.data import cboe, fred, prices, treasury
 from market_risk.data.breadth import load_breadth
 from market_risk.data.cache import DataFetchError
@@ -126,4 +126,6 @@ def fetch_raw_inputs(
         sources=tuple(sources),
         notes=tuple(notes),
         mode=mode,
+        decisions=load_data_decisions(),
+        oas_symbol=settings.oas_series,
     )

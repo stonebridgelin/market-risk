@@ -317,6 +317,103 @@ def tv_crosscheck(ctx: Context, refresh: bool = False, loader: ApiLoader | None 
     return CompareReport(results, text, ctx.paths.tv_crosscheck_md)
 
 
+@dataclass(frozen=True)
+class QualityReport:
+    results: list[Any]             # tv_quality.QualityResult
+    text: str
+    path: Path
+
+
+def tv_quality(ctx: Context, now: dt.datetime | None = None) -> QualityReport:
+    """广度指标（symbols.yaml 中 category=breadth）的早期数据质量检查，写 reports/tradingview_data_quality.md。"""
+    from market_risk.data import tradingview as tv
+    from market_risk.data.tv_quality import analyze, render
+
+    results = []
+    for info in sorted(load_symbols().values(), key=lambda s: s.symbol):
+        if info.category != "breadth":
+            continue
+        bars = tv.read_processed_bars(ctx.paths, info.symbol)
+        if bars:
+            results.append(analyze(info.symbol, bars))
+    stamp = (now or dt.datetime.now(dt.UTC)).isoformat(timespec="seconds")
+    text = render(results, stamp)
+    _write_report(ctx.paths.tv_quality_md, text)
+    return QualityReport(results, text, ctx.paths.tv_quality_md)
+
+
+# ---------------------------------------------------------------------------
+# 休市日历审计与债市休市日 OAS 清单
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CalendarAuditReport:
+    audit: Any                     # calendar_audit.CalendarAudit
+    oas_differences: list[Any]     # calendar_audit.HolidayOasDiff
+    text: str
+    path: Path
+    yaml_text: str
+    yaml_path: Path | None         # 写入 holidays.yaml 时为其路径
+
+
+TreasuryLoader = Callable[[int, int], set[dt.date]]
+
+
+def _default_treasury_loader(ctx: Context) -> TreasuryLoader:  # pragma: no cover - 联网
+    from market_risk.data.treasury import fetch_treasury_year
+
+    def load(first_year: int, last_year: int) -> set[dt.date]:
+        today = dt.datetime.now(dt.UTC).date()
+        days: set[dt.date] = set()
+        for year in range(first_year, last_year + 1):
+            values, _ = fetch_treasury_year(ctx.paths, year, min(dt.date(year, 12, 31), today),
+                                            max_retries=ctx.settings.max_retries,
+                                            backoff_seconds=ctx.settings.backoff_seconds)
+            days |= {d for d, v in values.items() if v is not None}
+        return days
+
+    return load
+
+
+def audit_calendar(ctx: Context, start_year: int = 2008, oas_start_year: int = 1997, write_yaml: bool = False,
+                   loader: TreasuryLoader | None = None, holidays_path: Path | None = None,
+                   now: dt.datetime | None = None) -> CalendarAuditReport:
+    """补齐休市日历并与 SIFMA 常见规则对照；列出 1997 年以来债市休市日 OAS 数值不同的情况（只列出，不修正）。"""
+    from market_risk.config import DEFAULT_HOLIDAYS_PATH, load_data_decisions
+    from market_risk.data import calendar_audit as ca
+    from market_risk.data import tradingview as tv
+
+    today = (now or dt.datetime.now(dt.UTC)).date()
+    treasury_days = (loader or _default_treasury_loader(ctx))(min(start_year, oas_start_year), today.year)
+    if not treasury_days:
+        raise ServiceError("没有取得财政部数据")
+    end = max(treasury_days)
+    audit = ca.audit_calendar(treasury_days, dt.date(start_year, 1, 1), end)
+    decisions = load_data_decisions()
+    diffs = []
+    for symbol in (ctx.settings.oas_series, "BAMLC0A0CM"):
+        series = tv.read_processed(ctx.paths, symbol)
+        if series:
+            diffs += ca.oas_holiday_differences(symbol, series, treasury_days, dt.date(oas_start_year, 1, 1),
+                                                min(end, max(series)), decisions)
+    diffs.sort(key=lambda x: (x.date, x.symbol))
+    stamp = (now or dt.datetime.now(dt.UTC)).isoformat(timespec="seconds")
+    text = ca.render_audit(audit, diffs, stamp, dt.date(oas_start_year, 1, 1))
+    _write_report(ctx.paths.holiday_audit_md, text)
+
+    target = holidays_path or DEFAULT_HOLIDAYS_PATH
+    current = load_holidays(target) if target.exists() else MarketHolidays(frozenset(), frozenset(), frozenset(),
+                                                                            frozenset())
+    manual = {"stock_holidays": current.stock_holidays, "stock_early_closes": current.stock_early_closes,
+              "bond_holidays": current.bond_holidays, "bond_early_closes": current.bond_early_closes}
+    yaml_text = ca.render_holidays_yaml(audit, manual)
+    if write_yaml:
+        target.write_text(yaml_text, encoding="utf-8")
+    return CalendarAuditReport(audit, diffs, text, ctx.paths.holiday_audit_md, yaml_text,
+                               target if write_yaml else None)
+
+
 # ---------------------------------------------------------------------------
 # 正式记录、资料、广度
 # ---------------------------------------------------------------------------

@@ -13,6 +13,7 @@ import datetime as dt
 import json
 from pathlib import Path
 
+from market_risk.config import DataDecision
 from market_risk.data.cache import series_from_csv, series_to_csv
 from market_risk.data.snapshot import RawInputs
 from market_risk.models import BreadthReading, SourceInfo
@@ -51,6 +52,11 @@ def save_raw_inputs(raw: RawInputs, directory: Path) -> None:
         "symbols": sorted(raw.closes),
         "sources": [_src(s) for s in raw.sources],
         "notes": list(raw.notes),
+        "oas_symbol": raw.oas_symbol,
+        "decisions": [
+            {**dataclasses.asdict(d), "date": d.date.isoformat(), "decided_on": d.decided_on.isoformat()}
+            for d in raw.decisions
+        ],
     }
     (directory / "meta.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -88,4 +94,10 @@ def load_raw_inputs(
         sources=sources,
         notes=tuple(meta["notes"]),
         mode=meta["mode"],
+        decisions=tuple(
+            DataDecision(dt.date.fromisoformat(d["date"]), d["symbol"], d["decision"], d["reason"],
+                         dt.date.fromisoformat(d["decided_on"]))
+            for d in meta.get("decisions", [])
+        ),
+        oas_symbol=meta.get("oas_symbol", "BAMLH0A0HYM2"),
     )
