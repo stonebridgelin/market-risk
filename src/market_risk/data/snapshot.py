@@ -25,6 +25,7 @@ from market_risk.models import (
     BreadthReading,
     EtfSnapshot,
     MarketSnapshot,
+    OasVintageValue,
     SourceInfo,
     ThreeSegmentResult,
 )
@@ -198,25 +199,51 @@ def build_snapshot(
         notes.add(f"FRED 在 v3-R1 的 O6（{refs.oas_o6_v3r1}）没有 OAS 数值：信用维度可能记待补")
     oas_o1_v2 = None if refs.oas_o1_v2m is None else oas_valued.get(refs.oas_o1_v2m)
     oas_o6_v2 = None if refs.oas_o6_v2m is None else oas_valued.get(refs.oas_o6_v2m)
-    published: bool | None = None
+
+    # 债市休市日的 OAS 观测（SPEC 5.6 第10条）：沿用值排除；与前一观测不同的保留并报告
+    span_start = min(d for d in (refs.oas_o6_v3r1, refs.oas_o6_v2m) if d is not None)
+    for h_obs in mcal.bond_holiday_observations(oas, bond_cal):
+        if not (span_start <= h_obs.date < base):
+            continue
+        if h_obs.carried_forward:
+            notes.add(
+                f"OAS {h_obs.date}（债市休市日）为沿用值 {h_obs.value}"
+                f"（同 {h_obs.previous_date}），v2-M 不计为观测"
+            )
+        else:
+            notes.add(
+                f"【需人工判断】OAS {h_obs.date} 为债市休市日，但 FRED 数值 {h_obs.value} "
+                f"与前一个观测（{h_obs.previous_date}：{h_obs.previous_value}）不同；"
+                "未自动排除，v2-M 仍计为观测"
+            )
+
+    # 历史修订比对（SPEC 5.6 第3条）：ALFRED 版本日期不能代表真实发布时间
+    vintage_values: list[OasVintageValue] = []
     if oas_vintage is not None:
         vintage_valued = _valued(oas_vintage)
-        published = refs.oas_o1 in vintage_valued
-        if not published:
-            notes.add(f"ALFRED：O1（{refs.oas_o1}）不在基准日 {base} 的版本中，视为数据滞后")
-        elif base in vintage_valued:
-            notes.add(
-                "ALFRED：基准日版本中已包含基准日当天的观测，说明该系列的版本日期不反映"
-                "美东18:30的发布时点；发布时点仍按\"次日发布\"假设（基准日当天观测不使用）"
-            )
-        for d, label in ((refs.oas_o1, "O1"), (refs.oas_o6_v3r1, "O6")):
-            if d in vintage_valued and d in oas_valued and vintage_valued[d] != oas_valued[d]:
+        points = (
+            ("v3-R1 O1", refs.oas_o1),
+            ("v3-R1 O6", refs.oas_o6_v3r1),
+            ("v2-M O1", refs.oas_o1_v2m),
+            ("v2-M O6", refs.oas_o6_v2m),
+        )
+        for label, d in points:
+            if d is None:
+                continue
+            item = OasVintageValue(label, d, vintage_valued.get(d), oas_valued.get(d))
+            vintage_values.append(item)
+            if item.revised:
                 notes.add(
-                    f"OAS {label}（{d}）已被修订：基准日版本 {vintage_valued[d]}，"
-                    f"当前版本 {oas_valued[d]}；计分使用当前版本"
+                    f"OAS 历史修订：{label}（{d}）基准日版本 {item.vintage_value}，"
+                    f"当前版本 {item.current_value}；计分使用当前版本"
                 )
+        if base in vintage_valued:
+            notes.add(
+                "ALFRED 基准日版本已包含基准日当天的观测：该系列的版本日期不能代表真实发布时间，"
+                "发布时点按\"次日发布\"假设处理（基准日当天观测不使用）"
+            )
     else:
-        notes.add("未进行 ALFRED 发布时点核验，按\"次日发布\"的默认假设处理")
+        notes.add("未取得 OAS 基准日版本（ALFRED），未做历史修订比对；不影响计分")
 
     snapshot = MarketSnapshot(
         refs=refs,
@@ -235,7 +262,7 @@ def build_snapshot(
         oas_o6_v3r1=oas_o6_v3,
         oas_o1_v2m=oas_o1_v2,
         oas_o6_v2m=oas_o6_v2,
-        oas_o1_published=published,
+        oas_vintage=tuple(vintage_values),
         hyg_lqd=hyg_lqd,
         spy_window_max_close=spy_window_max,
         three_segment=three_segment,

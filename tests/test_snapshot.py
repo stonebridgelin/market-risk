@@ -151,23 +151,94 @@ def test_missing_o1_oas_value_noted():
     assert snap.oas_o1_v2m == 3.00 and snap.refs.oas_o1_v2m == D(2025, 11, 24)
 
 
-def test_alfred_vintage_checks():
+def test_oas_revision_comparison():
+    """SPEC 5.6 第3条：历史修订比对。计分用当前版本，修订只报告。"""
     base = D(2025, 11, 26)
     raw = synthetic_raw(base)
-    vintage_missing_o1 = {D(2025, 11, 24): 3.0}
-    snap = build_snapshot(dataclasses.replace(raw, oas_vintage=vintage_missing_o1))
-    assert snap.oas_o1_published is False
-    assert any("不在基准日" in n for n in snap.data_notes)
-
     vintage = {D(2025, 11, 18): 3.10, D(2025, 11, 25): 3.00, base: 2.9}
     snap = build_snapshot(dataclasses.replace(raw, oas_vintage=vintage))
-    assert snap.oas_o1_published is True
-    assert any("不反映" in n for n in snap.data_notes)
-    assert any("已被修订" in n for n in snap.data_notes)  # O6=11-18：3.10 → 3.00
+    by_label = {v.label: v for v in snap.oas_vintage}
+    assert set(by_label) == {"v3-R1 O1", "v3-R1 O6", "v2-M O1", "v2-M O6"}
+    o6 = by_label["v3-R1 O6"]
+    assert (o6.date, o6.vintage_value, o6.current_value, o6.revised) == (
+        D(2025, 11, 18), 3.10, 3.00, True
+    )
+    assert not by_label["v3-R1 O1"].revised
+    assert snap.oas_o6_v3r1 == 3.00  # 计分使用当前版本
+    assert any("历史修订" in n and "2025-11-18" in n for n in snap.data_notes)
+    assert any("不能代表真实发布时间" in n for n in snap.data_notes)
 
     snap = build_snapshot(raw)
-    assert snap.oas_o1_published is None
-    assert any("未进行 ALFRED" in n for n in snap.data_notes)
+    assert snap.oas_vintage == ()
+    assert any("未做历史修订比对" in n for n in snap.data_notes)
+
+
+def test_samples_have_no_oas_revision():
+    for sample in ("2025-08-29", "2025-09-26", "2025-10-31", "2025-11-28"):
+        snap = build_snapshot(load_sample_raw(sample))
+        assert len(snap.oas_vintage) == 4
+        assert not any(v.revised for v in snap.oas_vintage), sample
+
+
+# ---- SPEC 5.6 第10条：债市休市日的沿用值（真实 FRED 数据）----
+
+
+def _raw_at(sample: str, base: dt.date):
+    """用样本的离线数据构造更早基准日的输入（build_snapshot 会截断到该基准日）。"""
+    raw = load_sample_raw(sample)
+    return dataclasses.replace(raw, base_date=base, oas_vintage=None)
+
+
+def test_v2m_o1_skips_columbus_day_carry_forward():
+    """基准日 2025-10-14：FRED 在 10-13 为沿用值 3.18，v2-M 的 O1=10-10，滞后2个股票交易日。"""
+    snap = build_snapshot(_raw_at("2025-10-31", D(2025, 10, 14)))
+    r = snap.refs
+    assert r.oas_o1 == r.oas_o1_v2m == D(2025, 10, 10)
+    assert r.o1_v2m_lag_stock_days == 2
+    assert snap.oas_o1_v2m == 3.18
+    assert any("2025-10-13（债市休市日）为沿用值 3.18" in n for n in snap.data_notes)
+
+
+def test_v2m_o6_skips_columbus_day():
+    """基准日 2025-10-17：O1=10-16，v2-M 的 O6=10-08，与 v3-R1 相同。"""
+    snap = build_snapshot(_raw_at("2025-10-31", D(2025, 10, 17)))
+    r = snap.refs
+    assert r.oas_o1_v2m == r.oas_o1 == D(2025, 10, 16)
+    assert r.oas_o6_v2m == r.oas_o6_v3r1 == D(2025, 10, 8)
+    assert snap.oas_o6_v2m == 2.84
+
+
+def test_sample4_v2m_o1_o6_match_spec_table():
+    """样本4：11-27 感恩节沿用值排除，v2-M 的 O1=11-26、O6=11-19，与 SPEC 表一致。"""
+    snap = build_snapshot(load_sample_raw("2025-11-28"))
+    r = snap.refs
+    assert (r.oas_o1_v2m, r.oas_o6_v2m) == (D(2025, 11, 26), D(2025, 11, 19))
+    assert (snap.oas_o1_v2m, snap.oas_o6_v2m) == (3.00, 3.17)
+    assert r.o1_v2m_lag_stock_days == 1
+    assert not any("两种口径的 O1 不同" in n for n in snap.data_notes)
+
+
+def test_labor_day_2025_09_02():
+    """基准日 2025-09-02：09-01 沿用值排除；08-31（周日）月末观测计入。"""
+    snap = build_snapshot(_raw_at("2025-09-26", D(2025, 9, 2)))
+    r = snap.refs
+    assert (r.oas_o1_v2m, snap.oas_o1_v2m) == (D(2025, 8, 31), 2.84)
+    assert (r.oas_o6_v2m, snap.oas_o6_v2m) == (D(2025, 8, 25), 2.80)
+    assert r.o1_v2m_lag_stock_days == 1  # 不滞后
+    assert (r.oas_o1, snap.oas_o1) == (D(2025, 8, 29), 2.82)
+    assert (r.oas_o6_v3r1, snap.oas_o6_v3r1) == (D(2025, 8, 22), 2.88)
+    assert any("2025-09-01（债市休市日）为沿用值 2.84" in n for n in snap.data_notes)
+
+
+def test_holiday_observation_with_new_value_is_kept_and_flagged():
+    """债市休市日的数值与前一观测不同：不自动排除，报告交给用户判断。"""
+    raw = _raw_at("2025-10-31", D(2025, 10, 14))
+    oas = {**raw.oas, D(2025, 10, 13): 3.25}
+    snap = build_snapshot(dataclasses.replace(raw, oas=oas))
+    assert snap.refs.oas_o1_v2m == D(2025, 10, 13)
+    assert snap.oas_o1_v2m == 3.25
+    assert snap.refs.oas_o1 == D(2025, 10, 10)  # v3-R1 不取休市日
+    assert any("【需人工判断】" in n and "2025-10-13" in n for n in snap.data_notes)
 
 
 def test_three_segment_dependency_note():

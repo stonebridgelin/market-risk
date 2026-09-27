@@ -17,7 +17,7 @@ three_segment:
 
 oas:
   series: BAMLH0A0HYM2
-  verify_vintage: true         # SPEC 5.6 第3条：用 ALFRED 版本数据核验 O1 的发布时点
+  revision_check: true         # SPEC 5.6 第3条：历史修订比对（ALFRED 基准日版本 vs 当前版本）
 
 vix:
   series: VIXCLS

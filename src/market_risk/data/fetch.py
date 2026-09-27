@@ -74,7 +74,7 @@ def fetch_raw_inputs(
         notes.append(ice_note)
 
     oas_vintage = None
-    if settings.verify_oas_vintage:
+    if settings.oas_revision_check:
         try:
             oas_vintage, info = fred.fetch_series(
                 paths,
@@ -89,7 +89,7 @@ def fetch_raw_inputs(
             sources.append(info)
         except DataFetchError as exc:
             notes.append(
-                f"ALFRED 版本数据无法取得（{exc}），回退到\"次日发布\"的默认假设"
+                f"ALFRED 基准日版本无法取得（{exc}），不做历史修订比对；不影响计分"
             )
 
     return RawInputs(

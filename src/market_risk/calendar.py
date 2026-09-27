@@ -227,6 +227,58 @@ def valued_observation_dates(observations: Mapping[dt.date, float | None]) -> li
     return sorted(d for d, v in observations.items() if not _is_missing(v))
 
 
+@dataclass(frozen=True)
+class HolidayObservation:
+    """FRED 在债市休市日（工作日）返回的有数值观测（SPEC 5.6 第10条）。"""
+
+    date: dt.date
+    value: float
+    previous_date: dt.date | None
+    previous_value: float | None
+
+    @property
+    def carried_forward(self) -> bool:
+        """是否为沿用值：与前一个有数值观测相同（按两位小数）。"""
+        return self.previous_value is not None and round(self.value, 2) == round(
+            self.previous_value, 2
+        )
+
+
+def bond_holiday_observations(
+    observations: Mapping[dt.date, float | None], bond_cal: BondCalendar
+) -> list[HolidayObservation]:
+    """找出落在债市休市日（覆盖范围内、非债市营业日的工作日）的有数值观测。周末观测不在此列。"""
+    valued = valued_observation_dates(observations)
+    result: list[HolidayObservation] = []
+    for i, d in enumerate(valued):
+        if d.weekday() >= 5 or not (bond_cal.coverage_start <= d <= bond_cal.coverage_end):
+            continue
+        if bond_cal.is_business_day(d):
+            continue
+        prev = valued[i - 1] if i > 0 else None
+        result.append(
+            HolidayObservation(
+                date=d,
+                value=float(observations[d]),  # type: ignore[arg-type]
+                previous_date=prev,
+                previous_value=None if prev is None else float(observations[prev]),  # type: ignore[arg-type]
+            )
+        )
+    return result
+
+
+def v2m_observation_dates(
+    observations: Mapping[dt.date, float | None], bond_cal: BondCalendar
+) -> list[dt.date]:
+    """v2-M 计数用的观测：有数值的行，排除债市休市日的沿用值；月末周末观测保留。
+
+    债市休市日的数值若与前一个观测不同，不自动排除（仍计入），由调用方报告（SPEC 5.6 第10条）。
+    """
+    carried = {h.date for h in bond_holiday_observations(observations, bond_cal)
+               if h.carried_forward}
+    return [d for d in valued_observation_dates(observations) if d not in carried]
+
+
 def oas_o1_v2m(base_date: dt.date, observation_dates: Iterable[dt.date]) -> dt.date | None:
     """O1（v2-M）：基准日之前（不含基准日）最新的一个有数值观测；没有时返回 None。"""
     earlier = [d for d in observation_dates if d < base_date]
@@ -293,7 +345,8 @@ def compute_date_references(
     """计算基准日的全部日期参照。
 
     oas_observations：FRED 实际返回的 OAS 观测（日期 → 数值，"." 已转为 None/NaN）；
-    只有有数值的行算观测。为 None 时 v2-M 的 O1/O6 无法确定，记为 None。
+    v2-M 只数有数值的行，并排除债市休市日的沿用值（v2m_observation_dates）。
+    为 None 时 v2-M 的 O1/O6 无法确定，记为 None。
     休市日列表的范围为 min(T−20, O6) 至基准日。
     """
     if not is_stock_trading_day(base_date):
@@ -310,7 +363,7 @@ def compute_date_references(
     o1_v2: dt.date | None = None
     o6_v2: dt.date | None = None
     if oas_observations is not None:
-        valued = valued_observation_dates(oas_observations)
+        valued = v2m_observation_dates(oas_observations, bond_cal)
         o1_v2 = oas_o1_v2m(base_date, valued)
         if o1_v2 is not None:
             o6_v2 = oas_o6_v2m(o1_v2, valued)

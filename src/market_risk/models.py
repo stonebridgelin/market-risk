@@ -107,6 +107,20 @@ class ThreeSegmentResult:
 
 
 @dataclass(frozen=True)
+class OasVintageValue:
+    """OAS 历史修订比对（SPEC 5.6 第3条）：某个 O1/O6 在基准日版本与当前版本中的数值。"""
+
+    label: str                       # 如 "v3-R1 O1"、"v2-M O6"
+    date: dt.date
+    vintage_value: float | None      # 基准日版本（ALFRED）；版本中没有时为 None
+    current_value: float | None      # 当前版本（计分使用）
+
+    @property
+    def revised(self) -> bool:
+        return self.vintage_value != self.current_value
+
+
+@dataclass(frozen=True)
 class MarketSnapshot:
     """截至基准日的全部评分输入（SPEC 第4节）。缺失值为 None，由评分记待补。"""
 
@@ -126,7 +140,7 @@ class MarketSnapshot:
     oas_o6_v3r1: float | None
     oas_o1_v2m: float | None
     oas_o6_v2m: float | None
-    oas_o1_published: bool | None              # ALFRED：O1 是否在基准日版本中；None=未核验
+    oas_vintage: tuple[OasVintageValue, ...]   # 历史修订比对；未取得版本数据时为空
     hyg_lqd: float | None
     spy_window_max_close: float                # 20日窗口内 SPY 最高收盘价（v2-M 广度 b）
     three_segment: dict[bool, tuple[ThreeSegmentResult, ...]]  # 键：d1 是否包含 T−20

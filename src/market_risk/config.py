@@ -48,7 +48,7 @@ class Settings:
     d1_includes_t_minus_20: bool
     three_segment_query_offset: int
     oas_series: str
-    verify_oas_vintage: bool
+    oas_revision_check: bool
     vix_series: str
     cboe_vix_history_url: str
     treasury_fallback_series: str
@@ -96,7 +96,7 @@ def load_settings(path: Path = DEFAULT_SETTINGS_PATH, root: Path = PROJECT_ROOT)
             d1_includes_t_minus_20=bool(raw["three_segment"]["d1_includes_t_minus_20"]),
             three_segment_query_offset=int(raw["three_segment"]["query_start_offset"]),
             oas_series=str(raw["oas"]["series"]),
-            verify_oas_vintage=bool(raw["oas"]["verify_vintage"]),
+            oas_revision_check=bool(raw["oas"]["revision_check"]),
             vix_series=str(raw["vix"]["series"]),
             cboe_vix_history_url=str(raw["vix"]["cboe_history_url"]),
             treasury_fallback_series=str(raw["treasury"]["fallback_series"]),
