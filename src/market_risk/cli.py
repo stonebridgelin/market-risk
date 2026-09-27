@@ -142,6 +142,76 @@ def tv_list() -> None:
     typer.echo(tv.format_list(StoragePaths(load_settings().storage_root)))
 
 
+
+def _run_compare(infos: list, paths: StoragePaths, settings: Any, refresh: bool) -> list:  # pragma: no cover - 联网
+    from market_risk.data import tradingview as tv
+    from market_risk.data.tv_compare import CompareResult, compare_series, fetch_api_series
+
+    try:
+        key: str | None = get_fred_api_key()
+    except Exception:
+        key = None
+    results = []
+    for info in infos:
+        series = tv.read_processed(paths, info.symbol)
+        if not series:
+            results.append(CompareResult(info.symbol, info.tv_symbol, info.api_source or "", info.tolerance,
+                                         error="尚未导入该标的的 TradingView 数据"))
+            continue
+        try:
+            api = fetch_api_series(info.api_source, min(series), max(series), settings, paths, key, refresh)
+        except Exception as exc:
+            results.append(CompareResult(info.symbol, info.tv_symbol, info.api_source or "", info.tolerance,
+                                         error=f"接口数据获取失败：{exc}"))
+            continue
+        results.append(compare_series(info, series, api, info.tolerance))
+    return results
+
+
+@tv_app.command("compare")
+def tv_compare(
+    symbol: Annotated[str, typer.Option("--symbol", help="标的，如 BAMLH0A0HYM2")],
+    refresh: Annotated[bool, typer.Option("--refresh", help="忽略接口缓存")] = False,
+) -> None:  # pragma: no cover - 联网
+    """与接口数据做重叠比对，结果写入 reports/tradingview_compare_<标的>.md。"""
+    from market_risk.config import load_symbols
+    from market_risk.data.tv_compare import format_results
+
+    settings = load_settings()
+    paths = StoragePaths(settings.storage_root)
+    infos = [s for s in load_symbols().values() if s.symbol.upper() == symbol.upper()]
+    if not infos or not infos[0].api_source:
+        typer.echo(f"错误：{symbol} 未在 config/symbols.yaml 登记 api_source", err=True)
+        raise typer.Exit(code=1)
+    results = _run_compare(infos, paths, settings, refresh)
+    now = dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
+    text = format_results(results, f"TradingView 与接口数据重叠比对：{infos[0].symbol}", now)
+    out = paths.tv_compare_md(infos[0].symbol)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text, encoding="utf-8")
+    typer.echo(text)
+    typer.echo(f"已写入 {out}")
+
+
+@tv_app.command("crosscheck")
+def tv_crosscheck(
+    refresh: Annotated[bool, typer.Option("--refresh", help="忽略接口缓存")] = False,
+) -> None:  # pragma: no cover - 联网
+    """全部 crosscheck 标的与接口数据比对，写入 reports/tradingview_crosscheck.md。"""
+    from market_risk.config import load_symbols
+    from market_risk.data.tv_compare import format_results
+
+    settings = load_settings()
+    paths = StoragePaths(settings.storage_root)
+    infos = [s for s in load_symbols().values() if s.usage == "crosscheck" and s.api_source]
+    results = _run_compare(infos, paths, settings, refresh)
+    now = dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
+    text = format_results(results, "TradingView 交叉校验", now)
+    paths.tv_crosscheck_md.parent.mkdir(parents=True, exist_ok=True)
+    paths.tv_crosscheck_md.write_text(text, encoding="utf-8")
+    typer.echo(text)
+    typer.echo(f"已写入 {paths.tv_crosscheck_md}")
+
 def format_snapshot_summary(snap: MarketSnapshot) -> str:
     """快照的文字摘要（供 fetch 命令核对数据）。"""
     r = snap.refs

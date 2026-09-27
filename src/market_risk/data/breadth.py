@@ -10,6 +10,7 @@ import datetime as dt
 from pathlib import Path
 
 from market_risk.models import BreadthReading
+from market_risk.storage.paths import StoragePaths
 
 COLUMNS = ["date", "s5fi", "s5tw", "note"]
 
@@ -85,3 +86,43 @@ def upsert_breadth(path: Path, reading: BreadthReading, overwrite: bool = False)
     readings[reading.date] = reading
     write_breadth(path, readings)
     return True
+
+
+# ---------------------------------------------------------------------------
+# 读取顺序（SPEC 6.5 / TRADINGVIEW 6.1）：先 TradingView 导出数据，再手工录入
+# ---------------------------------------------------------------------------
+
+TV_TOLERANCE = 0.005
+
+
+def merge_breadth(
+    tv_s5fi: dict[dt.date, float],
+    tv_s5tw: dict[dt.date, float],
+    manual: dict[dt.date, BreadthReading],
+) -> tuple[dict[dt.date, BreadthReading], dict[dt.date, str]]:
+    """合并两个来源。同一日期都有数值但不一致时记录差异，以 TradingView 为准。
+
+    TradingView 只有 S5FI、S5TW 其中之一的日期不采用（两项需同时来自同一来源）。
+    返回 (读数, {日期: 差异说明})。
+    """
+    result: dict[dt.date, BreadthReading] = dict(manual)
+    conflicts: dict[dt.date, str] = {}
+    for d in sorted(set(tv_s5fi) & set(tv_s5tw)):
+        tv = make_reading(d, tv_s5fi[d], tv_s5tw[d], "TradingView 导出")
+        tv = BreadthReading(tv.date, tv.s5fi, tv.s5tw, "tradingview", tv.note)
+        old = manual.get(d)
+        if old is not None and (abs(old.s5fi - tv.s5fi) > TV_TOLERANCE or abs(old.s5tw - tv.s5tw) > TV_TOLERANCE):
+            conflicts[d] = (
+                f"广度 {d}：TradingView 导出 S5FI={tv.s5fi}、S5TW={tv.s5tw}，"
+                f"手工录入 S5FI={old.s5fi}、S5TW={old.s5tw}，不一致，以 TradingView 为准"
+            )
+        result[d] = tv
+    return result, conflicts
+
+
+def load_breadth(paths: StoragePaths) -> tuple[dict[dt.date, BreadthReading], dict[dt.date, str]]:
+    """按读取顺序加载全部广度读数：TradingView 清洗结果（S5FI.csv、S5TW.csv）优先，手工录入补充。"""
+    from market_risk.data.tradingview import read_processed
+
+    return merge_breadth(read_processed(paths, "S5FI"), read_processed(paths, "S5TW"),
+                         read_breadth(paths.breadth_csv))

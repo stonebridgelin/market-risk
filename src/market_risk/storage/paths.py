@@ -181,6 +181,15 @@ class StoragePaths:
     def backtest_stats_md(self) -> Path:
         return self.reports_dir / "backtest_stats.md"
 
+    @property
+    def tv_crosscheck_md(self) -> Path:
+        return self.reports_dir / "tradingview_crosscheck.md"
+
+    def tv_compare_md(self, symbol: str) -> Path:
+        if not _TV_SYMBOL_RE.match(symbol):
+            raise PathError(f"TradingView 标的名不合法：{symbol!r}")
+        return self.reports_dir / f"tradingview_compare_{symbol}.md"
+
     def daily_report_csv(self, year: int, month: int) -> Path:
         if not 1 <= month <= 12:
             raise PathError(f"月份不合法：{month}")

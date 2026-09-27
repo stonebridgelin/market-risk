@@ -104,3 +104,21 @@ def ice_history_note(series_id: str, requested_start: dt.date, series: Series) -
             "（自2026年4月起 FRED 只提供 ICE 系列最近三年的数据，更早的需向 ICE 购买）"
         )
     return None
+
+
+def fill_long_history(
+    fred_values: Series, tv_values: dict[dt.date, float], requested_start: dt.date, end: dt.date
+) -> tuple[Series, list[str]]:
+    """oas.long_history_source=tradingview 时（SPEC 6.3 / TRADINGVIEW 6.2）：
+    只有 FRED API 取不到的日期（早于 FRED 返回的第一个观测）才使用 TradingView 导出数据。
+    """
+    first = min(fred_values) if fred_values else end + dt.timedelta(days=1)
+    extra = {d: v for d, v in tv_values.items() if requested_start <= d < first and d <= end}
+    if not extra:
+        return dict(fred_values), []
+    merged: Series = {**extra, **fred_values}
+    note = (
+        f"OAS {min(extra)} 至 {max(extra)} 共 {len(extra)} 个观测来自 TradingView 导出数据"
+        "（FRED API 只提供最近三年；已按 oas.long_history_source=tradingview 使用）"
+    )
+    return merged, [note]

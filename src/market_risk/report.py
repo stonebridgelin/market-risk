@@ -123,7 +123,7 @@ class ReportContext:
     results: tuple[ScoreResult, ...]
     near: tuple[NearThresholdItem, ...]
     d1_includes_t_minus_20: bool
-    breadth_source: str = "TradingView 导出数据或手工录入（data/manual/breadth.csv）"
+    breadth_source: str | None = None   # 为 None 时按读数的 source 自动说明
 
 
 def _holidays_text(snapshot: MarketSnapshot) -> str:
@@ -138,6 +138,20 @@ def _holidays_text(snapshot: MarketSnapshot) -> str:
         else:
             parts.append(f"{d} 债市休市、股市开市（利率窗口少一个观测，不插值；不计为债市营业日）")
     return "；".join(parts) if parts else "无"
+
+
+BREADTH_SOURCES = {
+    "tradingview": "TradingView 导出数据（INDEX:S5FI、INDEX:S5TW 日线收盘值）",
+    "manual": "手工录入（data/manual/breadth.csv）",
+    "screenshot": "截图读数",
+}
+
+
+def _breadth_source_text(snap: MarketSnapshot) -> str:
+    readings = [r for r in (snap.breadth, snap.breadth_t5) if r is not None]
+    if not readings:
+        return "缺失"
+    return "；".join(sorted({f"{r.date}：{BREADTH_SOURCES.get(r.source, r.source)}" for r in readings}))
 
 
 def prompt_context(ctx: ReportContext, rules: Mapping[str, str]) -> dict[str, Any]:
@@ -197,7 +211,7 @@ def prompt_context(ctx: ReportContext, rules: Mapping[str, str]) -> dict[str, An
         "refs": refs,
         "v3r1_sequence": "、".join(str(d) for d in refs.oas_o1_to_o6_sequence),
         "holidays_text": _holidays_text(snap),
-        "breadth_source": ctx.breadth_source,
+        "breadth_source": ctx.breadth_source or _breadth_source_text(snap),
         "etfs": etfs,
         "spy_window_max": fixed2(snap.spy_window_max_close),
         "d1_scope": "T−20 至 T−2" if flag else "T−19 至 T−2",

@@ -1,0 +1,172 @@
+"""TradingView 数据的使用（docs/TRADINGVIEW.md 第6节）：广度读取顺序、OAS 长历史、重叠比对。
+
+使用手工构造的样本（或由离线接口数据生成的 TradingView 格式文件），只写入临时目录。
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import shutil
+from pathlib import Path
+
+import pytest
+from conftest import load_sample_raw
+
+from market_risk.config import SymbolInfo, load_symbols
+from market_risk.data import tradingview as tv
+from market_risk.data.breadth import load_breadth, make_reading, merge_breadth, upsert_breadth
+from market_risk.data.fred import fill_long_history
+from market_risk.data.tv_compare import compare_series, format_results
+from market_risk.models import BreadthReading
+from market_risk.storage.paths import StoragePaths
+
+FIX = Path(__file__).resolve().parent / "fixtures" / "tradingview"
+D = dt.date
+SYMBOLS = load_symbols()
+EXPORT = D(2026, 9, 26)
+
+
+@pytest.fixture()
+def paths(tmp_path):
+    return StoragePaths(tmp_path)
+
+
+def _import(paths: StoragePaths, files: dict[str, str | Path]):
+    d = paths.tv_raw_dir(EXPORT)
+    d.mkdir(parents=True, exist_ok=True)
+    for name, src in files.items():
+        if isinstance(src, Path):
+            shutil.copyfile(src, d / name)
+        else:
+            (d / name).write_text(src, encoding="utf-8")
+    return tv.import_directory(d, paths, SYMBOLS)
+
+
+# ---------------------------------------------------------------------------
+# 6.1 广度读取顺序
+# ---------------------------------------------------------------------------
+
+
+def test_merge_breadth_tradingview_first():
+    manual = {
+        D(2025, 11, 28): BreadthReading(D(2025, 11, 28), 58.40, 76.73),   # 与 TV 不一致
+        D(2025, 12, 1): BreadthReading(D(2025, 12, 1), 60.00, 70.00),     # TV 未覆盖
+        D(2025, 11, 26): BreadthReading(D(2025, 11, 26), 55.00, 70.00),   # 与 TV 一致
+    }
+    tv_fi = {D(2025, 11, 28): 58.44, D(2025, 11, 26): 55.0, D(2025, 11, 25): 50.0}
+    tv_tw = {D(2025, 11, 28): 76.73, D(2025, 11, 26): 70.0}   # 11-25 只有 S5FI
+    merged, conflicts = merge_breadth(tv_fi, tv_tw, manual)
+    assert merged[D(2025, 11, 28)].s5fi == 58.44 and merged[D(2025, 11, 28)].source == "tradingview"
+    assert merged[D(2025, 12, 1)].source == "manual"
+    assert D(2025, 11, 25) not in merged
+    assert list(conflicts) == [D(2025, 11, 28)]
+    assert "以 TradingView 为准" in conflicts[D(2025, 11, 28)]
+
+
+def test_load_breadth_from_processed_and_manual(paths):
+    _import(paths, {"INDEX_S5FI, 1D.csv": FIX / "iso" / "INDEX_S5FI, 1D.csv",
+                    "INDEX_S5TW, 1D.csv": FIX / "unix" / "INDEX_S5TW, 1D.csv"})
+    upsert_breadth(paths.breadth_csv, make_reading(D(2025, 12, 1), 61.0, 71.0))
+    upsert_breadth(paths.breadth_csv, make_reading(D(2025, 10, 31), 40.00, 38.56))
+    readings, conflicts = load_breadth(paths)
+    assert readings[D(2025, 10, 31)].s5fi == 40.15   # TradingView 为准
+    assert readings[D(2025, 11, 28)].s5tw == 76.73
+    assert readings[D(2025, 12, 1)].source == "manual"
+    assert list(conflicts) == [D(2025, 10, 31)]
+
+
+def test_prompt_names_breadth_source(paths):
+    from market_risk.config import load_settings
+    from market_risk.pipeline import run_scoring
+    from market_risk.storage.runs import GitInfo
+
+    base = D(2025, 11, 28)
+    raw = load_sample_raw("2025-11-28", {base: BreadthReading(base, 58.44, 76.73, "tradingview")})
+    out = run_scoring(raw, load_settings(), paths, GitInfo("a" * 40, False))
+    prompt = (out.run_dir / "prompt.md").read_text("utf-8")
+    assert "S5FI、S5TW：2025-11-28：TradingView 导出数据" in prompt
+
+
+# ---------------------------------------------------------------------------
+# 6.2 OAS 长历史
+# ---------------------------------------------------------------------------
+
+
+def test_fill_long_history_only_before_fred_start():
+    fred_values = {D(2023, 9, 26): 4.04, D(2023, 9, 27): 4.03}
+    tv_values = {D(2023, 9, 22): 3.90, D(2023, 9, 25): 3.95, D(2023, 9, 26): 9.99, D(2023, 1, 3): 4.5}
+    merged, notes = fill_long_history(fred_values, tv_values, D(2023, 6, 1), D(2023, 9, 27))
+    assert merged[D(2023, 9, 26)] == 4.04          # FRED 有的日期不用 TradingView
+    assert merged[D(2023, 9, 25)] == 3.95 and D(2023, 1, 3) not in merged
+    assert "2023-09-22 至 2023-09-25 共 2 个观测来自 TradingView" in notes[0]
+    assert fill_long_history(fred_values, {}, D(2023, 6, 1), D(2023, 9, 27)) == (fred_values, [])
+    merged, _ = fill_long_history({}, tv_values, D(2023, 1, 1), D(2023, 9, 30))
+    assert len(merged) == 4
+
+
+def test_long_history_setting_parsed(tmp_path):
+    from market_risk.config import ConfigError, load_settings
+
+    assert load_settings().oas_long_history_source == "none"
+    text = (Path(__file__).resolve().parents[1] / "config" / "settings.yaml").read_text("utf-8")
+    bad = tmp_path / "s.yaml"
+    bad.write_text(text.replace("long_history_source: none", "long_history_source: yes please"), "utf-8")
+    with pytest.raises(ConfigError, match="long_history_source"):
+        load_settings(bad)
+
+
+# ---------------------------------------------------------------------------
+# 6.2 / 6.3 重叠比对与交叉校验
+# ---------------------------------------------------------------------------
+
+
+def _tv_file_from_series(series: dict[dt.date, float | None]) -> str:
+    lines = ["time,open,high,low,close"]
+    for d, v in sorted(series.items()):
+        if v is not None:
+            lines.append(f"{d.isoformat()},{v},{v},{v},{v}")
+    return "\n".join(lines) + "\n"
+
+
+def test_oas_tradingview_file_matches_fred(paths):
+    """用离线 FRED 数据生成 TradingView 格式的 OAS 文件：导入通过，重叠比对完全一致。"""
+    oas = load_sample_raw("2025-11-28").oas
+    result = _import(paths, {"FRED_BAMLH0A0HYM2, 1D.csv": _tv_file_from_series(oas)})
+    rep = result.reports[0]
+    assert rep.symbol == "BAMLH0A0HYM2" and rep.status == tv.PASSED, rep.issues
+    msgs = [i.message for i in rep.issues]
+    assert any("月末周末观测" in m and "2025-08-31" in m for m in msgs)
+    assert any("股市休市日有数据" in m for m in msgs)   # 感恩节的沿用值
+    info = SYMBOLS["FRED:BAMLH0A0HYM2"]
+    cmp = compare_series(info, tv.read_processed(paths, "BAMLH0A0HYM2"), oas, info.tolerance)
+    assert cmp.ok and cmp.overlap == len([v for v in oas.values() if v is not None])
+    assert cmp.status == "一致"
+
+
+def test_compare_reports_mismatch_and_gaps():
+    info = SymbolInfo("SPY", "AMEX:SPY", api_source="yahoo:SPY")
+    tv_s = {D(2025, 11, 24): 668.73, D(2025, 11, 25): 675.03, D(2025, 11, 26): 679.68, D(2025, 11, 28): 683.39}
+    api = {D(2025, 11, 24): 668.73, D(2025, 11, 25): 675.02, D(2025, 11, 28): 683.39, D(2025, 11, 21): 659.03}
+    r = compare_series(info, tv_s, api, 0.005)
+    assert r.mismatches == [(D(2025, 11, 25), 675.03, 675.02, 0.01)]
+    assert r.tv_only == [D(2025, 11, 26)] and r.api_only == []
+    assert (r.first, r.last, r.overlap) == (D(2025, 11, 24), D(2025, 11, 28), 3)
+    assert r.status == "有差异"
+    assert compare_series(info, tv_s, api, 0.02).ok
+    text = format_results([r], "测试", "2026-09-27T00:00:00+00:00")
+    assert "| 2025-11-25 | 675.03 | 675.02 | +0.0100 |" in text
+    assert "仅 TradingView 有数据的日期（1 个）：2025-11-26" in text
+    none = compare_series(info, {D(2020, 1, 2): 1.0}, api, 0.005)
+    assert none.status == "无重叠"
+    assert compare_series(info, {}, api, 0.005).status == "无法比对"
+
+
+def test_exchange_prefix_fallback(paths):
+    """导出前缀与登记不同（BATS_SPY vs AMEX:SPY）：按代码唯一匹配，并用 known_values 校验。"""
+    closes = load_sample_raw("2025-11-28").closes["SPY"]
+    rows = {d: v for d, v in closes.items() if d >= D(2025, 10, 1)}
+    rep = _import(paths, {"BATS_SPY, 1D.csv": _tv_file_from_series(rows)}).reports[0]
+    assert rep.tv_symbol == "AMEX:SPY" and rep.symbol == "SPY"
+    assert rep.status == tv.PASSED
+    assert any("交易所前缀与登记不同" in i.message for i in rep.issues)
+    assert any("已知读数核对通过 2/4" in i.message for i in rep.issues)

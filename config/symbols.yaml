@@ -43,3 +43,80 @@
     2025-10-24: 57.65
     2025-10-31: 38.56
     2025-11-28: 76.73
+
+# ---- crosscheck：与接口数据互相校验，不参与评分（TRADINGVIEW 6.3）----
+# 交易所前缀以实际导出为准；若导出为 BATS_SPY 等其他前缀，程序按代码部分唯一匹配。
+- symbol: SPY
+  tv_symbol: AMEX:SPY
+  name: 标普500 ETF
+  category: etf
+  usage: crosscheck
+  unit: price
+  api_source: yahoo:SPY
+  known_values: {2025-08-29: 645.05, 2025-09-26: 661.82, 2025-10-31: 682.06, 2025-11-28: 683.39}
+- symbol: QQQ
+  tv_symbol: NASDAQ:QQQ
+  name: 纳斯达克100 ETF
+  category: etf
+  usage: crosscheck
+  unit: price
+  api_source: yahoo:QQQ
+  known_values: {2025-08-29: 570.40, 2025-09-26: 595.97, 2025-10-31: 629.07, 2025-11-28: 619.25}
+- symbol: RSP
+  tv_symbol: AMEX:RSP
+  name: 标普500等权重 ETF
+  category: etf
+  usage: crosscheck
+  unit: price
+  api_source: yahoo:RSP
+  known_values: {2025-08-29: 188.62, 2025-09-26: 188.57, 2025-10-31: 187.93, 2025-11-28: 191.53}
+- symbol: HYG
+  tv_symbol: AMEX:HYG
+  name: 高收益债 ETF
+  category: etf
+  usage: crosscheck
+  unit: price
+  api_source: yahoo:HYG
+- symbol: LQD
+  tv_symbol: AMEX:LQD
+  name: 投资级公司债 ETF
+  category: etf
+  usage: crosscheck
+  unit: price
+  api_source: yahoo:LQD
+- symbol: VIX
+  tv_symbol: CBOE:VIX
+  name: VIX 指数
+  category: volatility
+  usage: crosscheck
+  unit: index
+  api_source: fred:VIXCLS
+  known_values: {2025-08-22: 14.22, 2025-08-29: 15.36, 2025-09-19: 15.45, 2025-09-26: 15.29,
+                 2025-10-24: 16.37, 2025-10-31: 17.44, 2025-11-20: 26.42, 2025-11-28: 16.35}
+- symbol: BAMLH0A0HYM2
+  tv_symbol: FRED:BAMLH0A0HYM2
+  name: ICE BofA 美国高收益债 OAS
+  category: credit
+  usage: crosscheck
+  unit: percent
+  calendar: bond
+  api_source: fred:BAMLH0A0HYM2
+  tolerance: 0.0           # 重叠日期须完全一致（两位小数），TRADINGVIEW 6.2
+  known_values: {2025-08-28: 2.75, 2025-09-18: 2.71, 2025-09-25: 2.76, 2025-10-23: 2.96,
+                 2025-10-30: 2.85, 2025-11-19: 3.17, 2025-11-26: 3.00}
+- symbol: DGS10
+  tv_symbol: FRED:DGS10
+  name: 美国10年期国债收益率（FRED，与财政部相同）
+  category: rates
+  usage: crosscheck
+  unit: percent
+  calendar: bond
+  api_source: treasury:10Y
+  tolerance: 0.0
+  known_values: {2025-08-29: 4.23, 2025-09-26: 4.20, 2025-10-03: 4.13, 2025-10-31: 4.11, 2025-11-28: 4.02}
+- symbol: US10Y
+  tv_symbol: TVC:US10Y
+  name: 美国10年期收益率（TradingView 报价，与财政部官方值存在口径差异）
+  category: rates
+  usage: reference
+  unit: percent

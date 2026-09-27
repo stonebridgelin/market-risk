@@ -172,6 +172,13 @@ def _extra_name(raw: str, used: set[str]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _match_by_code(tv_symbol: str, symbols: Mapping[str, SymbolInfo]) -> SymbolInfo | None:
+    """交易所前缀不同（如 BATS:SPY 与登记的 AMEX:SPY）时，按代码部分唯一匹配。"""
+    code = tv_symbol.split(":", 1)[-1]
+    found = [s for s in symbols.values() if s.tv_symbol.split(":", 1)[-1] == code]
+    return found[0] if len(found) == 1 else None
+
+
 def _unregistered(tv_symbol: str) -> SymbolInfo:
     code = tv_symbol.split(":", 1)[-1]
     symbol = re.sub(r"[^A-Za-z0-9_\-]", "_", code)
@@ -199,6 +206,11 @@ def read_file(
         report.add(FAILED, str(exc))
         return report
     info = symbols.get(report.tv_symbol)
+    if info is None:
+        info = _match_by_code(report.tv_symbol, symbols)
+        if info is not None:
+            report.add("info", f"文件的交易所前缀与登记不同：{report.tv_symbol} 按已登记的 {info.tv_symbol} 处理")
+            report.tv_symbol = info.tv_symbol
     if info is None:
         info = _unregistered(report.tv_symbol)
         report.add(WARNING, f"{report.tv_symbol} 未在 config/symbols.yaml 登记（按 reference 保存）")
@@ -364,8 +376,11 @@ def _check_calendar(report: FileReport, info: SymbolInfo) -> None:
     missing = sorted(trading - have)
     extra = sorted(have - trading)
     if info.calendar == "bond":
-        weekend = [d for d in extra if d.weekday() >= 5]
+        month_end = [d for d in extra if d.weekday() >= 5 and (d + dt.timedelta(days=1)).month != d.month]
+        weekend = [d for d in extra if d.weekday() >= 5 and d not in month_end]
         holiday = [d for d in extra if d.weekday() < 5]
+        if month_end:
+            report.add("info", f"月末周末观测 {len(month_end)} 个（FRED ICE 系列属正常）：{_fmt_dates(month_end)}")
         if holiday:
             report.add("info", f"股市休市日有数据 {len(holiday)} 个（债市营业日，属正常）："
                                f"{_fmt_dates(holiday)}")

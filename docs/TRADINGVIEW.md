@@ -139,7 +139,10 @@ uv run market-risk tv import --dir data/manual/tradingview/raw/2026-09-26   # �
 uv run market-risk tv validate [--symbol S5FI]                             # 重新校验
 uv run market-risk tv list                                                 # 列出已导入标的、起止日期、校验状态
 uv run market-risk tv compare --symbol BAMLH0A0HYM2                        # 与 FRED API 数据做重叠比对
+uv run market-risk tv crosscheck                                           # 全部 crosscheck 标的，写 reports/tradingview_crosscheck.md
 ```
+
+- `tv compare` 的结果写入 `reports/tradingview_compare_<标的>.md`。比对的接口来源由 `symbols.yaml` 的 `api_source` 指定，容差由 `tolerance` 指定（OAS、DGS10 为 0，即两位小数完全一致）。
 
 `tv import` 结束时打印一张汇总表：每个文件的标的、起止日期、行数、校验结果、问题说明。**用户在会员有效期内要根据这张表判断是否需要重新导出**，所以输出必须清楚易读。
 

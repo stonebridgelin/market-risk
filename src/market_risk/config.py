@@ -173,6 +173,8 @@ class SymbolInfo:
     inception: dt.date | None = None
     filename_aliases: tuple[str, ...] = ()
     known_values: dict[dt.date, float] | None = None
+    api_source: str | None = None      # 交叉校验用的接口数据，如 yahoo:SPY、fred:BAMLH0A0HYM2
+    tolerance: float = 0.005           # 交叉校验容差
 
 
 def _one_date(value: Any, field: str) -> dt.date:
@@ -203,6 +205,8 @@ def load_symbols(path: Path = DEFAULT_SYMBOLS_PATH) -> dict[str, SymbolInfo]:
                     _one_date(item["inception"], "inception") if item.get("inception") else None
                 ),
                 filename_aliases=tuple(str(a) for a in item.get("filename_aliases") or ()),
+                api_source=item.get("api_source"),
+                tolerance=float(item.get("tolerance", 0.005)),
                 known_values={
                     _one_date(d, "known_values"): float(v)
                     for d, v in (item.get("known_values") or {}).items()
