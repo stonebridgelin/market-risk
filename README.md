@@ -1,11 +1,17 @@
 # market-risk：美股大盘风险评分
 
-用程序替代截图，完成美股大盘风险评分（v2-M 与 v3-R1 并行）的数据准备、机械计算和 prompt 生成。
-评分规则的权威来源是 [`docs/SOP.md`](docs/SOP.md) 第3、6、7节，开发规格见 [`docs/SPEC.md`](docs/SPEC.md)。
+用程序替代截图，完成美股大盘确认型风险评分（**v2-M 与 v3-R1 并行**）的数据准备、机械计算和 prompt 生成，并保存每次运行的结果、做回测统计。
 
-> 本文件为初稿（阶段1），阶段5完善。
+- 评分规则的权威来源：[`docs/SOP.md`](docs/SOP.md) 第3、6、7节（程序逐条对应，规则版本冻结）。
+- 开发规格：[`docs/SPEC.md`](docs/SPEC.md)（第5.6节为 SOP 未写清之处的既定口径）。
+- 存储设计：[`docs/STORAGE.md`](docs/STORAGE.md)；TradingView 导入：[`docs/TRADINGVIEW.md`](docs/TRADINGVIEW.md)。
+- 开发进度：[`docs/progress/`](docs/progress/)。
 
-## 安装
+> 分数是规则标签，不是经过校准的概率；本项目不提供仓位或投资建议。
+
+---
+
+## 1. 安装
 
 需要 Python 3.12 与 [uv](https://docs.astral.sh/uv/)。
 
@@ -13,29 +19,205 @@
 uv sync
 ```
 
-## 配置
+命令行入口为 `uv run market-risk ...`，`uv run market-risk --help` 查看全部命令。
 
-1. 复制 `.env.example` 为 `.env`，填入 `FRED_API_KEY`（在 https://fred.stlouisfed.org/docs/api/api_key.html 免费申请）。
-2. `config/settings.yaml`：标的、均线周期、口径开关、贴近门槛阈值、缓存设置。
-3. `config/holidays.yaml`：股市/债市休市日与提前收盘日（人工维护，仅作核对）。
+## 2. 配置
 
-## 用法
+### 2.1 FRED API 密钥
+
+1. 在 https://fred.stlouisfed.org/docs/api/api_key.html 免费申请。
+2. 复制 `.env.example` 为 `.env`，填入 `FRED_API_KEY=你的密钥`。
+3. `.env` 已写入 `.gitignore`，**不要把真实密钥写进 `.env.example` 或任何会提交的文件**。
+
+### 2.2 配置文件
+
+| 文件 | 内容 |
+|---|---|
+| `config/settings.yaml` | 标的、均线周期、三环节 d1 口径开关、OAS 历史修订比对与长历史开关、网络重试、贴近门槛阈值、存储根目录 |
+| `config/holidays.yaml` | 股市/债市休市日与提前收盘日（人工维护，只用于核对） |
+| `config/symbols.yaml` | TradingView 标的登记表（用途、单位、时区、已知读数、交叉校验接口） |
+
+评分门槛写在 `src/market_risk/scoring/v2m.py`、`v3r1.py` 中，按 SOP 冻结，不在配置文件里。
+
+## 3. 数据来源
+
+| 数据 | 来源 | 说明 |
+|---|---|---|
+| SPY、QQQ、RSP、HYG、LQD 日线 | Yahoo Finance（yfinance） | **不复权 Close**（`auto_adjust=False`），不使用 Adj Close |
+| 均线 MA5/10/20/30/50/200 | 程序计算 | 简单移动平均，截至基准日 |
+| VIX | FRED `VIXCLS` | 缺失时用 Cboe 官方 `VIX_History.csv`（SPEC 5.6 第7条） |
+| 10年期收益率 | 财政部 Daily Par Yield Curve 的 `10 Yr` | 主源失败时用 FRED `DGS10` |
+| OAS | FRED `BAMLH0A0HYM2` | O1 为基准日之前的观测；FRED 只提供最近三年 |
+| S5FI、S5TW | TradingView 导出数据，其次手工录入 | 没有免费接口 |
+
+所有数据都**截断到基准日（含）**，快照构建后会断言没有晚于基准日的数据。
+
+## 4. 常用命令
+
+### 4.1 日期与样本
 
 ```bash
 uv run market-risk dates --date 2025-11-28
 ```
 
 ```bash
-uv run market-risk fetch --date 2025-11-28            # 下载并显示核对摘要（缓存于 data/cache/）
-uv run market-risk fetch --date 2025-11-28 --refresh  # 忽略缓存重新下载
+uv run market-risk samples --year 2026
 ```
 
-其余命令（`score`、`validate`、`samples` 等）在后续阶段实现。存储目录见 [`docs/STORAGE.md`](docs/STORAGE.md)。
+`dates` 列出 T−5、T−20、20日窗口、O1/O6、T−45、结果窗口、休市日；`samples` 按 SOP 9.2 列出每月样本日期。
 
-## 测试
+### 4.2 下载并核对数据
+
+```bash
+uv run market-risk fetch --date 2025-11-28
+```
+
+加 `--refresh` 忽略缓存重新下载。缓存在 `data/cache/`（不提交 git）。
+
+### 4.3 评分（回测）
+
+```bash
+uv run market-risk score --date 2025-11-28 --s5fi 58.44 --s5tw 76.73
+```
+
+- 传入的广度读数会写入 `data/manual/breadth.csv`；已有 TradingView 数据时可不传。
+- 规则需要 5 日前读数时（例如 L<40%），加 `--s5fi-t5 X --s5tw-t5 Y`；缺少时程序按待补处理，并提示"需要补录 YYYY-MM-DD 的 S5FI、S5TW 读数"。
+
+### 4.4 评分（每日前瞻）
+
+```bash
+uv run market-risk score --mode daily --s5fi 55.1 --s5tw 60.2
+```
+
+基准日默认为今天（美东）。财政部当日数值未发布时利率维度记待补；输出中注明"本日是否为本周最后一个交易日"。
+
+### 4.5 回归核对
+
+```bash
+uv run market-risk validate
+```
+
+用 `tests/fixtures/` 中的离线数据，把样本1至4的程序值与截图读数逐项比对（价格与均线容差 0.02，其余完全一致）。
+
+### 4.6 TradingView 导出数据
+
+```bash
+uv run market-risk tv import --dir data/manual/tradingview/raw/2026-09-26
+```
+
+```bash
+uv run market-risk tv list
+```
+
+```bash
+uv run market-risk tv crosscheck
+```
+
+```bash
+uv run market-risk tv compare --symbol BAMLH0A0HYM2
+```
+
+- 把导出的 CSV 原样放进 `data/manual/tradingview/raw/<导出日期>/`，**不要改文件名**（程序靠 `INDEX_S5FI, 1D.csv` 这样的默认文件名识别标的）。
+- `tv import` 打印汇总表（标的、起止日期、行数、校验结果、问题说明），据此判断是否需要重新导出。
+- `tv validate [--symbol S5FI]` 按 manifest 重新校验；原始文件被改动时会报错（sha256）。
+- 开启 OAS 长历史（`oas.long_history_source: tradingview`）之前，先用 `tv compare` 确认重叠日期完全一致。
+
+### 4.7 正式记录、资料、标签
+
+```bash
+uv run market-risk official set --date 2025-11-28 --run run_20260927T004923Z_629aaf8
+```
+
+```bash
+uv run market-risk official confirm --date 2025-11-28
+```
+
+```bash
+uv run market-risk material add --date 2025-11-28 --type chatgpt_response --file 路径/回复.md
+```
+
+```bash
+uv run market-risk breadth add --date 2025-11-28 --s5fi 58.44 --s5tw 76.73
+```
+
+```bash
+uv run market-risk outcome compute --date 2025-10-31
+```
+
+```bash
+uv run market-risk outcome add --date 2025-10-31 --spx -4.41 --qqq -6.90
+```
+
+- 某基准日第一次运行、状态为 complete 或 pending、代码与配置没有未提交修改时，自动设为正式记录（reviewed=false）；复核后用 `official confirm`。
+- 结果标签只能在结果窗口（基准日后第20个交易日）结束后计算；手工录入与程序计算不一致时报告差异，统计以手工为准。
+
+### 4.8 导入旧记录、数据库、统计
+
+```bash
+uv run market-risk import-legacy
+```
+
+```bash
+uv run market-risk rebuild-db
+```
+
+```bash
+uv run market-risk stats --from 2025-08-01 --to 2026-09-30
+```
+
+- `import-legacy` 读取 `data/legacy/backtest_record_legacy.xlsx`，截图记录设为正式记录（reviewed=true），与程序记录对照；分数不同时以退出码 3 结束并列出差异，交给人工判断。
+- `stats` 写 `reports/backtest_stats.md` 与 `reports/backtest_history.xlsx`；样本量不足时结论为"不确定"。
+
+## 5. 输出说明
+
+每次 `score` 运行在 `results/MARKET/risk_scoring/<年>/<日期>/run_<UTC时间>_<commit>/` 下生成（不覆盖旧运行）：
+
+| 文件 | 内容 |
+|---|---|
+| `meta.json` | 运行信息：时间（UTC 与本地）、git commit 与是否有未提交修改、配置开关、各数据源 URL/下载时间/截止日期、状态、待补维度、需人工判断事项 |
+| `dates.json` | 全部日期参照 |
+| `snapshot.json` | 评分输入（不含逐日序列） |
+| `scores.json` | 两个版本的五维分数、计算过程、总分与阶段、证据链、贴近门槛、三环节遍历 |
+| `metrics.json` | 扁平数值指标（数据库用） |
+| `three_segment.csv` | 三环节完整遍历（两种 d1 口径） |
+| `prompt.md` | 交给 ChatGPT 的 prompt（结构同 SOP 11.1；要求不联网、只用提供的数据复核；附三环节遍历表与逐日收盘价；规则全文从 SOP 原样截取） |
+| `summary.md` | 中文摘要：分项分数、总分、阶段、证据链、计算过程、贴近门槛、数据问题 |
+| `inputs/` | 当次实际使用的数据（逐日数据、FRED 观测、财政部数值、广度读数、全部原始序列），可复现 |
+
+同一基准日的 `official.json` 指向正式记录。数据库 `db/market_risk.sqlite` 可随时由文件重建。
+
+## 6. 与截图方式的差异
+
+| 项目 | 截图方式 | 程序 |
+|---|---|---|
+| 价格与均线 | Tiger 图表十字光标读数 | Yahoo 不复权收盘价，均线由程序计算（样本1至4与截图差值 ≤0.005） |
+| VIX、OAS | FRED 网页 Observations 文字值 | FRED API；VIX 缺失时用 Cboe 官方数据 |
+| 10年期收益率 | Claude 从财政部网站补充 | 财政部年度 CSV（与 SOP 附录A逐日一致） |
+| 广度 | TradingView 截图读数 | TradingView 导出数据或手工录入 |
+| 三环节 | ChatGPT 查询收盘价后判断 | 程序完整遍历全部候选 d1（两种口径），附在 prompt 中供复核 |
+| 日期与休市 | 人工计算 | NYSE 日历 + 财政部实际数据；债市休市日的 OAS 沿用值按 SPEC 5.6 第10条处理 |
+| 未来信息 | 靠人工裁剪截图 | 程序截断到基准日并断言；prompt 不附图表 |
+| 记录 | Excel | 每次运行一个目录 + SQLite 数据库 + 统计报表 |
+
+## 7. 常见问题
+
+- **提示"未配置 FRED_API_KEY"**：见 2.1 节。
+- **财政部或 FRED 暂时访问失败**：程序会重试 3 次；财政部失败时自动改用 DGS10 并在数据说明中注明。
+- **提示"需要补录 YYYY-MM-DD 的 S5FI、S5TW 读数"**：规则需要 5 日前读数，用 `breadth add` 或 `score --s5fi-t5 --s5tw-t5` 补录后重新运行。
+- **tv import 报"疑似日期偏移"**：多半是 UNIX 时间戳为 UTC 午夜；把 `symbols.yaml` 中该标的的 `timezone` 改为 `UTC` 后运行 `tv validate`。
+- **tv import 报"历史可能未完整加载"**：在 TradingView 图表上向左拖到最早，再重新导出。
+- **结果为"待补"**：必要数据缺失且缺失值可能改变结果时，程序不给0分，而是列出可能的分数与总分范围。
+- **为什么 ALFRED 不能核验发布时点**：该系列的版本日期等于观测日期，不代表真实发布时间；程序按"次日发布"处理，只用 ALFRED 做历史修订比对（SPEC 5.6 第3条）。
+- **本机 git 不在 PATH 中**：`storage/runs.py` 会在常见路径（含 `C:\Execute\Git\bin`）查找；找不到时 commit 记为 `0000000` 且不自动设定正式记录。
+
+## 8. 开发
 
 ```bash
 uv run pytest
 ```
 
-默认跳过联网测试；运行联网测试：`uv run pytest -m network`。
+```bash
+uv run ruff check
+```
+
+联网测试默认跳过，运行 `uv run pytest -m network`。长期约定见 [`CLAUDE.md`](CLAUDE.md)。

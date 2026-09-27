@@ -325,6 +325,9 @@ def score(
     if date is None and mode != "daily":
         raise typer.BadParameter("回测模式必须提供 --date")
     base = _parse_date(date) if date else today_new_york()
+    if not mcal.is_stock_trading_day(base):
+        typer.echo(f"错误：{base} 不是股票交易日", err=True)
+        raise typer.Exit(code=1)
     settings = load_settings()
     paths = StoragePaths(settings.storage_root)
     _record_breadth(paths, base, s5fi, s5tw)
