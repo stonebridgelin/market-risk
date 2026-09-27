@@ -27,7 +27,8 @@ market-risk/
 │   │   ├── cboe/
 │   │   └── tiingo/                     # 只用于 tv crosscheck 的第三方核对
 │   ├── market/                         # 市场数据集（评分输入），由 data build 生成，提交 git
-│   │   ├── daily/<序列>.csv            # SPY/QQQ/RSP/HYG/LQD、VIXCLS、VIX_CBOE、BAMLH0A0HYM2、UST10Y、S5FI、S5TW
+│   │   ├── daily/<序列>.csv            # SPY/QQQ/RSP/HYG/LQD、VIXCLS、VIX_CBOE、BAMLH0A0HYM2、UST10Y、S5FI、S5TW、SPX、NDX
+│   │   ├── weekly/<序列>.csv           # STLFSI4、NFCI（周频参考序列，revisable：整体替换为最新版本）
 │   │   ├── vintage/<序列>_<基准日>.csv # ALFRED 基准日版本（只为正式样本生成）
 │   │   ├── manifest.json               # 来源、下载时间、行数、起止日期、sha256
 │   │   └── README.md

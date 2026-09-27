@@ -9,7 +9,7 @@ from __future__ import annotations
 import datetime as dt
 from collections.abc import Collection
 
-from market_risk.config import Settings
+from market_risk.config import Settings, SymbolInfo, load_symbols
 from market_risk.data import cache, cboe, fred, prices, treasury
 from market_risk.data.breadth import load_breadth
 from market_risk.data.market import (
@@ -30,10 +30,41 @@ from market_risk.data.market import (
 from market_risk.models import SourceInfo
 from market_risk.storage.paths import StoragePaths
 
+# 指数（用于结果标签与回调事件标签，不参与评分）：数据集序列名 → Yahoo 代码
+INDEX_SERIES = {"SPX": "^GSPC", "NDX": "^NDX"}
+WEEKLY_START = dt.date(1970, 1, 1)      # 周频参考序列：从来源最早的观测开始（NFCI 1971、STLFSI4 1993）
 
-def series_names(settings: Settings) -> list[str]:
+
+def scoring_series(settings: Settings) -> list[str]:
+    """评分输入序列：永远不得设为 revisable。"""
     return [*settings.scored_symbols, *settings.reference_symbols, settings.vix_series, VIX_CBOE,
             settings.oas_series, TREASURY_SERIES, "S5FI", "S5TW"]
+
+
+def weekly_series(symbols: dict[str, SymbolInfo] | None = None) -> list[SymbolInfo]:
+    """symbols.yaml 中登记的周频 FRED 参考序列（如 STLFSI4、NFCI）。"""
+    infos = (symbols or load_symbols()).values()
+    return sorted((s for s in infos if s.frequency == "weekly" and (s.api_source or "").startswith("fred:")),
+                  key=lambda s: s.symbol)
+
+
+def check_revisable(settings: Settings, symbols: dict[str, SymbolInfo] | None = None) -> None:
+    """参与评分的序列不得设 revisable（CLAUDE.md 第13条例外只适用于 reference 序列）。"""
+    infos = (symbols or load_symbols()).values()
+    bad = sorted({s.symbol for s in infos if s.revisable} & set(scoring_series(settings)))
+    if bad:
+        raise cache.DataFetchError(f"评分序列不得设为 revisable：{bad}")
+
+
+def series_names(settings: Settings, symbols: dict[str, SymbolInfo] | None = None) -> list[str]:
+    return [*scoring_series(settings), *INDEX_SERIES, *(s.symbol for s in weekly_series(symbols))]
+
+
+def _weekly(info: SymbolInfo, values: dict[dt.date, float | None], end: dt.date,
+            inputs: list[SourceInfo]) -> NewSeries:
+    s = value_series(info.symbol, values, "fred", end, inputs)
+    s.frequency, s.revisable = "weekly", info.revisable
+    return s
 
 
 def _tv_oas(paths: StoragePaths, settings: Settings) -> dict[dt.date, float] | None:
@@ -49,12 +80,22 @@ def collect_online(
     only: Collection[str] | None = None,
 ) -> tuple[list[NewSeries], dict[dt.date, str]]:  # pragma: no cover - 网络请求
     retry = {"max_retries": settings.max_retries, "backoff_seconds": settings.backoff_seconds}
+    check_revisable(settings)
     want = set(only or series_names(settings))
     out: list[NewSeries] = []
     for sym in (*settings.scored_symbols, *settings.reference_symbols):
         if sym in want:
             rows, info = prices.fetch_ohlcv(paths, sym, ETF_START, end, refresh, **retry)
             out.append(etf_series(sym, rows, end, [info]))
+    for name, ticker in INDEX_SERIES.items():
+        if name in want:
+            rows, info = prices.fetch_ohlcv(paths, ticker, ETF_START, end, refresh, key=name, **retry)
+            out.append(etf_series(name, rows, end, [info]))
+    for w in weekly_series():
+        if w.symbol in want:
+            values, info = fred.fetch_series(paths, (w.api_source or "").split(":", 1)[1], WEEKLY_START, end,
+                                             api_key, refresh=refresh, **retry)
+            out.append(_weekly(w, values, end, [info]))
     if settings.vix_series in want or VIX_CBOE in want:
         vix, vinfo = fred.fetch_series(paths, settings.vix_series, VIX_START, end, api_key, refresh=refresh, **retry)
         cb, cinfo = cboe.fetch_vix_history(paths, VIX_START, end, settings.cboe_vix_history_url, refresh, **retry)
@@ -101,10 +142,22 @@ def _merged_cache(paths: StoragePaths, source: str, key: str) -> tuple[dict[dt.d
 def collect_offline(
     paths: StoragePaths, settings: Settings, end: dt.date, only: Collection[str] | None = None,
 ) -> tuple[list[NewSeries], dict[dt.date, str]]:
-    """只用现有缓存生成（不联网）。没有缓存的序列跳过。"""
+    """只用现有缓存生成（不联网）。没有缓存的序列跳过。
+
+    revisable 序列只取最新的一份缓存（整体替换，不与旧版本缓存逐日合并）。
+    """
+    check_revisable(settings)
     want = set(only or series_names(settings))
     out: list[NewSeries] = []
-    for sym in (*settings.scored_symbols, *settings.reference_symbols):
+    for w in weekly_series():
+        files = cache.cached_files(paths, "fred", (w.api_source or "").split(":", 1)[1])
+        if w.symbol in want and files:
+            chosen = files[-1:] if w.revisable else files
+            values: dict[dt.date, float | None] = {}
+            for f, _ in chosen:
+                values.update(cache.series_from_csv(f.read_text(encoding="utf-8")))
+            out.append(_weekly(w, values, end, [cache.source_info_from_meta(m) for _, m in chosen]))
+    for sym in (*settings.scored_symbols, *settings.reference_symbols, *INDEX_SERIES):
         if sym not in want:
             continue
         rows: dict[dt.date, dict[str, float | None]] = {}

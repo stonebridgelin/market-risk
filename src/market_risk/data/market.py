@@ -69,6 +69,8 @@ class NewSeries:
     primary: str                                # 主来源：数值相同时来源改为主来源
     inputs: list[SourceInfo] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    frequency: str = "daily"                    # daily / weekly
+    revisable: bool = False                     # 整体替换为最新下载（只用于 reference 序列）
 
     @property
     def columns(self) -> list[str]:
@@ -96,6 +98,7 @@ class BuildResult:
     notes: list[str]
     accepted: bool
     manifest_path: Any = None
+    replaced: dict[str, dict[str, int]] = field(default_factory=dict)   # revisable 序列：修订、新增、删除的条数
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +181,21 @@ def merge_rows(
     return merged, revisions
 
 
+def replace_rows(new: NewSeries, old: Mapping[dt.date, Row] | None) -> tuple[dict[dt.date, Row], dict[str, int]]:
+    """revisable 序列：整体替换为最新下载的完整序列（不与旧版本逐日混合），统计本次修订条数。
+
+    新下载为空（例如离线且无缓存）时保留上一版，不清空。
+    """
+    old = old or {}
+    if not new.rows:
+        return dict(old), {"revised": 0, "added": 0, "removed": 0}
+    value_columns = [c for c in new.columns if c != "source"]
+    revised = sum(1 for d, row in new.rows.items() if d in old
+                  and any(not _same(c, old[d].get(c), row.get(c), new.decimals) for c in value_columns))
+    return dict(new.rows), {"revised": revised, "added": len(set(new.rows) - set(old)),
+                            "removed": len(set(old) - set(new.rows))}
+
+
 def build_dataset(
     paths: StoragePaths,
     new_series: Iterable[NewSeries],
@@ -197,6 +215,7 @@ def build_dataset(
 
     # 全部预检后再写文件，裁定无效时不得留下已写入的部分序列。
     prepared = []
+    replaced: dict[str, dict[str, int]] = {}
     incoming = list(new_series)
     rebuilding = {s.name for s in incoming}
     affected = {d.symbol for d in decisions if d.decision == "correct"}
@@ -205,11 +224,22 @@ def build_dataset(
         if name not in entries:
             raise MarketDataError(f"修正标的不存在：{name}")
         # 即使本次没有取得该序列的新缓存，也须在已有来源原值上应用/撤销裁定。
-        incoming.append(NewSeries(name, entries[name]["kind"], {}, ""))
+        incoming.append(NewSeries(name, entries[name]["kind"], {}, "",
+                                  frequency=entries[name].get("frequency", "daily")))
     for s in incoming:
-        path = paths.market_daily_file(s.name)
+        path = paths.market_series_file(s.name, s.frequency)
         old = read_series_file(path)[1] if path.exists() else None
         prev = entries.get(s.name, {})
+        if s.revisable:
+            if any(d.symbol == s.name and d.decision == "correct" for d in decisions):
+                raise MarketDataError(f"revisable 序列不能有人工修正：{s.name}")
+            merged, replaced[s.name] = replace_rows(s, old)
+            if s.rows:
+                c = replaced[s.name]
+                notes.append(f"{s.name}：来源会修订历史，已整体替换为最新下载的完整序列"
+                             f"（本次修订 {c['revised']} 条，新增 {c['added']} 条，删除 {c['removed']} 条）")
+            prepared.append((s, path, prev, merged, [], []))
+            continue
         old = restore_originals(old or {}, prev.get("corrections", []))
         merged, revs = merge_rows(s, old, accept_revisions)
         merged, audit = apply_corrections(s.name, s.kind, merged, decisions)
@@ -242,6 +272,9 @@ def build_dataset(
             "first_date": min(merged).isoformat() if merged else None,
             "last_date": max(merged).isoformat() if merged else None,
             "sha256": digest,
+            **({"frequency": s.frequency} if s.frequency != "daily" else {}),
+            # revisable：本版本即最新下载的完整序列，downloaded_at_utc 为版本标识
+            **({"revisable": True, "last_replacement": replaced[s.name]} if s.revisable else {}),
             **({"corrections": audit} if audit else {}),
         }
     new_manifest = {
@@ -253,7 +286,7 @@ def build_dataset(
     if new_manifest != manifest:
         new_manifest["generated_at_utc"] = stamp
         write_manifest(paths, new_manifest)
-    return BuildResult(entries, revisions, changed, notes, accept_revisions, paths.market_manifest)
+    return BuildResult(entries, revisions, changed, notes, accept_revisions, paths.market_manifest, replaced)
 
 
 def read_manifest(paths: StoragePaths) -> dict[str, Any]:

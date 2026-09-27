@@ -22,6 +22,9 @@
     返回数据类或可序列化为 JSON 的结构；以后的 FastAPI 接口、Vue 前端和 LangChain Agent 都将调用这些函数。
 13. 市场数据一律从 `data/market/` 读取（由 `market-risk data build` 生成，提交 git）；接口缓存只作为 data build 的输入，
     评分与回测不得直接读取缓存；数据集的历史修订不得自动覆盖（docs/decisions/0001）。
+    唯一例外：symbols.yaml 中 `revisable: true` 的纯参考序列（usage=reference，如 NFCI），每次 data build
+    整体替换为最新下载的完整序列（不得只替换有修订的日期），manifest 以下载时间为版本标识并记录修订条数；
+    参与评分的序列永远不得设为 revisable（载入与构建时检查，有测试）。
 14. `db/sql/` 下的 SQL 文件由 `market-risk db export-sql` 导出，不得手工修改；表结构以 Alembic 为唯一源头。
 15. 不得在任何地方（文件、日志、报告、汇报）输出数据库密码或连接地址（如 `MYSQL_VERIFY_URL`），也不得输出 API 密钥。
 16. 本机 git 不在 PATH 中，路径为 `C:\Execute\Git\bin`；在 PowerShell 中先执行 `$env:PATH = "C:\Execute\Git\bin;$env:PATH"`。

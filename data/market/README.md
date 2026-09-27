@@ -7,6 +7,7 @@
 | 路径 | 内容 |
 |---|---|
 | `daily/<序列>.csv` | 逐日序列，每个序列一个文件 |
+| `weekly/<序列>.csv` | 周频参考序列（STLFSI4、NFCI），按来源原始周频日期保存，不插值 |
 | `vintage/<序列>_<基准日>.csv` | OAS 的 ALFRED 基准日版本，只为正式样本（月末样本、每日前瞻运行）生成，用于历史修订比对；逐日历史回测不生成 |
 | `manifest.json` | 每个序列的文件、来源（各来源行数）、下载时间、输入缓存、行数、起止日期、sha256；另记 `vintage` 与广度来源冲突 |
 
@@ -20,6 +21,9 @@
 | `BAMLH0A0HYM2.csv` | FRED（最近三年）+ TradingView（更早日期） | 早于 FRED 返回的第一个观测的日期由 TradingView 导出数据补充（`source=tradingview`，TRADINGVIEW 6.2） |
 | `UST10Y.csv` | 财政部 Daily Treasury Par Yield Curve 的 `10 Yr` | 主源失败时为 FRED DGS10（`source=fred:DGS10`）；债市日历由此推出 |
 | `S5FI.csv`、`S5TW.csv` | TradingView 清洗结果 + 手工录入（`data/manual/breadth.csv`） | TradingView 优先（SPEC 6.5）；只收两项都有数值的日期 |
+| `SPX.csv`、`NDX.csv` | Yahoo `^GSPC`、`^NDX`（yfinance，`auto_adjust=False`） | 标普500、纳斯达克100指数，1990 年起；列同 ETF（开高低收量，4位小数）；**不参与评分**，用于结果标签与回调事件标签；与 TradingView 的 SP_DLY:SPX、NASDAQ_DLY:NDX 交叉校验（两位小数，差值绝对值>0.02 点为争议，见 `reports/tradingview_crosscheck.md`） |
+| `weekly/STLFSI4.csv` | FRED `STLFSI4`（圣路易斯联储金融压力指数） | 参考用，不参与评分。周频，观测日期为每周五；通常在下一周发布（数据约滞后一周，以 FRED 与发布机构页面为准）。`revisable: true` |
+| `weekly/NFCI.csv` | FRED `NFCI`（芝加哥联储全国金融状况指数） | 参考用，不参与评分。周频，观测日期为每周五；芝加哥联储通常在下一周的周三发布（约滞后五天）。**NFCI 每次发布都会修订历史数据：当前文件是最新版本，不是当时可见的版本**，用于历史研究时存在前视偏差。`revisable: true` |
 
 参考序列（不参与评分）不在此重复存放，直接使用 `data/processed/tradingview/<标的>.csv`（由 `data/manual/tradingview/raw/` 重建，登记见 `config/symbols.yaml`）。
 
@@ -27,6 +31,7 @@
 
 - 只写入已完整收盘的交易日（美东收盘后 15 分钟；提前收盘日 13:00）。
 - 与上一版相比，已有日期的数值被修订时**不自动覆盖**：保留旧值，清单写入 `reports/market_data_revisions.md`；确认后运行 `market-risk data build --accept-revisions`。修订判定：Yahoo 价格按4位小数、成交量按整数；其他来源按两位小数。新下载中没有的旧日期保留。
+- 例外（`revisable: true`，只允许 usage=reference 的序列，参与评分的序列永远不得设置，有测试保证）：来源会修订历史的参考序列（STLFSI4、NFCI），每次 data build 整体替换为最新下载的完整序列（不只替换有修订的日期，避免新旧版本混合）；manifest 的 `downloaded_at_utc` 为版本标识，`last_replacement` 与 data build 输出列出本次修订、新增、删除的条数。离线生成时只取最新的一份缓存。
 - 本目录有未提交的修改时，运行结果不能自动设为正式记录（git 干净检查包含 `data/market/`）；运行目录的 `meta.json` 记录 `market_manifest_sha256`。
 - 不得手工修改本目录的文件。
 

@@ -78,6 +78,7 @@ class CompareResult:
     api_only: list[dt.date] = field(default_factory=list)
     error: str | None = None
     max_abs_diff: float = 0.0                   # 重叠日期的最大绝对差值（两位小数后）
+    nonzero: int = 0                            # 两位小数后差值不为 0 的天数（含未超过容差的）
     rel_first: float | None = None              # 最早 10% 重叠日期的平均相对偏差
     rel_last: float | None = None               # 最近 10% 重叠日期的平均相对偏差
     neg_share: float | None = None              # 有偏差的日期中 TV 偏低的比例
@@ -147,6 +148,7 @@ def compare_series(
     for d in common:
         a, b = round(tv[d], 2), round(api_valued[d], 2)
         res.max_abs_diff = max(res.max_abs_diff, round(abs(a - b), 4))
+        res.nonzero += a != b
         if abs(a - b) > tolerance + 1e-9:
             res.mismatches.append((d, a, b, round(a - b, 4)))
     res.check_adjustment = (info.api_source or "").startswith("yahoo:")
@@ -169,6 +171,11 @@ def fetch_api_series(
     from market_risk.data import cboe, fred, prices, treasury
 
     source, _, key = spec.partition(":")
+    if source == "market":      # 与数据集 data/market/ 中的序列比对（不联网）
+        from market_risk.data.market import read_series_file
+
+        rows = read_series_file(paths.market_daily_file(key))[1]
+        return {d: r["value"] for d, r in rows.items() if start <= d <= end}
     retry = {"max_retries": settings.max_retries, "backoff_seconds": settings.backoff_seconds}
     if source == "yahoo":
         series, _ = prices.fetch_closes(paths, key, end, (end - start).days, refresh, **retry)
@@ -189,14 +196,15 @@ def fetch_api_series(
 
 def format_results(results: list[CompareResult], title: str, generated_at: str) -> str:
     lines = [f"# {title}", "", f"生成时间（UTC）：{generated_at}", "",
-             "比对口径：两者日期范围交集内逐日比对收盘值（两位小数），差值超过容差为不一致。"
+             "比对口径：两者日期范围交集内逐日比对收盘值（两位小数），差值超过容差为不一致；"
+             "非零差异为两位小数后差值不为 0 的天数（含未超过容差的）。"
              "只报告差异，不修改数据；TradingView 的 ETF、VIX、收益率数据不参与评分。", "",
-             "| 标的 | TV代码 | 接口 | 重叠区间 | 重叠天数 | 不一致 | 最大差值 | 最近不一致日 | 2010年起不一致 | "
-             "仅TV有 | 仅接口有 | 结果 |",
-             "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+             "| 标的 | TV代码 | 接口 | 重叠区间 | 重叠天数 | 非零差异 | 不一致 | 最大差值 | 最近不一致日 | "
+             "2010年起不一致 | 仅TV有 | 仅接口有 | 结果 |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in results:
         span = f"{r.first} 至 {r.last}" if r.first else "-"
-        lines.append(f"| {r.symbol} | {r.tv_symbol} | {r.api_source} | {span} | {r.overlap} | "
+        lines.append(f"| {r.symbol} | {r.tv_symbol} | {r.api_source} | {span} | {r.overlap} | {r.nonzero} | "
                      f"{len(r.mismatches)} | {r.max_abs_diff:.2f} | {r.mismatches[-1][0] if r.mismatches else '-'} | "
                      f"{sum(1 for m in r.mismatches if m[0].year >= 2010)} | "
                      f"{len(r.tv_only)} | {len(r.api_only)} | {r.status} |")

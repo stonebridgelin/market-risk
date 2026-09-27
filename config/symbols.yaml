@@ -13,6 +13,10 @@
 #   filename_aliases  文件名无法按"交易所_代码, 周期.csv"解析时，在此登记文件名前缀
 #   known_values  已知读数（收盘值），用于校验数值与日期是否对齐（容差 0.005）
 #   crosscheck_note  口径不同、交叉校验"不适用"的原因（tv crosscheck 标为"不适用"，不再报"无法比对"）
+#   revisable     来源会修订历史（如 NFCI）：data build 每次整体替换为最新下载的完整序列（只允许 usage=reference；
+#                 参与评分的序列不得设置，载入与构建时都会检查）。CLAUDE.md 第13条的例外
+#   frequency     daily（默认）/ weekly：数据集目录 data/market/daily/ 或 data/market/weekly/
+#   api_source 的 market:<序列> 表示与数据集 data/market/ 中的该序列比对（如 Yahoo ^GSPC 整理成的 SPX）
 #
 # 文件名解析：带 _DLY 的延迟数据源前缀整体作为数据源（ICE_DLY_MOVE → ICE_DLY:MOVE）。
 # BATS = Cboe BZX 交易所：BATS 的成交量只含 Cboe BZX 一家交易所，不得用于成交量计算；
@@ -346,15 +350,41 @@
   inception: 2007-01-23   # 导入结果的最早日期
 - symbol: SPX
   tv_symbol: SP_DLY:SPX
-  name: 标普500指数（用于核对结果标签）
+  name: 标普500指数（数据集 SPX 取 Yahoo ^GSPC，用于结果标签与回调事件标签，不参与评分）
   category: index
-  usage: reference
+  usage: crosscheck
   unit: index
   inception: 1960-09-01   # 导入结果的最早日期
+  api_source: market:SPX  # 与数据集中的 Yahoo ^GSPC 比对（两位小数；差值绝对值>0.02 点为争议）
+  tolerance: 0.02
 - symbol: NDX
   tv_symbol: NASDAQ_DLY:NDX
-  name: 纳斯达克100指数（用于核对结果标签）
+  name: 纳斯达克100指数（数据集 NDX 取 Yahoo ^NDX，参考用，不参与评分）
   category: index
-  usage: reference
+  usage: crosscheck
   unit: index
   inception: 1985-01-31   # 导入结果的最早日期
+  api_source: market:NDX  # 与数据集中的 Yahoo ^NDX 比对（两位小数；差值绝对值>0.02 点为争议）
+  tolerance: 0.02
+
+# ---- reference：公开金融压力指数（FRED 周频，参考用，不参与评分；data/market/weekly/）----
+- symbol: STLFSI4
+  tv_symbol: FRED:STLFSI4
+  name: 圣路易斯联储金融压力指数（STLFSI4，周频）
+  category: stress
+  usage: reference
+  unit: index
+  calendar: none
+  frequency: weekly
+  revisable: true          # 每次 data build 整体替换为最新下载的完整序列
+  api_source: fred:STLFSI4
+- symbol: NFCI
+  tv_symbol: FRED:NFCI
+  name: 芝加哥联储全国金融状况指数（NFCI，周频；会修订历史数据）
+  category: stress
+  usage: reference
+  unit: index
+  calendar: none
+  frequency: weekly
+  revisable: true          # 每次 data build 整体替换为最新下载的完整序列（当前为最新版本，不是当时可见的版本）
+  api_source: fred:NFCI

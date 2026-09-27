@@ -161,6 +161,15 @@ class StoragePaths:
             raise PathError(f"序列名不合法：{series!r}")
         return self.market_dir / "daily" / f"{series}.csv"
 
+    def market_weekly_file(self, series: str) -> Path:
+        """周频序列：data/market/weekly/<序列>.csv，按原始周频日期保存，不插值。"""
+        if not _TV_SYMBOL_RE.match(series):
+            raise PathError(f"序列名不合法：{series!r}")
+        return self.market_dir / "weekly" / f"{series}.csv"
+
+    def market_series_file(self, series: str, frequency: str = "daily") -> Path:
+        return self.market_weekly_file(series) if frequency == "weekly" else self.market_daily_file(series)
+
     def market_vintage_file(self, series: str, base_date: dt.date) -> Path:
         """基准日版本（ALFRED）：data/market/vintage/<序列>_<基准日>.csv，只用于正式样本的历史修订比对。"""
         if not _TV_SYMBOL_RE.match(series):

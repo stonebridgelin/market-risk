@@ -93,14 +93,18 @@ def fetch_ohlcv(
     downloader: Downloader = yfinance_download,
     max_retries: int = 3,
     backoff_seconds: float = 1.0,
+    key: str | None = None,
 ) -> tuple[dict[dt.date, dict[str, float | None]], SourceInfo]:
-    """下载 [start, end] 的日线开高低收量（data build 使用；缓存代码 <标的>_OHLCV）。"""
+    """下载 [start, end] 的日线开高低收量（data build 使用；缓存代码 <key>_OHLCV，key 默认为标的）。
+
+    指数代码含 "^"（如 ^GSPC），不能作为缓存文件名，由调用方给出 key（如 SPX）。
+    """
     from market_risk.data.cache import cached_rows
 
     symbol = symbol.upper()
     end_exclusive = end + dt.timedelta(days=1)
     return cached_rows(
-        paths, "yahoo", f"{symbol}_OHLCV", start, end, OHLCV_COLUMNS,
+        paths, "yahoo", f"{(key or symbol).upper()}_OHLCV", start, end, OHLCV_COLUMNS,
         url_for_log=f"yfinance.download({symbol!r}, start={start}, end={end_exclusive}, auto_adjust=False) → OHLCV",
         download=lambda: ohlcv_rows_from_frame(downloader(symbol, start, end_exclusive), symbol),
         refresh=refresh, max_retries=max_retries, backoff_seconds=backoff_seconds,

@@ -272,6 +272,7 @@ YAML 增加 `corrected_value` 与 `evidence_source`，迁移0005同步参考表�
 - 历史修订：与上一版相比已有日期的数值变化时列出修订清单（`reports/market_data_revisions.md`），**不自动覆盖**，确认后用 `--accept-revisions` 更新。判定：Yahoo 价格按4位小数、成交量按整数，其他来源按两位小数。
 - `fetch --date` = 按需更新数据集 + 该基准日的 ALFRED 版本（`data/market/vintage/`，只为正式样本：月末样本、每日前瞻运行；逐日历史回测不做版本比对）。`score` 只读数据集，未覆盖基准日时报错并提示先运行 `fetch`。
 - `validate` 另用 `data/market/` 对样本1至4重新计分，与离线样本逐项比对。
+- 补充序列（2026-09-27，第三部分）：`SPX`（Yahoo `^GSPC`）、`NDX`（Yahoo `^NDX`）为指数，1990 年起，用于结果标签与回调事件标签，不参与评分，与 TradingView 的 SP_DLY:SPX、NASDAQ_DLY:NDX 交叉校验（`tv crosscheck`，接口来源 `market:<序列>`，两位小数，差值绝对值>0.02 点为争议，另报告全部非零差异的天数与最大差值）。`STLFSI4`、`NFCI` 为 FRED 周频参考序列，放在 `data/market/weekly/`，`revisable: true`（每次整体替换为最新下载的完整序列；只允许 reference 序列，评分序列不得设置）。
 - 已知事项（2026-09-27 记录，以后统一处理）：价格两位小数的取整方式不一致——争议价格审查（`price_review.py`）用 Decimal 的 ROUND_HALF_UP，评分读取（`market.raw_inputs_from_series`）用 Python `round()`（银行家舍入，且受二进制浮点表示影响）。已核实 2007 年以后 SPY、QQQ、RSP、HYG、LQD 的数据集价格全部为整分（4 位小数的后两位均为 0），两种方式结果相同，不影响回测。
 
 ### 6.0.1 收盘价争议处理原则（2026-09-27 确认）

@@ -177,6 +177,8 @@ class SymbolInfo:
     api_source: str | None = None      # 交叉校验用的接口数据，如 yahoo:SPY、fred:BAMLH0A0HYM2
     tolerance: float = 0.005           # 交叉校验容差
     crosscheck_note: str | None = None  # 口径不同、交叉校验"不适用"的原因
+    revisable: bool = False            # 来源会修订历史（如 NFCI）：data build 整体替换为最新下载（只允许 reference）
+    frequency: str = "daily"           # daily / weekly（数据集目录）
 
 
 DEFAULT_DECISIONS_PATH = PROJECT_ROOT / "config" / "data_decisions.yaml"
@@ -267,6 +269,8 @@ def load_symbols(path: Path = DEFAULT_SYMBOLS_PATH) -> dict[str, SymbolInfo]:
                 api_source=item.get("api_source"),
                 tolerance=float(item.get("tolerance", 0.005)),
                 crosscheck_note=item.get("crosscheck_note"),
+                revisable=bool(item.get("revisable", False)),
+                frequency=str(item.get("frequency", "daily")),
                 known_values={
                     _one_date(d, "known_values"): float(v)
                     for d, v in (item.get("known_values") or {}).items()
@@ -278,6 +282,11 @@ def load_symbols(path: Path = DEFAULT_SYMBOLS_PATH) -> dict[str, SymbolInfo]:
             raise ConfigError(f"{info.symbol}：usage 应为 {sorted(_USAGES)}")
         if info.unit is not None and info.unit not in _UNITS:
             raise ConfigError(f"{info.symbol}：unit 应为 {sorted(_UNITS)}")
+        if info.revisable and info.usage != "reference":
+            # CLAUDE.md 第13条的例外只适用于纯参考序列；参与评分或交叉校验的序列不得整体替换
+            raise ConfigError(f"{info.symbol}：只有 usage=reference 的序列可以设置 revisable")
+        if info.frequency not in ("daily", "weekly"):
+            raise ConfigError(f"{info.symbol}：frequency 应为 daily 或 weekly")
         if info.calendar not in _CALENDARS:
             raise ConfigError(f"{info.symbol}：calendar 应为 {sorted(_CALENDARS)}")
         if info.tv_symbol in result:
