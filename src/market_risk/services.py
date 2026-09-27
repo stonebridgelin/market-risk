@@ -129,10 +129,11 @@ class DataBuildReport:
 
 def data_build(ctx: Context, offline: bool = False, refresh: bool = False, accept_revisions: bool = False,
                end: dt.date | None = None, only: Collection[str] | None = None,
-               collect: Callable[..., Any] | None = None, now: dt.datetime | None = None) -> DataBuildReport:
+               collect: Callable[..., Any] | None = None, now: dt.datetime | None = None,
+               decisions: tuple[Any, ...] | None = None) -> DataBuildReport:
     """由接口缓存（按需下载）、TradingView 清洗结果和手工录入生成 data/market/（B1）。
 
-    collect：测试时注入，签名 (end) -> (序列列表, 广度冲突)。
+    collect：测试时注入，签名 (end) -> (序列列表, 广度冲突)；decisions：裁定表（默认读取 config/data_decisions.yaml）。
     """
     from market_risk.data import market
     from market_risk.data.cache import DataFetchError
@@ -162,7 +163,7 @@ def data_build(ctx: Context, offline: bool = False, refresh: bool = False, accep
     try:
         result = market.build_dataset(ctx.paths, series, accept_revisions,
                                       conflicts if names & {"S5FI", "S5TW"} else None, now,
-                                      decisions=load_data_decisions())
+                                      decisions=load_data_decisions() if decisions is None else decisions)
     except (ConfigError, ValueError, market.MarketDataError) as exc:   # 裁定表有误：显示原因，不抛异常栈
         raise ServiceError(f"数据集生成失败（config/data_decisions.yaml 或数据集有误）：{exc}") from exc
     rev_path = None
@@ -483,23 +484,33 @@ class PriceReviewReport:
     text: str
     path: Path
     impacts: tuple[Any, ...] = ()          # price_impact.ImpactResult
+    majority: Mapping[tuple[str, dt.date], Any] = field(default_factory=dict)   # price_review.MajorityResult
+    implied: Mapping[tuple[str, dt.date], Any] = field(default_factory=dict)    # price_review.ImpliedPrice
 
 
 def review_price_disputes(
     ctx: Context, refresh: bool = False, config: ReviewConfig | None = None, inputs: ReviewInputs | None = None,
     third_party: tuple[ThirdPartyLoader | None, str] | None = None, run_impact: bool = True,
 ) -> PriceReviewReport:
-    """固定残差法审查；网络数据只用于审计，不应用价格修正、不调用评分或标签。"""
-    from market_risk.data.price_review import ReviewResult, load_review_config, render_review, review_case
+    """固定残差法审查 + 第三方多数一致 + 隐含价格 + 实质影响检验；网络数据只用于审计，不调用标签。"""
+    from market_risk.data.price_review import (
+        ReviewResult,
+        implied_price,
+        load_review_config,
+        majority_verdict,
+        published_prices,
+        render_review,
+        review_case,
+    )
     from market_risk.data.price_review_inputs import collect_review_inputs
-    from market_risk.data.tv_compare import CompareResult
+    from market_risk.data.tiingo import verify_unadjusted
     from market_risk.price_impact import render_impact
 
     config = config or load_review_config()
     inputs = inputs or collect_review_inputs(ctx.paths, ctx.settings, config, refresh)
-    results = []
-    comparisons = {}
     infos = {info.symbol: info for info in load_symbols().values()}
+    results = []
+    implied = {}
     for symbol, day in config.cases:
         benchmark = config.benchmarks[symbol]
         error = inputs.errors.get(symbol) or inputs.errors.get(benchmark)
@@ -513,26 +524,52 @@ def review_price_disputes(
                                  inputs.tv.get(benchmark, {}), inputs.yahoo_indices.get(benchmark, {}),
                                  inputs.dividends.get(symbol, frozenset()), config)
         results.append(result)
-        info = infos[symbol]
-        comparison = comparisons.setdefault(symbol, CompareResult(symbol, info.tv_symbol, info.api_source or "", 0.02))
-        a, b = inputs.tv.get(symbol, {}).get(day), inputs.yahoo.get(symbol, {}).get(day)
-        if a is not None and b is not None:
-            comparison.mismatches.append((day, float(a), float(b), float(a - b)))
+        disputed = frozenset(d for s, d in config.cases if s == symbol and d != day)
+        index = inputs.tv.get(benchmark, {})
+        dividends = inputs.dividends.get(symbol, frozenset())
+        implied[symbol, day] = tuple(
+            implied_price(day, etf, index, name, dividends, disputed)
+            for name, etf in (("TradingView", inputs.tv.get(symbol, {})), ("Yahoo", inputs.yahoo.get(symbol, {}))))
+
+    # 第三方：先用已知读数验证不复权，再按多数一致口径判定（争议日与次日）
     loader, source = third_party if third_party is not None else _default_third_party(ctx, refresh)
-    third_party_checks(list(comparisons.values()), infos, loader, source)
-    evidence = {}
-    for symbol, comparison in comparisons.items():
-        for _, day in (case for case in config.cases if case[0] == symbol):
-            evidence[symbol, day] = comparison.third_party_note or source
-        for check in comparison.third_party:
-            evidence[symbol, check.date] += f"；close={check.third}，{check.verdict}"
+    notes: dict[tuple[str, dt.date], str] = {}
+    majority = {}
+    for symbol in sorted({s for s, _ in config.cases}):
+        days = [d for s, d in config.cases if s == symbol]
+        if loader is None:
+            notes.update({(symbol, d): source for d in days})
+            continue
+        known = infos[symbol].known_values or {}
+        end = max([mcal.shift_trading_days(max(days), 1), *known])
+        try:
+            third = published_prices(loader(symbol, min(days), end))
+        except Exception as exc:  # 第三方失败只写入报告
+            notes.update({(symbol, d): f"第三方数据获取失败：{exc}" for d in days})
+            continue
+        problems = verify_unadjusted({d: float(v) for d, v in third.items()}, known) if known \
+            else ["没有已知读数，无法验证是否不复权"]
+        if problems:
+            notes.update({(symbol, d): f"{source} 未通过不复权验证（{'；'.join(problems)}），不采用" for d in days})
+            continue
+        for day in days:
+            nxt = mcal.shift_trading_days(day, 1)
+            notes[symbol, day] = f"{source} 已用已知读数验证为不复权（{len(known)} 个读数全部相符）"
+            majority[symbol, day] = majority_verdict(
+                tuple(inputs.tv.get(symbol, {}).get(t) for t in (day, nxt)),  # type: ignore[arg-type]
+                tuple(inputs.yahoo.get(symbol, {}).get(t) for t in (day, nxt)),  # type: ignore[arg-type]
+                tuple(third.get(t) for t in (day, nxt)), config, source)  # type: ignore[arg-type]
+
     corrections = tuple((d.symbol, d.date, str(d.corrected_value), d.evidence_source or "", str(d.decided_on))
                         for d in load_data_decisions() if d.decision == "correct")
     impacts = price_dispute_impacts(ctx, config, inputs) if run_impact else ()
     sections = ("\n".join(render_impact(impacts)),) if impacts else ()
-    text = render_review(tuple(results), config, list(inputs.provenance), evidence, corrections, sections)
+    verdicts = {(i.symbol, i.date): i.verdict for i in impacts}
+    text = render_review(tuple(results), config, list(inputs.provenance), notes, corrections, sections,
+                         majority, implied, verdicts)
     _write_report(ctx.paths.price_dispute_review_md, text)
-    return PriceReviewReport(tuple(results), text, ctx.paths.price_dispute_review_md, tuple(impacts))
+    return PriceReviewReport(tuple(results), text, ctx.paths.price_dispute_review_md, tuple(impacts),
+                             majority, implied)
 
 
 def price_dispute_impacts(ctx: Context, config: ReviewConfig, inputs: ReviewInputs) -> tuple[Any, ...]:

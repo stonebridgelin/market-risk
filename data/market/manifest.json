@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-09-27T11:11:35+00:00",
+  "generated_at_utc": "2026-09-27T15:34:58+00:00",
   "series": {
     "BAMLH0A0HYM2": {
       "file": "data/market/daily/BAMLH0A0HYM2.csv",
@@ -52,7 +52,8 @@
       "file": "data/market/daily/QQQ.csv",
       "kind": "etf",
       "sources": {
-        "yahoo": 6930
+        "correct:yahoo": 1,
+        "yahoo": 6929
       },
       "downloaded_at_utc": "2026-09-27T11:01:45+00:00",
       "inputs": [
@@ -61,13 +62,34 @@
       "rows": 6930,
       "first_date": "1999-03-10",
       "last_date": "2026-09-25",
-      "sha256": "ba60219898897b7e7439a32a4cebbace109f47a2864e9d49f56d272c36e6088c"
+      "sha256": "7d0a431f79d50fe86cc2d6893beb3b786924ea041144becbe3eded94a9e44a30",
+      "corrections": [
+        {
+          "date": "2008-09-08",
+          "original_value": 43.37,
+          "corrected_value": "43.31",
+          "original_row": {
+            "value": 43.37,
+            "open": 44.02,
+            "high": 44.22,
+            "low": 42.68,
+            "close": 43.37,
+            "volume": 311065100.0,
+            "source": "yahoo"
+          },
+          "outside_source_high_low": false,
+          "evidence_source": "多数一致：TradingView 与 Tiingo 争议日均为 43.31、次日均为 42.45（两日相差≤0.01），Yahoo 争议日为 43.37（相差>0.02）； 残差法无法判定；实质影响检验：无实质影响",
+          "reason": "多数一致判定 Yahoo 有误（负责人批准，reports/price_dispute_review.md）",
+          "decided_on": "2026-09-27"
+        }
+      ]
     },
     "RSP": {
       "file": "data/market/daily/RSP.csv",
       "kind": "etf",
       "sources": {
-        "yahoo": 5889
+        "correct:yahoo": 1,
+        "yahoo": 5888
       },
       "downloaded_at_utc": "2026-09-27T11:01:47+00:00",
       "inputs": [
@@ -76,7 +98,27 @@
       "rows": 5889,
       "first_date": "2003-05-01",
       "last_date": "2026-09-25",
-      "sha256": "084953a99f23f74ee4715e022886578452e45612708d45e9a83a5887c8d4ffe4"
+      "sha256": "5035529c08e645051129a03bf875cc1b16fabd40d891be5dc4de3ecd2a5b90a2",
+      "corrections": [
+        {
+          "date": "2016-06-24",
+          "original_value": 78.12,
+          "corrected_value": "78.18",
+          "original_row": {
+            "value": 78.12,
+            "open": 78.72,
+            "high": 79.69,
+            "low": 78.01,
+            "close": 78.12,
+            "volume": 2750900.0,
+            "source": "yahoo"
+          },
+          "outside_source_high_low": false,
+          "evidence_source": "多数一致：TradingView 与 Tiingo 争议日均为 78.18、次日均为 76.14（两日相差≤0.01），Yahoo 争议日为 78.12（相差>0.02）； 残差法无法判定；实质影响检验：无实质影响",
+          "reason": "多数一致判定 Yahoo 有误（负责人批准，reports/price_dispute_review.md）",
+          "decided_on": "2026-09-27"
+        }
+      ]
     },
     "S5FI": {
       "file": "data/market/daily/S5FI.csv",
@@ -114,7 +156,8 @@
       "file": "data/market/daily/SPY.csv",
       "kind": "etf",
       "sources": {
-        "yahoo": 8472
+        "correct:yahoo": 1,
+        "yahoo": 8471
       },
       "downloaded_at_utc": "2026-09-27T11:01:43+00:00",
       "inputs": [
@@ -123,7 +166,27 @@
       "rows": 8472,
       "first_date": "1993-01-29",
       "last_date": "2026-09-25",
-      "sha256": "186a9a13a0ea447b70615a2bef70447d6a38cd5da98af2c7389181ae9e50ffc2"
+      "sha256": "eaf166f909b289542eac86cc31c98f85fc99bc5f86b65332906cbe0ca10456da",
+      "corrections": [
+        {
+          "date": "2009-07-16",
+          "original_value": 93.11,
+          "corrected_value": "94.15",
+          "original_row": {
+            "value": 93.11,
+            "open": 93.0,
+            "high": 94.51,
+            "low": 92.82,
+            "close": 93.11,
+            "volume": 231174500.0,
+            "source": "yahoo"
+          },
+          "outside_source_high_low": false,
+          "evidence_source": "TradingView 94.15；由前后两日 SPY/标普500 比值推算的指数隐含价 94.12；残差法判定 Yahoo 有误（置信程度中）； Tiingo 为 93.11，与 Yahoo 一致，判断为共享上游数据，不构成独立证据；实质影响检验：无实质影响",
+          "reason": "Yahoo 收盘价 93.11 有误（负责人批准，reports/price_dispute_review.md）",
+          "decided_on": "2026-09-27"
+        }
+      ]
     },
     "UST10Y": {
       "file": "data/market/daily/UST10Y.csv",

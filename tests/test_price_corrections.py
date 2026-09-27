@@ -174,3 +174,10 @@ def test_data_build_reports_invalid_correction_as_service_error(tmp_path, monkey
     monkeypatch.setattr(services, 'load_data_decisions', lambda: (correction(), correction()))
     with pytest.raises(services.ServiceError, match='重复'):
         services.data_build(ctx, end=DAY, collect=lambda e: ([series()], {}))
+
+
+@pytest.mark.parametrize(('value', 'outside'), [('101', False), ('102', False), ('102.01', True), ('97.99', True)])
+def test_manifest_flags_correction_outside_source_high_low(tmp_path, value, outside):
+    """修正后的收盘价超出来源当日高低区间（98–102）时在 manifest 中标注。"""
+    result = market.build_dataset(StoragePaths(tmp_path), [series()], decisions=(correction(value),))
+    assert result.series['SPY']['corrections'][0]['outside_source_high_low'] is outside

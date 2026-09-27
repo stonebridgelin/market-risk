@@ -661,7 +661,10 @@ INSERT INTO market_holidays (market, date, kind, note) VALUES ('bond', '2026-06-
 INSERT INTO market_holidays (market, date, kind, note) VALUES ('bond', '2026-07-02', 'early_close', '独立日前（长周末）');
 INSERT INTO market_holidays (market, date, kind, note) VALUES ('bond', '2026-09-04', 'early_close', '劳动节前（长周末）');
 
--- data_decisions：3 行
+-- data_decisions：6 行
+INSERT INTO data_decisions (date, symbol, decision, reason, decided_on, corrected_value, evidence_source) VALUES ('2008-09-08', 'QQQ', 'correct', '多数一致判定 Yahoo 有误（负责人批准，reports/price_dispute_review.md）', '2026-09-27', 43.31, '多数一致：TradingView 与 Tiingo 争议日均为 43.31、次日均为 42.45（两日相差≤0.01），Yahoo 争议日为 43.37（相差>0.02）； 残差法无法判定；实质影响检验：无实质影响');
+INSERT INTO data_decisions (date, symbol, decision, reason, decided_on, corrected_value, evidence_source) VALUES ('2009-07-16', 'SPY', 'correct', 'Yahoo 收盘价 93.11 有误（负责人批准，reports/price_dispute_review.md）', '2026-09-27', 94.15, 'TradingView 94.15；由前后两日 SPY/标普500 比值推算的指数隐含价 94.12；残差法判定 Yahoo 有误（置信程度中）； Tiingo 为 93.11，与 Yahoo 一致，判断为共享上游数据，不构成独立证据；实质影响检验：无实质影响');
 INSERT INTO data_decisions (date, symbol, decision, reason, decided_on, corrected_value, evidence_source) VALUES ('2015-01-19', 'BAMLH0A0HYM2', 'exclude', '马丁·路德·金纪念日；SIFMA 建议全天休市，财政部无数据，已确认为债市休市日', '2026-09-27', NULL, NULL);
+INSERT INTO data_decisions (date, symbol, decision, reason, decided_on, corrected_value, evidence_source) VALUES ('2016-06-24', 'RSP', 'correct', '多数一致判定 Yahoo 有误（负责人批准，reports/price_dispute_review.md）', '2026-09-27', 78.18, '多数一致：TradingView 与 Tiingo 争议日均为 78.18、次日均为 76.14（两日相差≤0.01），Yahoo 争议日为 78.12（相差>0.02）； 残差法无法判定；实质影响检验：无实质影响');
 INSERT INTO data_decisions (date, symbol, decision, reason, decided_on, corrected_value, evidence_source) VALUES ('2026-06-18', 'PCCE', 'invalid', '数据源错误：最低价与收盘价为 0（TradingView USI:PCCE，2026-09-26 导出），不重新导出', '2026-09-27', NULL, NULL);
 INSERT INTO data_decisions (date, symbol, decision, reason, decided_on, corrected_value, evidence_source) VALUES ('2026-07-02', 'PCCE', 'invalid', '数据源错误：最低价与收盘价为 0（TradingView USI:PCCE，2026-09-26 导出），不重新导出', '2026-09-27', NULL, NULL);

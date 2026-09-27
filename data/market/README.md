@@ -32,10 +32,11 @@
 
 ## 人工价格修正（任务1）
 
-`config/data_decisions.yaml` 的 `decision: correct` 只在负责人批准后添加，本任务不包含实际修正条目。
+`config/data_decisions.yaml` 的 `decision: correct` 只在负责人批准后添加（2026-09-27 批准 3 条：SPY 2009-07-16、QQQ 2008-09-08、RSP 2016-06-24）。
 字段为标的、日期、`corrected_value`（正数，最多4位小数）、`evidence_source`、理由及裁定日期。
 当前用于价格序列（kind=etf）：同步修改 `value` 与 `close`，开高低量保持来源原值，
 所以修正后收盘不一定落在未修正的日内高低区间内；OHLC 不被推测重写。
+manifest 的 `outside_source_high_low` 标注修正后收盘价是否超出来源当日最高价与最低价的区间（3 条均在区间内）。
 
 - 历史修订比较发生在应用裁定之前：上一版人工修正行先从 manifest 恢复来源原值，再与新接口数值比较。
 - manifest 各序列的 `corrections` 记录日期、`original_value`、`corrected_value`、修正前完整行

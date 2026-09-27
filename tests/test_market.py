@@ -116,10 +116,10 @@ def test_build_dataset_writes_files_manifest_and_is_stable(paths):
 def test_data_build_reports_revisions(ctx, paths):
     raw, breadth = _sample()
     first = dataset_from_raw(raw, breadth)
-    services.data_build(ctx, end=D(2025, 11, 28), collect=lambda e: (first, {}))
+    services.data_build(ctx, end=D(2025, 11, 28), collect=lambda e: (first, {}), decisions=())
     revised = dataset_from_raw(dataclasses.replace(
         raw, closes={**raw.closes, "SPY": {**raw.closes["SPY"], D(2025, 11, 26): 999.0}}), breadth)
-    report = services.data_build(ctx, end=D(2025, 11, 28), collect=lambda e: (revised, {}))
+    report = services.data_build(ctx, end=D(2025, 11, 28), collect=lambda e: (revised, {}), decisions=())
     assert {(r.series, r.date, r.column) for r in report.result.revisions} == {
         ("SPY", D(2025, 11, 26), "value"), ("SPY", D(2025, 11, 26), "close")}
     assert report.revisions_path == paths.market_revisions_md
@@ -127,7 +127,8 @@ def test_data_build_reports_revisions(ctx, paths):
     assert "未自动覆盖" in text and "| SPY | 2025-11-26 | close |" in text
     spy = market.read_series_file(paths.market_daily_file("SPY"))[1]
     assert spy[D(2025, 11, 26)]["value"] != 999.0
-    services.data_build(ctx, end=D(2025, 11, 28), accept_revisions=True, collect=lambda e: (revised, {}))
+    services.data_build(ctx, end=D(2025, 11, 28), accept_revisions=True, collect=lambda e: (revised, {}),
+                        decisions=())
     assert market.read_series_file(paths.market_daily_file("SPY"))[1][D(2025, 11, 26)]["value"] == 999.0
 
 

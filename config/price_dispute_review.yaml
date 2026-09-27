@@ -9,6 +9,14 @@ high_normal_z: '2'
 reversal_min: '0.5'
 reversal_max: '1.5'
 index_tolerance: '0.02'
+# 第三方"多数一致"判定（2026-09-27 负责人确认的三处口径）：
+#   1. TradingView 与第三方（Tiingo）两日（争议日与次日）都相差 ≤agree_tolerance，
+#      且争议日 Yahoo 与两者都相差 >differ_tolerance → 多数一致：Yahoo 有误（建议值取两者一致的数值）；
+#   2. 第三方与 Yahoo 两日都相差 ≤agree_tolerance → Yahoo 正确；
+#   3. 其余组合一律无法判定。
+# Yahoo 与 Tiingo 可能共享上游数据，两者一致不构成两份独立证据；隐含价格（指数推算）为独立证据，只作展示。
+agree_tolerance: '0.01'
+differ_tolerance: '0.02'
 benchmarks: {SPY: SPX, QQQ: NDX, RSP: SPX}
 index_tickers: {SPX: '^GSPC', NDX: '^NDX'}
 cases:

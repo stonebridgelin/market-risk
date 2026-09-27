@@ -28,6 +28,8 @@ class ReviewConfig:
     reversal_min: Decimal
     reversal_max: Decimal
     index_tolerance: Decimal
+    agree_tolerance: Decimal            # 多数一致：两来源"一致"的容差（两日都≤）
+    differ_tolerance: Decimal           # 多数一致：Yahoo 与另外两方"不一致"的容差（争议日>）
     benchmarks: Mapping[str, str]
     index_tickers: Mapping[str, str]
     cases: tuple[tuple[str, dt.date], ...]
@@ -36,7 +38,7 @@ class ReviewConfig:
 def load_review_config(path: Path = PROJECT_ROOT / "config" / "price_dispute_review.yaml") -> ReviewConfig:
     raw = _read_yaml(path)
     names = ("mad_scale", "sigma_floor", "abnormal_z", "normal_z", "high_abnormal_z", "high_normal_z",
-             "reversal_min", "reversal_max", "index_tolerance")
+             "reversal_min", "reversal_max", "index_tolerance", "agree_tolerance", "differ_tolerance")
     try:
         numbers = {name: Decimal(str(raw[name])) for name in names}
         if any(not v.is_finite() or v <= 0 for v in numbers.values()):
@@ -190,11 +192,108 @@ def explain(result: ReviewResult, config: ReviewConfig, adjacent: tuple[dt.date,
     return "；".join(parts)
 
 
+@dataclass(frozen=True)
+class MajorityResult:
+    """第三方证据的"多数一致"判定（SPEC 6.0 争议处理原则；口径 2026-09-27 确认）。"""
+
+    source: str
+    tv: tuple[Decimal | None, Decimal | None]         # 争议日、次日
+    yahoo: tuple[Decimal | None, Decimal | None]
+    third: tuple[Decimal | None, Decimal | None]
+    verdict: str
+    suggested: Decimal | None = None
+
+
+def majority_verdict(tv: tuple[Decimal | None, Decimal | None], yahoo: tuple[Decimal | None, Decimal | None],
+                     third: tuple[Decimal | None, Decimal | None], config: ReviewConfig,
+                     source: str = "Tiingo") -> MajorityResult:
+    """三处口径：
+    1. TradingView 与第三方两日都相差 ≤agree，且争议日 Yahoo 与两者都相差 >differ → 多数一致：Yahoo 有误；
+    2. 第三方与 Yahoo 两日都相差 ≤agree → Yahoo 正确；
+    3. 其余组合一律无法判定。
+    """
+    if any(v is None for v in (*tv, *yahoo, *third)):
+        return MajorityResult(source, tv, yahoo, third, "第三方或来源数据缺失，无法判定")
+
+    def agree(a: tuple, b: tuple) -> bool:
+        return all(abs(x - y) <= config.agree_tolerance for x, y in zip(a, b, strict=True))
+
+    yahoo_differs = (abs(yahoo[0] - tv[0]) > config.differ_tolerance  # type: ignore[operator]
+                     and abs(yahoo[0] - third[0]) > config.differ_tolerance)  # type: ignore[operator]
+    if agree(tv, third) and yahoo_differs:
+        # 建议值取两者一致的数值；两者相差不超过容差但不完全相同时不给建议值，由负责人选定
+        suggested = tv[0] if tv[0] == third[0] else None
+        return MajorityResult(source, tv, yahoo, third, "多数一致：Yahoo 有误", suggested)
+    if agree(yahoo, third):
+        return MajorityResult(source, tv, yahoo, third, "Yahoo 正确")
+    return MajorityResult(source, tv, yahoo, third, "无法判定")
+
+
+@dataclass(frozen=True)
+class ImpliedPrice:
+    """由对应指数推算的隐含价格：争议日指数 × 前后交易日 ETF/指数比值的平均。只作证据展示，不改变判定。"""
+
+    etf_source: str
+    prev_day: dt.date
+    next_day: dt.date
+    ratio_prev: Decimal | None
+    ratio_next: Decimal | None
+    value: Decimal | None
+    notes: tuple[str, ...] = ()
+
+
+def implied_price(day: dt.date, etf: Series, index: Series, etf_source: str,
+                  dividends: frozenset[dt.date] = frozenset(),
+                  disputed: frozenset[dt.date] = frozenset()) -> ImpliedPrice:
+    prev_day, next_day = cal.shift_trading_days(day, -1), cal.shift_trading_days(day, 1)
+
+    def ratio(t: dt.date) -> Decimal | None:
+        return etf[t] / index[t] if t in etf and t in index and index[t] else None
+
+    rp, rn = ratio(prev_day), ratio(next_day)
+    notes = [f"{t} 为除息日，比值含分红影响" for t in (prev_day, next_day) if t in dividends]
+    notes += [f"{t} 本身也是争议日" for t in (prev_day, next_day) if t in disputed]
+    value = (rp + rn) / 2 * index[day] if rp is not None and rn is not None and day in index else None
+    if value is None:
+        notes.append("相邻交易日或当日指数缺数，无法推算")
+    return ImpliedPrice(etf_source, prev_day, next_day, rp, rn, value, tuple(notes))
+
+
+def disposition(result: ReviewResult, majority: MajorityResult | None, impact_verdict: str | None,
+                corrected: str | None, config: ReviewConfig) -> str:
+    """处理结论：由修正条目、残差法、多数一致与实质影响检验的结果生成。"""
+    if corrected is not None:
+        return f"已修正为 {corrected}（config/data_decisions.yaml）"
+    note = ""
+    y = result.yahoo
+    reversal_shape = (y is not None and y.e0 * y.e1 < 0 and y.reversal is not None
+                      and config.reversal_min <= y.reversal <= config.reversal_max
+                      and config.normal_z < y.z0 <= config.abnormal_z)
+    if reversal_shape and majority is not None and majority.verdict == "Yahoo 正确":
+        note = (f"；注：Yahoo 残差呈单日异常、次日反转形态（z(d)={y.z0:.2f}，未超过 {config.abnormal_z}），"  # type: ignore[union-attr]
+                "但第三方与 Yahoo 一致，按规则判 Yahoo 正确；不为此修改规则或门槛")
+    impact = f"，{impact_verdict}" if impact_verdict else ""
+    # 建议修正的条件（负责人事先约定）：(a) 残差法判 Yahoo 有误且置信为中或高；(b) 多数一致判 Yahoo 有误
+    if (result.verdict == "Yahoo 有误" and result.confidence in ("中", "高")) or (
+            majority is not None and majority.verdict == "多数一致：Yahoo 有误"):
+        return f"满足建议修正条件，待负责人批准{impact}"
+    if majority is not None and majority.verdict == "Yahoo 正确":
+        return f"保留 Yahoo 原值：多数一致规则判 Yahoo 正确{impact}{note}"
+    return f"保留 Yahoo 原值：无法判定{impact}"
+
+
 def render_review(results: tuple[ReviewResult, ...], config: ReviewConfig, provenance: list[str],
                   third_party: Mapping[tuple[str, dt.date], str],
                   corrections: tuple[tuple[str, dt.date, str, str, str], ...] = (),
-                  extra_sections: tuple[str, ...] = ()) -> str:
-    """corrections：config/data_decisions.yaml 中已批准的修正（标的、日期、修正值、证据、裁定日期）。"""
+                  extra_sections: tuple[str, ...] = (),
+                  majority: Mapping[tuple[str, dt.date], MajorityResult] | None = None,
+                  implied: Mapping[tuple[str, dt.date], tuple[ImpliedPrice, ...]] | None = None,
+                  impact_verdicts: Mapping[tuple[str, dt.date], str] | None = None) -> str:
+    """corrections：config/data_decisions.yaml 中已批准的修正（标的、日期、修正值、证据、裁定日期）；
+    third_party：第三方核对的说明（不复权验证等）；majority：多数一致判定；implied：隐含价格证据。"""
+    majority = majority or {}
+    implied = implied or {}
+    impact_verdicts = impact_verdicts or {}
     lines = ["# 争议收盘价审查", "", "## 方法与边界", "",
              "这是事后数据审计：双侧窗口含争议日之后的数据，只用于核查输入质量，不参与当日评分。",
              "收益率及残差用 Decimal 计算，不先取整；e、σ 以下用基点展示（1bp=0.0001），z 为 |e|/σ。",
@@ -207,6 +306,12 @@ def render_review(results: tuple[ReviewResult, ...], config: ReviewConfig, prove
              f"后者两日 z≤{config.high_normal_z}，否则为中。指数任一天差>{config.index_tolerance}点则无法判定。",
              f"参照指数：{'；'.join(f'{k} 对应 {v}' for k, v in sorted(config.benchmarks.items()))}。"
              "其余情况均无法判定，第三方证据单列，不覆盖固定算法结论。",
+             f"第三方（多数一致，SPEC 6.0）：TradingView 与第三方两日都相差 ≤{config.agree_tolerance}，"
+             f"且争议日 Yahoo 与两者都相差 >{config.differ_tolerance} → 多数一致：Yahoo 有误；"
+             f"第三方与 Yahoo 两日都相差 ≤{config.agree_tolerance} → Yahoo 正确；其余组合一律无法判定。"
+             "Yahoo 与 Tiingo 可能共享上游数据，两者一致不构成两份独立证据。",
+             "隐含价格：争议日指数 × 前后交易日 ETF/指数比值的平均（指数取 TradingView），是独立证据，只作展示，"
+             "不改变判定。",
              "参数与日期清单：`config/price_dispute_review.yaml`。", "",
              "## 结论", "", "| 标的 | 日期 | 判定 | 置信程度 | 依据 |", "|---|---|---|---|---|"]
     lines += [f"| {r.symbol} | {r.date} | {r.verdict} | {r.confidence} | {r.reason} |" for r in results]
@@ -233,9 +338,33 @@ def render_review(results: tuple[ReviewResult, ...], config: ReviewConfig, prove
         lines += ["", f"正常样本排除的除息日：{excluded or '无'}。",
                   f"指数核对 |TV−Yahoo|（d / d+1，点）：{' / '.join(map(str, r.index_differences)) or '缺失'}。",
                   f"判定：{r.verdict}；置信程度：{r.confidence}。{r.reason}。",
-                  f"第三方：{third_party.get((r.symbol, r.date), '未核对')}。", ""]
+                  f"第三方：{third_party.get((r.symbol, r.date), '未核对')}。"]
+        m = majority.get((r.symbol, r.date))
+        if m is not None:
+            def two(v: tuple) -> str:
+                return " / ".join("缺失" if x is None else f"{x:.2f}" for x in v)
+            lines.append(f"多数一致（争议日 / 次日）：TradingView {two(m.tv)}；Yahoo {two(m.yahoo)}；"
+                         f"{m.source} {two(m.third)} → {m.verdict}"
+                         + (f"，建议值 {m.suggested:.2f}" if m.suggested is not None else "") + "。")
+        for ip in implied.get((r.symbol, r.date), ()):
+            val = "无法推算" if ip.value is None else f"{ip.value:.2f}"
+            rp = "缺失" if ip.ratio_prev is None else f"{ip.ratio_prev:.6f}"
+            rn = "缺失" if ip.ratio_next is None else f"{ip.ratio_next:.6f}"
+            lines.append(f"隐含价格（ETF 取 {ip.etf_source}）：{val}（{ip.prev_day} 比值 {rp}，{ip.next_day} 比值 {rn}"
+                         + (f"；{'；'.join(ip.notes)}" if ip.notes else "") + "）。")
+        lines.append("")
     for section in extra_sections:
         lines += [section, ""]
+    fixed = {(s, d): v for s, d, v, _, _ in corrections}
+    lines += ["## 处理结论（由修正条目、残差法、多数一致与实质影响检验生成）", "",
+              "| 标的 | 日期 | 残差法 | 多数一致 | 实质影响 | 处理 |", "|---|---|---|---|---|---|"]
+    for r in results:
+        key = (r.symbol, r.date)
+        m = majority.get(key)
+        handled = disposition(r, m, impact_verdicts.get(key), fixed.get(key), config)
+        lines.append(f"| {r.symbol} | {r.date} | {r.verdict}（{r.confidence}） | {m.verdict if m else '未核对'} | "
+                     f"{impact_verdicts.get(key, '未检验')} | {handled} |")
+    lines.append("")
     uncertain = [r for r in results if r.verdict == "无法判定"]
     cases = {(r.symbol, r.date) for r in results}
     lines += ["## 无法判定的原因（由计算结果生成）", ""]

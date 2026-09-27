@@ -45,8 +45,12 @@ def apply_corrections(
             raise ValueError(f"修正日期不存在：{symbol} {item.date}")
         original = dict(rows[item.date])
         result[item.date].update(value=float(value), close=float(value), source=f"correct:{original['source']}")
+        high, low = original.get("high"), original.get("low")
+        outside = None if high is None or low is None else not (Decimal(str(low)) <= value <= Decimal(str(high)))
         audit.append({"date": item.date.isoformat(), "original_value": original.get("value"),
                       "corrected_value": str(value), "original_row": original,
+                      # 修正后收盘价是否超出来源当日最高价与最低价的区间（开高低不修正；无高低数据时为 null）
+                      "outside_source_high_low": outside,
                       "evidence_source": item.evidence_source, "reason": item.reason,
                       "decided_on": item.decided_on.isoformat()})
     return result, sorted(audit, key=lambda row: row["date"])

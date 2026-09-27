@@ -11,7 +11,7 @@
 #   corrected_value  修正后的不复权收盘价（正数，最多4位小数；仅 correct 必填）
 #   evidence_source  证据来源（仅 correct 必填）
 # 修正前整行及修正值保存在市场数据 manifest；历史修订检测比较修正前的来源原值。
-# 当前不登记实际 correct 条目，须由负责人审阅 reports/price_dispute_review.md 后批准。
+# correct 条目须由负责人审阅 reports/price_dispute_review.md 后批准（2026-09-27 批准 3 条）。
 #
 # 2026-09-27 起债市休市日的 OAS 观测按统一规则处理（SPEC 5.6 第10条）：一律排除，自然月末例外（v2-M 计入，v3-R1 不计入）。
 # 本表只用于规则无法覆盖或需要偏离规则的日期；表中裁定优先于规则。清单见 reports/holiday_calendar_audit.md 第三部分。
@@ -33,4 +33,34 @@
   symbol: PCCE
   decision: invalid
   reason: 数据源错误：最低价与收盘价为 0（TradingView USI:PCCE，2026-09-26 导出），不重新导出
+  decided_on: 2026-09-27
+
+- date: 2009-07-16
+  symbol: SPY
+  decision: correct
+  corrected_value: 94.15
+  evidence_source: >-
+    TradingView 94.15；由前后两日 SPY/标普500 比值推算的指数隐含价 94.12；残差法判定 Yahoo 有误（置信程度中）；
+    Tiingo 为 93.11，与 Yahoo 一致，判断为共享上游数据，不构成独立证据；实质影响检验：无实质影响
+  reason: Yahoo 收盘价 93.11 有误（负责人批准，reports/price_dispute_review.md）
+  decided_on: 2026-09-27
+
+- date: 2008-09-08
+  symbol: QQQ
+  decision: correct
+  corrected_value: 43.31
+  evidence_source: >-
+    多数一致：TradingView 与 Tiingo 争议日均为 43.31、次日均为 42.45（两日相差≤0.01），Yahoo 争议日为 43.37（相差>0.02）；
+    残差法无法判定；实质影响检验：无实质影响
+  reason: 多数一致判定 Yahoo 有误（负责人批准，reports/price_dispute_review.md）
+  decided_on: 2026-09-27
+
+- date: 2016-06-24
+  symbol: RSP
+  decision: correct
+  corrected_value: 78.18
+  evidence_source: >-
+    多数一致：TradingView 与 Tiingo 争议日均为 78.18、次日均为 76.14（两日相差≤0.01），Yahoo 争议日为 78.12（相差>0.02）；
+    残差法无法判定；实质影响检验：无实质影响
+  reason: 多数一致判定 Yahoo 有误（负责人批准，reports/price_dispute_review.md）
   decided_on: 2026-09-27
