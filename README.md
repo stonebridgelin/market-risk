@@ -29,6 +29,12 @@ uv sync
 2. 复制 `.env.example` 为 `.env`，填入 `FRED_API_KEY=你的密钥`。
 3. `.env` 已写入 `.gitignore`，**不要把真实密钥写进 `.env.example` 或任何会提交的文件**。
 
+### 2.1.1 可选：Tiingo 与 MySQL 验证库
+
+- `TIINGO_API_KEY`：只用于 `tv crosscheck` 核对 ETF 不复权收盘价（第三方核对），未设置时跳过。
+- `MYSQL_VERIFY_URL`：`db verify-mysql` 使用的专用、可清空的空库（先 `uv sync --extra mysql` 安装驱动）。未设置时跳过。
+- 两者都只写在 `.env`，不得输出到任何地方。
+
 ### 2.2 配置文件
 
 | 文件 | 内容 |
@@ -50,7 +56,7 @@ uv sync
 | OAS | FRED `BAMLH0A0HYM2` | O1 为基准日之前的观测；FRED 只提供最近三年 |
 | S5FI、S5TW | TradingView 导出数据，其次手工录入 | 没有免费接口 |
 
-所有数据都**截断到基准日（含）**，快照构建后会断言没有晚于基准日的数据。
+所有数据由 `data build` 整理为 `data/market/` 下的市场数据集（每个序列一个 CSV，提交 git），**评分只读这里**；接口缓存 `data/cache/` 只作为其输入。所有数据都**截断到基准日（含）**，快照构建后会断言没有晚于基准日的数据。存储架构见 `docs/decisions/0001-数据存储架构.md`。
 
 ## 4. 常用命令
 
@@ -66,13 +72,19 @@ uv run market-risk samples --year 2026
 
 `dates` 列出 T−5、T−20、20日窗口、O1/O6、T−45、结果窗口、休市日；`samples` 按 SOP 9.2 列出每月样本日期。
 
-### 4.2 下载并核对数据
+### 4.2 生成市场数据集、下载并核对数据
+
+```bash
+uv run market-risk data build
+```
+
+按需下载全部历史（缓存在 `data/cache/`，不提交 git），生成 `data/market/` 与 `manifest.json`。`--offline` 只用现有缓存；历史数值被修订时列出清单（`reports/market_data_revisions.md`）、不自动覆盖，确认后加 `--accept-revisions`。
 
 ```bash
 uv run market-risk fetch --date 2025-11-28
 ```
 
-加 `--refresh` 忽略缓存重新下载。缓存在 `data/cache/`（不提交 git）。
+数据集未覆盖基准日时先运行 data build；并为该基准日取得 OAS 的 ALFRED 版本（正式样本用），然后显示核对摘要。加 `--refresh` 忽略缓存重新下载。
 
 ### 4.3 评分（回测）
 
@@ -82,7 +94,8 @@ uv run market-risk fetch --date 2025-11-28
 uv run market-risk score --date 2025-11-28 --s5fi 58.44 --s5tw 76.73
 ```
 
-- 传入的广度读数会写入 `data/manual/breadth.csv`；已有 TradingView 数据时可不传。
+- `score` 只读 `data/market/`；数据集未覆盖基准日时报错，先运行 `fetch --date`。
+- 传入的广度读数会写入 `data/manual/breadth.csv`，并离线更新数据集的 S5FI、S5TW；已有 TradingView 数据时可不传。
 - 规则需要 5 日前读数时（例如 L<40%），加 `--s5fi-t5 X --s5tw-t5 Y`；缺少时程序按待补处理，并提示"需要补录 YYYY-MM-DD 的 S5FI、S5TW 读数"。
 
 ### 4.4 评分（每日前瞻）
@@ -99,7 +112,7 @@ uv run market-risk score --mode daily --s5fi 55.1 --s5tw 60.2
 uv run market-risk validate
 ```
 
-用 `tests/fixtures/` 中的离线数据，把样本1至4的程序值与截图读数逐项比对（价格与均线容差 0.02，其余完全一致）。
+用 `tests/fixtures/` 中的离线数据，把样本1至4的程序值与截图读数逐项比对（价格与均线容差 0.02，其余完全一致）；已有 `data/market/` 时，另用数据集对同一样本重新计分并逐项比对。
 
 ### 4.6 TradingView 导出数据
 
@@ -178,6 +191,14 @@ uv run market-risk rebuild-db
 ```
 
 ```bash
+uv run market-risk db export-sql
+```
+
+```bash
+uv run --extra mysql market-risk db verify-mysql
+```
+
+```bash
 uv run market-risk stats --from 2025-08-01 --to 2026-09-30
 ```
 
@@ -202,7 +223,7 @@ uv run market-risk stats --from 2025-08-01 --to 2026-09-30
 
 同一基准日的 `official.json` 指向正式记录。
 
-数据库默认为 `db/market_risk.sqlite`（SQLite，WAL 模式），可随时由文件重建（`rebuild-db`）。连接地址可用 `.env` 的 `DATABASE_URL` 或 `settings.yaml` 的 `database.url` 更换；访问统一经 SQLAlchemy，表结构由 Alembic 迁移管理（`migrations/`），详见 STORAGE.md 4.1。
+数据库默认为 `db/market_risk.sqlite`（SQLite，WAL 模式），可随时由文件重建（`rebuild-db`）。连接地址可用 `.env` 的 `DATABASE_URL` 或 `settings.yaml` 的 `database.url` 更换；访问统一经 SQLAlchemy，表结构由 Alembic 迁移管理（`migrations/`），详见 STORAGE.md 4.1。数据库只存分析结果与索引（另有由 YAML 生成的参考表：标的登记、休市日历、裁定日期表），市场时间序列在 `data/market/`。`db/sql/` 下的 SQL 文件由 `db export-sql` 导出，不得手工修改（STORAGE 4.2）；MySQL 为已验证的备选（`db verify-mysql`，STORAGE 4.3）。
 
 ## 6. 与截图方式的差异
 

@@ -482,3 +482,36 @@ def stats(
     report = services.run_stats(_ctx(), framework, _opt_date(start), _opt_date(end))
     typer.echo(report.text)
     typer.echo(f"已写入 {report.markdown_path} 与 {report.workbook_path}")
+
+
+@db_app.command("export-sql")
+def db_export_sql() -> None:
+    """导出 db/sql/ 下的 SQL 文件（表结构由 Alembic 最新版本导出，参考表由 YAML 生成；不得手工修改）。"""
+    for p in _call(services.db_export_sql, _ctx()):
+        typer.echo(f"已写出 {p}")
+
+
+def format_verify(report: Any) -> str:
+    lines = [f"数据库：{report.dialect}；Alembic 版本：{report.alembic_version}"]
+    lines += [f"{k}：{v}" for k, v in report.settings.items()]
+    rows = [[t.table, str(t.sqlite_rows), str(t.target_rows), "一致" if t.equal else "不一致"] for t in report.tables]
+    lines.append(_table(["表", "SQLite 行数", "目标库行数", "结果"], rows))
+    for t in report.tables:
+        lines += [f"  {t.table} 差异示例：{s}" for s in t.samples]
+    if report.exported_sql_ok is not None:
+        lines.append("导出的 SQL（01_schema、02_base_data）建库：" + ("通过" if report.exported_sql_ok else "不通过"))
+        lines += [f"  {n}" for n in report.exported_sql_notes]
+    lines.append("结论：" + ("与 SQLite 逐表逐行一致" if report.ok else "存在差异"))
+    return "\n".join(lines)
+
+
+@db_app.command("verify-mysql")
+def db_verify_mysql() -> None:
+    """在 .env 的 MYSQL_VERIFY_URL（专用、可清空的库）上执行迁移与 rebuild-db，与 SQLite 逐表逐行比对。"""
+    report = _call(services.db_verify_mysql, _ctx())
+    if report is None:
+        typer.echo("未设置 MYSQL_VERIFY_URL，跳过 MySQL 兼容性验证。")
+        return
+    typer.echo(format_verify(report))
+    if not report.ok:
+        raise typer.Exit(code=1)

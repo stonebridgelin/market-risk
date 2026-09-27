@@ -6,7 +6,7 @@
 
 ## 1. 设计原则
 
-1. **四类数据分开存放**：可重新下载的缓存、人工录入与收集的资料、程序分析结果、统计汇总。
+1. **数据按性质分三处存放**（2026-09-27，`docs/decisions/0001-数据存储架构.md`）：原始资料（原始文件，提交 git）；市场数据（`data/market/`，整理后的 CSV，每个序列一个文件，提交 git，**评分与逐日回测一律从这里读取**）；分析结果（SQLite，不提交，可重建）。可重新下载的接口缓存（`data/cache/`）只作为生成市场数据的输入，不提交。
 2. **分析结果按"对象 → 框架 → 年份 → 日期"分类**。对象是 `MARKET`（大盘）或股票代码（如 `NVDA`）；框架是 `risk_scoring`（确认型风险评分），以后加入 `overheat`（过热预警）、`bottom`（底部信号）或单只股票的分析框架。
 3. **每次运行都保留，不覆盖**。同一个基准日可以运行多次（例如修正数据后重算），每次一个独立目录，并用指针文件标明哪一次是正式记录。
 4. **保存当次实际使用的数据**。FRED 等数据源会修订历史数值，缓存也可能被刷新，所以每次运行都要把参与计算的数据另存一份，保证日后能复现当时的结果。
@@ -20,11 +20,17 @@
 ```
 market-risk/
 ├── data/
-│   ├── cache/                          # 可重新下载的接口缓存，不提交 git
+│   ├── cache/                          # 可重新下载的接口缓存，不提交 git；只作为 data build 的输入
 │   │   ├── yahoo/
 │   │   ├── fred/
 │   │   ├── treasury/
-│   │   └── cboe/
+│   │   ├── cboe/
+│   │   └── tiingo/                     # 只用于 tv crosscheck 的第三方核对
+│   ├── market/                         # 市场数据集（评分输入），由 data build 生成，提交 git
+│   │   ├── daily/<序列>.csv            # SPY/QQQ/RSP/HYG/LQD、VIXCLS、VIX_CBOE、BAMLH0A0HYM2、UST10Y、S5FI、S5TW
+│   │   ├── vintage/<序列>_<基准日>.csv # ALFRED 基准日版本（只为正式样本生成）
+│   │   ├── manifest.json               # 来源、下载时间、行数、起止日期、sha256
+│   │   └── README.md
 │   ├── legacy/                         # 截图时代的历史记录，提交 git
 │   │   └── backtest_record_legacy.xlsx # 样本1至4（import-legacy 的输入）
 │   ├── manual/                         # 人工录入的数据，提交 git
@@ -73,15 +79,19 @@ market-risk/
 │           └── <框架名>/
 │               └── 2026/2026-09-25/run_.../
 ├── db/
-│   └── market_risk.sqlite              # 统计用数据库，不提交 git（可由 results/ 重建）
+│   ├── market_risk.sqlite              # 统计用数据库，不提交 git（可由文件重建）
+│   └── sql/                            # 由 db export-sql 导出的 SQL（表结构、参考表），提交 git，不得手工修改
 ├── reports/                            # 统计汇总与导出，提交 git
 │   ├── backtest_history.xlsx           # 样本汇总表（格式同现有 Excel）
 │   ├── backtest_stats.md               # 第9.4节指标统计
 │   ├── tradingview_crosscheck.md       # TradingView 与接口数据的交叉校验
 │   └── daily/                          # 前瞻逐日汇总（按月一个文件）
 │       └── 2026-10.csv
-└── config/
-    └── symbols.yaml                    # 标的登记表（docs/TRADINGVIEW.md 第4节）
+├── config/
+│   ├── symbols.yaml                    # 标的登记表（docs/TRADINGVIEW.md 第4节）
+│   ├── holidays.yaml                   # 休市日历
+│   └── data_decisions.yaml             # 已裁定日期表
+└── docs/decisions/                     # 架构决策记录（如 0001-数据存储架构.md）
 ```
 
 命名规则：
@@ -98,7 +108,7 @@ market-risk/
 - **自动设定**：某个基准日第一次运行时，同时满足以下条件才自动设为正式记录，且 `reviewed=false`：
   1. 该对象、框架、基准日尚无正式记录；
   2. 运行状态为 `complete` 或 `pending`（`failed` 不设）；
-  3. git 工作区干净（无未提交的修改）。口径（2026-09-27 确认）：排除 `results/`、`reports/`、`data/`、`db/`（数据与输出，否则每次运行后工作区都会变"脏"）；其余全部纳入检查，**特别是 `docs/SOP.md` 和 `templates/`**——prompt 的规则全文与格式来自这两处，它们有未提交的修改时不自动设定。代码、`config/`、`migrations/` 同样纳入检查。
+  3. git 工作区干净（无未提交的修改）。口径（2026-09-27 确认）：排除 `results/`、`reports/`、`data/`、`db/`（数据与输出，否则每次运行后工作区都会变"脏"），**但 `data/market/` 例外、纳入检查**（它是计分输入；2026-09-27 第二次确认）；其余全部纳入检查，**特别是 `docs/SOP.md` 和 `templates/`**——prompt 的规则全文与格式来自这两处，它们有未提交的修改时不自动设定。代码、`config/`、`migrations/` 同样纳入检查。
   否则不自动设定，并在命令行提示。
 - 之后再运行只新增运行目录，不改变正式记录；更换正式记录必须用 `official set` 手动指定（手动指定后 `reviewed=false`，需要重新确认）。
 - `official confirm` 把当前正式记录设为 `reviewed=true`。
@@ -115,7 +125,8 @@ market-risk/
 - `rule_versions`（如 `["v2-M", "v3-R1"]`）
 - `git_commit`，以及工作区是否有未提交的修改（有则警告）
 - 配置开关与口径的取值（如 `oas.revision_check`、三环节 d1 范围）
-- 每个数据源的来源 URL、下载时间、数据截止日期
+- 每个数据源的来源 URL、下载时间、数据截止日期（从数据集读取时为 `data/market/` 中的文件）
+- `market_manifest_sha256`：`data/market/manifest.json` 的 sha256，作为数据集版本
 - `data_source_type`：`api`（程序获取）或 `screenshot`（历史上的截图方式，用于导入样本1至4）
 - 运行状态：`complete` / `pending`（有待补维度）/ `failed`
 
@@ -135,9 +146,13 @@ market-risk/
 | `outcomes` | 风险事件标签（见第5节） |
 | `materials` | 资料索引：对象、日期、类型、文件路径、来源、说明 |
 | `reviews` | ChatGPT / Claude / 本人的复核结论，以及与程序结果的差异 |
+| `symbols` | 参考表：标的登记（由 `config/symbols.yaml` 生成） |
+| `market_holidays` | 参考表：股市、债市的休市日与提前收盘日，含注释（由 `config/holidays.yaml` 生成） |
+| `data_decisions` | 参考表：已裁定日期表（由 `config/data_decisions.yaml` 生成） |
 
 要求：
-- 数据库可以随时由 `results/`、`data/manual/`、`data/materials/` 重建（提供命令 `rebuild-db`）。
+- 数据库**只存分析结果与索引**：运行记录、分数、指标、结果标签、资料索引、复核记录，以及以后逐日回测的结果；另有三张参考表（YAML 仍为源头，供以后前端与统计查询使用）。**市场时间序列不存入数据库**（在 `data/market/`）。
+- 数据库可以随时由 `results/`、`data/manual/`、`data/materials/`、`config/` 重建（提供命令 `rebuild-db`；参考表在重建时由 YAML 写入）。
 - 同一对象、框架、基准日只能有一个正式记录（`is_official`）。实现：`officials` 表以（对象, 框架, 基准日）为复合主键。
 
 ### 4.1 数据库约定（2026-09-27 确认，为以后接 Vue 前端和更换数据库做准备）
@@ -149,6 +164,21 @@ market-risk/
 5. SQLite 开启 **WAL 模式**（并开启外键约束），只在连接 SQLite 时设置。
 6. 说明：SQLite 没有原生 DECIMAL，`Numeric(20, 8)` 在 SQLite 中按数值存储、读出时还原为 Decimal；换用 PostgreSQL 等数据库后为精确小数。`alembic.ini` 只含 ASCII 字符（Windows 上 Alembic 按系统编码读取该文件）；程序内部运行迁移时不读取该文件。
 7. 改造验证（2026-09-27）：改为 SQLAlchemy 后运行 `rebuild-db`，与改造前的 8 张表逐行比对，内容全部一致（仅"全部样本"类复核记录的日期由空字符串改为 NULL）；新增 `officials` 表 4 行。
+8. 选型（2026-09-27，`docs/decisions/0001-数据存储架构.md`）：继续使用 SQLite；MySQL 为已验证的备选，部署到服务器或多客户端访问时只需修改 `DATABASE_URL`。
+
+### 4.2 `db/sql/`（由程序导出，提交 git）
+
+- `01_schema_sqlite.sql`、`01_schema_mysql.sql`：由当前 Alembic 最新版本的表结构导出（导出前核对 `schema.py` 与迁移结果一致），含 `alembic_version`；
+- `02_base_data.sql`：参考表的 INSERT 语句，由 YAML 生成，两种数据库都可执行；
+- `README.md`：具体数据不导出 SQL（分别在 `data/market/`、`data/manual/`、`data/materials/`、`results/`），以及如何用 `rebuild-db` 重建。
+- 命令 `market-risk db export-sql`；测试保证表结构或 YAML 变化后已重新导出。SQL 文件中不得包含任何账户、密码或本机路径；不含生成时间。
+
+### 4.3 MySQL 兼容性验证
+
+- 命令 `market-risk db verify-mysql`（需 `uv sync --extra mysql` 安装 pymysql）：连接地址从 `.env` 的 `MYSQL_VERIFY_URL` 读取，未设置时跳过、不报错；**地址、账户、密码不得输出到任何文件、日志或汇报**，错误信息脱敏。
+- 验证库必须专用：库中只允许本项目的表，否则拒绝清空。
+- 流程：在验证库上执行 Alembic 迁移与 `rebuild-db`，与临时 SQLite 的 `rebuild-db` 逐表逐行比对（小数按数值、布尔、日期规范化后比较）；再用 `db/sql/` 的 SQL 建库核对参考表；报告字符集（utf8mb4）、排序规则与大小写敏感性。
+- 集成测试 `tests/test_dbsql.py::test_mysql_compatibility`，默认跳过（`uv run --extra mysql pytest -m mysql`）。
 
 ---
 

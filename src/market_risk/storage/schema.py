@@ -145,4 +145,42 @@ reviews = Table(
     Column("created_at", String(40)),
 )
 
-TABLES = (runs, officials, dimension_scores, totals, metrics, near_threshold, outcomes, materials, reviews)
+# ---- 参考表（迁移 0004）：内容由 config/ 下的 YAML 生成（YAML 为源头），rebuild-db 时写入 ----
+symbols = Table(
+    "symbols", metadata,
+    Column("symbol", String(40), primary_key=True),
+    Column("tv_symbol", String(40), nullable=False, unique=True),
+    Column("name", Text),
+    Column("category", String(32)),
+    Column("usage", String(16), nullable=False),
+    Column("unit", String(16)),
+    Column("timezone", String(40)),
+    Column("calendar", String(16)),
+    Column("inception", Date),
+    Column("api_source", String(64)),
+    Column("tolerance", DECIMAL),
+    Column("crosscheck_note", Text),
+    Column("filename_aliases", Text),       # JSON 列表
+    Column("known_values", Text),           # JSON 对象 {日期: 读数}
+)
+
+market_holidays = Table(
+    "market_holidays", metadata,
+    Column("market", String(8), primary_key=True),     # stock / bond
+    Column("date", Date, primary_key=True),
+    Column("kind", String(16), primary_key=True),      # holiday / early_close
+    Column("note", Text),                              # holidays.yaml 中该日期的注释
+)
+
+data_decisions = Table(
+    "data_decisions", metadata,
+    Column("date", Date, primary_key=True),
+    Column("symbol", String(40), primary_key=True),
+    Column("decision", String(16), nullable=False),    # exclude / keep / invalid
+    Column("reason", Text),
+    Column("decided_on", Date, nullable=False),
+)
+
+TABLES = (runs, officials, dimension_scores, totals, metrics, near_threshold, outcomes, materials, reviews,
+          symbols, market_holidays, data_decisions)
+REFERENCE_TABLES = (symbols, market_holidays, data_decisions)

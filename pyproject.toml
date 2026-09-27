@@ -19,6 +19,13 @@ dependencies = [
     "alembic>=1.13",
 ]
 
+[project.optional-dependencies]
+# MySQL 兼容性验证（market-risk db verify-mysql）：uv sync --extra mysql
+mysql = [
+    "pymysql>=1.1",
+    "cryptography>=42",
+]
+
 [project.scripts]
 market-risk = "market_risk.cli:app"
 
@@ -35,9 +42,10 @@ build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-m 'not network'"
+addopts = "-m 'not network and not mysql'"
 markers = [
     "network: 需要联网的测试，默认跳过；用 `uv run pytest -m network` 运行",
+    "mysql: MySQL 兼容性集成测试，默认跳过；需 .env 的 MYSQL_VERIFY_URL，用 `uv run --extra mysql pytest -m mysql` 运行",
 ]
 
 [tool.coverage.run]

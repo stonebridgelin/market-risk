@@ -258,6 +258,15 @@ market-risk/
 
 ## 6. 数据获取（`data/`）
 
+### 6.0 市场数据集（2026-09-27，`docs/decisions/0001-数据存储架构.md`）
+- **评分与逐日回测一律从 `data/market/` 读取**，不直接读取接口缓存；接口缓存只作为 `market-risk data build` 的输入。
+- `data build` 由缓存（按需下载；`--offline` 只用现有缓存）、TradingView 清洗结果和手工录入生成 `data/market/daily/<序列>.csv` 与 `manifest.json`（来源、下载时间、行数、起止日期、sha256）。列：`date, value, source`，ETF 另含 `open, high, low, close, volume`（`value` = 不复权 Close）。
+- 起点：ETF 从上市日；VIXCLS、财政部从 1990 年；OAS 从 1996-12-31。只写入已完整收盘的交易日。
+- 精度：Yahoo 价格四舍五入到4位小数存储（计分时按两位小数读取，5.3节）；FRED、财政部、TradingView、手工录入保存来源原值。
+- 历史修订：与上一版相比已有日期的数值变化时列出修订清单（`reports/market_data_revisions.md`），**不自动覆盖**，确认后用 `--accept-revisions` 更新。判定：Yahoo 价格按4位小数、成交量按整数，其他来源按两位小数。
+- `fetch --date` = 按需更新数据集 + 该基准日的 ALFRED 版本（`data/market/vintage/`，只为正式样本：月末样本、每日前瞻运行；逐日历史回测不做版本比对）。`score` 只读数据集，未覆盖基准日时报错并提示先运行 `fetch`。
+- `validate` 另用 `data/market/` 对样本1至4重新计分，与离线样本逐项比对。
+
 ### 6.1 通用要求
 - 每次下载写入 `data/cache/`，文件名包含数据源、代码、日期范围；同时保存元数据（来源 URL、下载时间、行数）。
 - 支持 `--refresh` 强制重新下载；默认优先使用缓存。
@@ -266,7 +275,7 @@ market-risk/
 
 ### 6.2 ETF 日线（`prices.py`）
 - 标的：SPY、QQQ、RSP、HYG、LQD。
-- 下载范围：基准日往前至少 420 个自然日（保证 MA200 和三环节有足够数据）至基准日次日（yfinance 的 `end` 参数不含当天）。
+- 计分窗口：基准日往前至少 420 个自然日（保证 MA200 和三环节有足够数据）至基准日；数据从 `data/market/` 读取（`data build` 下载全部历史，yfinance 的 `end` 参数不含当天）。
 - `auto_adjust=False`，只使用 `Close`。
 - 均线：对截至基准日（含）的 `Close` 做简单移动平均；数据不足周期时报错，不得计算。
 - HYG/LQD：两者收盘价之比，保留4位小数，仅作参考。
@@ -326,8 +335,11 @@ market-risk/
 
 ```
 uv run market-risk dates   --date 2025-11-28
-uv run market-risk fetch   --date 2025-11-28 [--refresh]
-uv run market-risk score   --date 2025-11-28 --s5fi 58.44 --s5tw 76.73 [--s5fi-t5 X --s5tw-t5 Y] [--mode backtest|daily] [--refresh]
+uv run market-risk data build [--offline] [--refresh] [--accept-revisions] [--end YYYY-MM-DD]
+uv run market-risk fetch   --date 2025-11-28 [--refresh]      # 按需更新 data/market/ 并显示核对摘要
+uv run market-risk score   --date 2025-11-28 --s5fi 58.44 --s5tw 76.73 [--s5fi-t5 X --s5tw-t5 Y] [--mode backtest|daily]
+uv run market-risk db export-sql                     # 导出 db/sql/（不得手工修改）
+uv run market-risk db verify-mysql                   # MySQL 兼容性验证（.env 的 MYSQL_VERIFY_URL）
 uv run market-risk validate                          # 用 tests/fixtures 中的历史样本比对程序值与截图值
 uv run market-risk samples --year 2026               # 按 SOP 9.2 列出每月最后一个周五（休市则取当月最后一个交易日）
 ```

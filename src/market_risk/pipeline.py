@@ -91,7 +91,8 @@ def run_scoring(
 
         meta["market_manifest_sha256"] = manifest_sha256(paths)
     if git.dirty:
-        meta["warnings"] = ["git 工作区有未提交的修改，结果对应的代码版本不完全等于 git_commit"]
+        meta["warnings"] = ["git 工作区（代码、配置或 data/market/）有未提交的修改，"
+                            "结果对应的版本不完全等于 git_commit"]
     try:
         snapshot = build_snapshot(
             raw, settings.scored_symbols, tuple(settings.reference_symbols[:2]), holidays  # type: ignore[arg-type]

@@ -8,7 +8,10 @@
 
 数据库内容全部可由文件重建（rebuild）：
 results/**/run_*/ 与 official.json → runs、officials、dimension_scores、totals、metrics、near_threshold；
-data/manual/outcomes.csv → outcomes；data/materials/index.csv → materials；data/manual/reviews.csv → reviews。
+data/manual/outcomes.csv → outcomes；data/materials/index.csv → materials；data/manual/reviews.csv → reviews；
+config/symbols.yaml、holidays.yaml、data_decisions.yaml
+→ 参考表 symbols、market_holidays、data_decisions（YAML 为源头）。
+市场时间序列不存入数据库（在 data/market/）。
 """
 
 from __future__ import annotations
@@ -32,7 +35,6 @@ from market_risk.storage.paths import RUN_FILES, StoragePaths
 from market_risk.storage.runs import read_json
 
 DEFAULT_URL = "sqlite:///db/market_risk.sqlite"
-HEAD_REVISION = "0001"          # 最新迁移版本（新增迁移时同步修改）
 DIMENSION_KEYS = ("price", "breadth", "vix", "rates", "credit")
 TABLE_NAMES = tuple(t.name for t in schema.TABLES)
 _ID_COLUMNS = {"id"}
@@ -276,6 +278,57 @@ def _insert_files(conn: Connection, paths: StoragePaths) -> None:
             other_run_key=r.get("other_run_key") or None, created_at=r["created_at"]))
 
 
+def holiday_rows(holidays_path: Path) -> list[dict[str, Any]]:
+    """holidays.yaml → market_holidays 的行（含每个日期的行内注释）。"""
+    import re
+
+    from market_risk.config import load_holidays
+
+    h = load_holidays(holidays_path)
+    notes: dict[tuple[str, str, str], str] = {}
+    market = kind = ""
+    for line in holidays_path.read_text(encoding="utf-8").splitlines():
+        if re.match(r"^(stock|bond):", line):
+            market = line.split(":")[0]
+        elif m := re.match(r"^\s+(holidays|early_closes):", line):
+            kind = "holiday" if m.group(1) == "holidays" else "early_close"
+        elif m := re.match(r"^\s+-\s*(\d{4}-\d{2}-\d{2})\s*(?:#\s*(.*))?$", line):
+            if m.group(2):
+                notes[(market, kind, m.group(1))] = m.group(2).strip()
+    rows = []
+    for market, kind, dates in (("stock", "holiday", h.stock_holidays), ("stock", "early_close", h.stock_early_closes),
+                                ("bond", "holiday", h.bond_holidays), ("bond", "early_close", h.bond_early_closes)):
+        rows += [{"market": market, "date": d, "kind": kind, "note": notes.get((market, kind, d.isoformat()))}
+                 for d in sorted(dates)]
+    return rows
+
+
+def reference_rows(config_dir: Path | None = None) -> dict[str, list[dict[str, Any]]]:
+    """参考表的内容，由 config/ 下的 YAML 生成（db export-sql 与 rebuild-db 共用）。"""
+    from market_risk.config import PROJECT_ROOT, load_data_decisions, load_symbols
+
+    cfg = config_dir or PROJECT_ROOT / "config"
+    symbols = [{
+        "symbol": s.symbol, "tv_symbol": s.tv_symbol, "name": s.name, "category": s.category, "usage": s.usage,
+        "unit": s.unit, "timezone": s.timezone, "calendar": s.calendar, "inception": s.inception,
+        "api_source": s.api_source, "tolerance": _dec(s.tolerance), "crosscheck_note": s.crosscheck_note,
+        "filename_aliases": json.dumps(list(s.filename_aliases), ensure_ascii=False),
+        "known_values": json.dumps({d.isoformat(): v for d, v in sorted((s.known_values or {}).items())}),
+    } for s in sorted(load_symbols(cfg / "symbols.yaml").values(), key=lambda s: s.symbol)]
+    decisions = [{"date": d.date, "symbol": d.symbol, "decision": d.decision, "reason": d.reason,
+                  "decided_on": d.decided_on}
+                 for d in sorted(load_data_decisions(cfg / "data_decisions.yaml"), key=lambda d: (d.date, d.symbol))]
+    return {"symbols": symbols, "market_holidays": holiday_rows(cfg / "holidays.yaml"),
+            "data_decisions": decisions}
+
+
+def _insert_reference(conn: Connection, config_dir: Path | None = None) -> None:
+    rows = reference_rows(config_dir)
+    for table in schema.REFERENCE_TABLES:
+        if rows[table.name]:
+            conn.execute(table.insert(), rows[table.name])
+
+
 def rebuild(paths: StoragePaths, url: str | None = None) -> str:
     """清空并重建数据库（rebuild-db）：Alembic 迁移到最新结构后，由文件写入全部内容。返回连接地址。"""
     url = url or default_url(paths)
@@ -287,6 +340,7 @@ def rebuild(paths: StoragePaths, url: str | None = None) -> str:
             for run_dir in iter_run_dirs(paths):
                 _insert_run(conn, paths, run_dir)
             _insert_files(conn, paths)
+            _insert_reference(conn)
     finally:
         engine.dispose()
     return url

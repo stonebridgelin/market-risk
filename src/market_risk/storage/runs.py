@@ -195,7 +195,7 @@ def maybe_auto_official(
     if status not in (STATUS_COMPLETE, STATUS_PENDING):
         return False, f"运行状态为 {status}，不自动设为正式记录"
     if git.dirty is not False:
-        reason = "git 工作区有未提交的修改" if git.dirty else "无法确定 git 工作区状态"
+        reason = "git 工作区（代码、配置或 data/market/）有未提交的修改" if git.dirty else "无法确定 git 工作区状态"
         return False, f"{reason}，不自动设为正式记录"
     set_official(paths, subject, framework, base_date, run_id, "auto", reviewed=False, now=now)
     return True, "已自动设为正式记录（reviewed=false，复核后用 official confirm 确认）"

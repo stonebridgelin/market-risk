@@ -785,3 +785,36 @@ def run_stats(ctx: Context, framework: str = RISK_SCORING, start: dt.date | None
 
     text, samples = _run(ctx.paths, ctx.db_url, framework, start, end, now)
     return StatsReport(text, samples, ctx.paths.backtest_stats_md, ctx.paths.backtest_history_xlsx)
+
+
+# ---------------------------------------------------------------------------
+# 数据库：SQL 导出与 MySQL 兼容性验证（docs/decisions/0001）
+# ---------------------------------------------------------------------------
+
+
+def db_export_sql(ctx: Context) -> list[Path]:
+    """由 Alembic 最新表结构与 config/ 下的 YAML 导出 db/sql/ 的 SQL 文件。"""
+    from market_risk.storage import sql_export
+
+    try:
+        return sql_export.export_sql(ctx.paths.db_sql_dir)
+    except (sql_export.SchemaMismatchError, ValueError) as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def db_verify_mysql(ctx: Context, url: str | None = None) -> Any | None:
+    """在 MYSQL_VERIFY_URL 指向的专用库上验证兼容性；未设置时返回 None（跳过，不报错）。
+
+    连接地址不输出到任何地方；返回 mysql_verify.VerifyReport。
+    """
+    from market_risk.config import get_optional_secret
+    from market_risk.storage import mysql_verify
+
+    url = url or get_optional_secret("MYSQL_VERIFY_URL")
+    if not url:
+        return None
+    url = mysql_verify.with_driver(url)
+    try:
+        return mysql_verify.verify(ctx.paths, url, ctx.paths.db_sql_dir)
+    except mysql_verify.VerifyError as exc:
+        raise ServiceError(f"MySQL 兼容性验证失败：{exc}") from exc

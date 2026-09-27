@@ -18,4 +18,8 @@
     所有数据库读写集中在 `src/market_risk/storage/`；SQLite 开启 WAL 模式。
 12. 代码分层：`cli.py` 只负责解析参数和格式化输出，所有业务逻辑必须写在可被直接调用的函数中（主要入口在 `services.py`），
     返回数据类或可序列化为 JSON 的结构；以后的 FastAPI 接口、Vue 前端和 LangChain Agent 都将调用这些函数。
-13. 本机 git 不在 PATH 中，路径为 `C:\Execute\Git\bin`；在 PowerShell 中先执行 `$env:PATH = "C:\Execute\Git\bin;$env:PATH"`。
+13. 市场数据一律从 `data/market/` 读取（由 `market-risk data build` 生成，提交 git）；接口缓存只作为 data build 的输入，
+    评分与回测不得直接读取缓存；数据集的历史修订不得自动覆盖（docs/decisions/0001）。
+14. `db/sql/` 下的 SQL 文件由 `market-risk db export-sql` 导出，不得手工修改；表结构以 Alembic 为唯一源头。
+15. 不得在任何地方（文件、日志、报告、汇报）输出数据库密码或连接地址（如 `MYSQL_VERIFY_URL`），也不得输出 API 密钥。
+16. 本机 git 不在 PATH 中，路径为 `C:\Execute\Git\bin`；在 PowerShell 中先执行 `$env:PATH = "C:\Execute\Git\bin;$env:PATH"`。
