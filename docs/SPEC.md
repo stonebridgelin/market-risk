@@ -272,6 +272,7 @@ market-risk/
 - ALFRED 版本查询见5.6节第3条。
 - 备注：自2026年4月起 FRED 只提供 ICE 系列最近三年的观测，更早的日期取不到时要给出明确提示。
 - VIX 备用源：Cboe 官方 `VIX_History.csv` 的 `CLOSE` 列，使用规则见5.6节第7条。
+- OAS 长历史（`docs/TRADINGVIEW.md` 第6.2节）：`settings.yaml` 中 `oas.long_history_source` 取值 `none`（默认）或 `tradingview`。开启前必须先运行 `tv compare --symbol BAMLH0A0HYM2`，重叠日期数值须完全一致（两位小数），由用户决定是否开启。开启后只有 FRED API 取不到的日期才使用 TradingView 导出数据，并在 `data_notes` 中注明来源。
 
 ### 6.4 财政部收益率（`treasury.py`）
 - 数据源：财政部 Daily Treasury Par Yield Curve Rates 的年度 CSV 下载（在 home.treasury.gov 的 Interest Rate Statistics 页面，按年份导出 CSV）。请先确认当前可用的下载 URL 格式，并在代码注释中写明。
@@ -280,7 +281,11 @@ market-risk/
 - 用 `docs/SOP.md` 附录A的2025年8月至12月数值做一致性测试。
 
 ### 6.5 广度（`breadth.py`）
-- 没有免费接口，采用手工录入：`data/manual/breadth.csv`，列为 `date,s5fi,s5tw,note`。
+- 读取顺序（`docs/TRADINGVIEW.md` 第6.1节）：
+  1. TradingView 导出数据（`data/processed/tradingview/S5FI.csv`、`S5TW.csv`）；
+  2. 手工录入的 `data/manual/breadth.csv`（导出日之后的新日期）。
+  两个来源在同一日期都有数值但不一致时，在 `data_notes` 中报告差异，以 TradingView 导出数据为准。
+- 没有免费接口；TradingView 未覆盖的日期采用手工录入：`data/manual/breadth.csv`，列为 `date,s5fi,s5tw,note`。
 - 命令行也可直接传入（见第8节），传入值会同时写入该 CSV。
 - 读取时校验：数值在 0–100 之间；同一日期不能有两条记录。
 

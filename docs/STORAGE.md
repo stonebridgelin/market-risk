@@ -1,6 +1,6 @@
 # market-risk 数据与结果存储设计（SPEC 补充）
 
-> 放在 `docs/STORAGE.md`。本文件补充并替代 `docs/SPEC.md` 第3节中 `data/`、`output/` 的目录设计，以及第7节的输出位置。其他内容不变。
+> 放在 `docs/STORAGE.md`。TradingView 导出数据的目录见 `docs/TRADINGVIEW.md` 第2节（已同步到下方第2节）。本文件补充并替代 `docs/SPEC.md` 第3节中 `data/`、`output/` 的目录设计，以及第7节的输出位置。其他内容不变。
 
 ---
 
@@ -29,7 +29,12 @@ market-risk/
 │   │   └── backtest_record_legacy.xlsx # 样本1至4（import-legacy 的输入）
 │   ├── manual/                         # 人工录入的数据，提交 git
 │   │   ├── breadth.csv                 # date,s5fi,s5tw,note（每个交易日一行）
-│   │   └── outcomes.csv                # 风险事件标签（见第5节）
+│   │   ├── outcomes.csv                # 风险事件标签（见第5节）
+│   │   └── tradingview/                # TradingView 导出数据（docs/TRADINGVIEW.md）
+│   │       ├── raw/<导出日期>/         # 原始导出文件，只读，保留默认文件名
+│   │       └── manifest.csv            # 每个原始文件一行（含 sha256、校验结果）
+│   ├── processed/                      # 由原始数据重建的清洗结果，不提交 git
+│   │   └── tradingview/<标的>.csv      # date,open,high,low,close,volume,extra_*,source_file
 │   └── materials/                      # 待分析资料，按对象和日期分类，提交 git（大文件除外）
 │       ├── MARKET/
 │       │   └── 2025/
@@ -69,11 +74,14 @@ market-risk/
 │               └── 2026/2026-09-25/run_.../
 ├── db/
 │   └── market_risk.sqlite              # 统计用数据库，不提交 git（可由 results/ 重建）
-└── reports/                            # 统计汇总与导出，提交 git
-    ├── backtest_history.xlsx           # 样本汇总表（格式同现有 Excel）
-    ├── backtest_stats.md               # 第9.4节指标统计
-    └── daily/                          # 前瞻逐日汇总（按月一个文件）
-        └── 2026-10.csv
+├── reports/                            # 统计汇总与导出，提交 git
+│   ├── backtest_history.xlsx           # 样本汇总表（格式同现有 Excel）
+│   ├── backtest_stats.md               # 第9.4节指标统计
+│   ├── tradingview_crosscheck.md       # TradingView 与接口数据的交叉校验
+│   └── daily/                          # 前瞻逐日汇总（按月一个文件）
+│       └── 2026-10.csv
+└── config/
+    └── symbols.yaml                    # 标的登记表（docs/TRADINGVIEW.md 第4节）
 ```
 
 命名规则：

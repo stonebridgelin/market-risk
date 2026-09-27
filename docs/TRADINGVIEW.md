@@ -79,6 +79,10 @@ config/
 
 其他标的（ETF、VIX、OAS、其他广度指标等）按实际导出情况补充，`usage` 分别为 `crosscheck` 或 `reference`。ETF 的已知收盘价可取自 SPEC 第9节的回归样本。
 
+- （2026-09-26 确认）`known_values` 只登记截图读数。SOP 10.1 样本2备注中"前一日S5TW为37.97%"（2025-09-25）**不登记**为 known_values。
+- （实现补充）`timezone`（默认 `America/New_York`）、`calendar`（`nyse` / `bond` / `none`）、`inception`、`filename_aliases`、`api_source`（交叉校验用的接口数据，如 `yahoo:SPY`、`fred:BAMLH0A0HYM2`）、`tolerance`（交叉校验容差）为可选字段。
+- 导出文件的交易所前缀与登记不同时（例如登记 `AMEX:SPY`、导出为 `BATS_SPY`），若代码部分只对应一个已登记标的，按该标的处理并在说明中注明。
+
 ---
 
 ## 5. 导入与清洗（`src/market_risk/data/tradingview.py`）
