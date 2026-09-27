@@ -123,3 +123,27 @@
   category: rates
   usage: reference
   unit: percent
+
+# ---- reference：只保存，不参与计算（2026-09-26 导出）----
+- symbol: S5TH
+  tv_symbol: INDEX:S5TH
+  name: 标普500成分股站上200日均线比例
+  category: breadth
+  usage: reference
+  unit: percent
+  inception: 2008-01-15   # TradingView 导出的最早日期
+- symbol: S5OH
+  tv_symbol: INDEX:S5OH
+  name: 标普500成分股站上100日均线比例
+  category: breadth
+  usage: reference
+  unit: percent
+  inception: 2008-08-05   # TradingView 导出的最早日期
+- symbol: BAMLC0A0CM
+  tv_symbol: FRED:BAMLC0A0CM
+  name: ICE BofA 美国投资级公司债 OAS
+  category: credit
+  usage: reference
+  unit: percent
+  calendar: bond
+  inception: 1996-12-31   # FRED 序列起点
