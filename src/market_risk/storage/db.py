@@ -248,16 +248,18 @@ def _insert_run(conn: Connection, paths: StoragePaths, run_dir: Path) -> None:
 
 
 def _insert_files(conn: Connection, paths: StoragePaths) -> None:
-    for r in _csv_rows(paths.outcomes_csv):
+    from market_risk.outcomes import compat_row
+
+    for r in map(compat_row, _csv_rows(paths.outcomes_csv)):
         values: dict[str, Any] = {
             "subject": r["subject"], "base_date": _date(r["base_date"]), "source": r["source"],
             "window_start": _date(r["window_start"]), "window_end": _date(r["window_end"]),
-            "spx_min_close_drawdown": _dec(r["spx_min_close_drawdown"]),
-            "qqq_min_close_drawdown": _dec(r["qqq_min_close_drawdown"]),
+            "spx_drawdown_from_base": _dec(r["spx_drawdown_from_base"]),
+            "qqq_drawdown_from_base": _dec(r["qqq_drawdown_from_base"]),
             "is_event": bool(_yes(r["is_event"])), "event_date": _date(r.get("event_date")),
             "entered_at": r["entered_at"],
         }
-        for col in ("spx_max_drawdown", "qqq_max_drawdown"):
+        for col in ("spx_peak_to_trough_drawdown", "qqq_peak_to_trough_drawdown"):
             if col in schema.outcomes.c:
                 values[col] = _dec(r.get(col))
         if "near_event" in schema.outcomes.c:

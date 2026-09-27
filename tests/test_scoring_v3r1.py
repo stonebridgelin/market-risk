@@ -169,3 +169,40 @@ def test_2025_09_02_credit():
                               oas_vintage=None)
     d = v3r1.score_credit(build_snapshot(raw))
     assert d.score == 0 and "ΔOAS=100×(O1−O6)=-6bp" in d.calculation
+
+
+# ---------------------------------------------------------------------------
+# OAS 长历史中缺失的两个股市交易日（2013-08-30、2015-01-16，长周末前债市提前收盘）
+# ---------------------------------------------------------------------------
+
+
+def _gap_snapshot(base, treasury_holidays, oas_overrides):
+    from conftest import synthetic_raw
+
+    raw = synthetic_raw(base, treasury_overrides=dict.fromkeys(treasury_holidays),
+                        oas_overrides=oas_overrides)
+    return build_snapshot(raw)
+
+
+def test_oas_gap_2013_08_30_as_o1():
+    """基准日 2013-09-03：v3-R1 的 O1 为 2013-08-30（债市营业日），OAS 缺失 → 待补：数据滞后。"""
+    snap = _gap_snapshot(D(2013, 9, 3), [D(2013, 9, 2)], {D(2013, 8, 30): None})
+    assert snap.refs.oas_o1 == D(2013, 8, 30)
+    d = v3r1.score_credit(snap)
+    assert d.score is None and d.pending_reason == "待补：数据滞后"
+    # v2-M：O1 取最新有数值观测 08-29，滞后 2 个股票交易日 → 最高1分
+    assert snap.refs.oas_o1_v2m == D(2013, 8, 29) and snap.refs.o1_v2m_lag_stock_days == 2
+    assert max(v2m.score_credit(snap).possible_scores) <= 1
+
+
+def test_oas_gap_2015_01_16_as_o6():
+    """基准日 2015-01-27：v3-R1 的 O6 为 2015-01-16，OAS 缺失。
+    O1<4.00% 时记待补；O1≥4.00% 时按 SOP 7.3"此时无需 O6"给2分（2015-01-26 实际 O1=5.26%）。"""
+    low = _gap_snapshot(D(2015, 1, 27), [D(2015, 1, 19)], {D(2015, 1, 16): None, D(2015, 1, 26): 3.50})
+    assert (low.refs.oas_o1, low.refs.oas_o6_v3r1) == (D(2015, 1, 26), D(2015, 1, 16))
+    d = v3r1.score_credit(low)
+    assert d.score is None and d.possible_scores == (0, 1, 2)
+    high = _gap_snapshot(D(2015, 1, 27), [D(2015, 1, 19)], {D(2015, 1, 16): None, D(2015, 1, 26): 5.26})
+    assert v3r1.score_credit(high).score == 2
+    # v2-M 只数有数值的观测：O6 顺延到 01-15，信用可确定
+    assert low.refs.oas_o6_v2m == D(2015, 1, 15) and v2m.score_credit(low).score is not None

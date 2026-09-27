@@ -154,7 +154,8 @@ market-risk/
 
 ## 5. 风险事件标签的隔离
 
-- 标签单独存放在 `data/manual/outcomes.csv` 和数据库 `outcomes` 表。字段：`subject`、`base_date`、`window_start`、`window_end`、`spx_min_close_drawdown`、`qqq_min_close_drawdown`、`is_event`、`source`（`manual` / `computed`）、`entered_at`。
+- 标签单独存放在 `data/manual/outcomes.csv` 和数据库 `outcomes` 表。字段：`subject`、`base_date`、`window_start`、`window_end`、`spx_drawdown_from_base`、`qqq_drawdown_from_base`（基准日口径，风险事件按此判断）、`is_event`、`event_date`、`spx_peak_to_trough_drawdown`、`qqq_peak_to_trough_drawdown`（峰谷回撤，参考）、`near_event`（接近事件，参考）、`source`（`manual` / `computed`）、`entered_at`。字段口径见 SOP 9.3。
+- 字段名于 2026-09-27 由 `*_min_close_drawdown` / `*_max_drawdown` 改为上述名称（Alembic 迁移 0003）；读取旧 CSV 时兼容旧列名。
 - 可以由程序在结果窗口结束后自动计算（只用收盘价，按 SOP 9.3），也可以人工录入；两者不一致时报告差异。
 - **隔离要求**：`scoring/`、`report.py` 中生成 prompt 的部分、`data/snapshot.py` 都不得读取 `outcomes`。写一个测试：扫描这些模块的导入和文件读取，确认不引用标签文件和标签表。
 - 结果窗口尚未结束时，不得计算标签。
@@ -212,7 +213,7 @@ uv run market-risk rebuild-db
 
 - 数据库的每张表都由文件重建：`reviews` 来自 `data/manual/reviews.csv`，`materials` 来自 `data/materials/index.csv`，`metrics` 来自运行目录的 `metrics.json`（没有时由 `snapshot.json` 计算）。
 - 运行目录另有 `metrics.json`（扁平数值指标）；import-legacy 的运行目录另有 `legacy.json`（Excel 中该样本的原始单元格），`data_source_type=screenshot`，`meta.json` 的 `legacy.sha256` 用于防止重复导入。
-- `outcomes.csv` 在第5节字段之外增加 `event_date`（首次达到门槛的日期），用于计算"命中样本的提前量"。同一样本同时有手工与程序标签时，统计以手工标签为准。
+- `outcomes.csv` 的 `event_date` 为首次达到门槛的日期，用于计算"命中样本的提前量"。同一样本同时有手工与程序标签时，统计以手工标签为准。
 - 命令补充：`outcome add --date --spx --qqq [--event-date]`（人工录入标签）。
 - 统计中的 95% 区间按 Newcombe 方法（独立样本近似）计算，仅供参考；样本量不足时结论固定为"不确定"。
 - 标签隔离：评分所用的指标提取放在不读取标签的 `metrics.py`；`scoring/`、`report.py`、`data/snapshot.py`、prompt 模板由测试扫描，确认不引用标签。

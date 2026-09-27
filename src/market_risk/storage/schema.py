@@ -108,14 +108,14 @@ outcomes = Table(
     Column("source", String(16), primary_key=True),
     Column("window_start", Date, nullable=False),
     Column("window_end", Date, nullable=False),
-    Column("spx_min_close_drawdown", DECIMAL),
-    Column("qqq_min_close_drawdown", DECIMAL),
+    Column("spx_drawdown_from_base", DECIMAL),
+    Column("qqq_drawdown_from_base", DECIMAL),
     Column("is_event", Boolean, nullable=False),
     Column("event_date", Date),
     Column("entered_at", String(40)),
-    # 迁移 0002：辅助字段（仅作参考，不改变 is_event）
-    Column("spx_max_drawdown", DECIMAL),
-    Column("qqq_max_drawdown", DECIMAL),
+    # 迁移 0002 增加、0003 改名：峰谷回撤与接近事件（仅作参考，不改变 is_event）
+    Column("spx_peak_to_trough_drawdown", DECIMAL),
+    Column("qqq_peak_to_trough_drawdown", DECIMAL),
     Column("near_event", Boolean),
 )
 

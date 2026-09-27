@@ -224,10 +224,10 @@ def render_markdown(samples: list[Sample], stats: dict[str, VersionStats], gener
     else:
         lines.append("所有样本两个版本的各维度分数相同。")
     lines += ["", "## 样本明细", "",
-              "最低收盘跌幅：以基准日收盘价为起点（风险事件口径）；最大收盘跌幅：窗口内最高收盘价到其后最低收盘价（辅助）。",
+              "基准日口径跌幅（drawdown_from_base，风险事件与接近事件口径）；峰谷回撤（peak_to_trough_drawdown，峰值起点包含基准日，仅作参考）。",
               "",
               "| 基准日 | 来源 | 已复核 | v2-M 总分 | v2-M 预警 | v3-R1 总分 | v3-R1 预警 | 风险事件 | "
-              "标普500 最低/最大收盘跌幅 | QQQ 最低/最大收盘跌幅 | 接近事件 |",
+              "标普500 基准日口径/峰谷回撤 | QQQ 基准日口径/峰谷回撤 | 接近事件 |",
               "|---|---|---|---|---|---|---|---|---|---|---|"]
     for s in samples:
         t2, t3 = s.totals.get("v2-M", {}), s.totals.get("v3-R1", {})
@@ -237,8 +237,8 @@ def render_markdown(samples: list[Sample], stats: dict[str, VersionStats], gener
 
         o = s.outcome
         ev = "-" if o is None else ("是" if o.is_event else "否")
-        spx = "-" if o is None else f"{o.spx_min_close_drawdown:.2f}% / {_pct(o.spx_max_drawdown)}"
-        qqq = "-" if o is None else f"{o.qqq_min_close_drawdown:.2f}% / {_pct(o.qqq_max_drawdown)}"
+        spx = "-" if o is None else f"{o.spx_drawdown_from_base:.2f}% / {_pct(o.spx_peak_to_trough_drawdown)}"
+        qqq = "-" if o is None else f"{o.qqq_drawdown_from_base:.2f}% / {_pct(o.qqq_peak_to_trough_drawdown)}"
         near = "-" if o is None else ("是" if o.near_event else "否")
         lines.append(f"| {s.base_date} | {'截图' if s.data_source_type == 'screenshot' else '程序'} | "
                      f"{'是' if s.reviewed else '否'} | {tot(t2)} | {t2.get('alert')} | {tot(t3)} | "
@@ -250,7 +250,7 @@ HISTORY_HEADERS = ["序号", "基准日", "星期", "状态", "v2-M 价格", "v2
                    "v2-M 总分", "v2-M 阶段", "v2-M 明确恶化", "v3-R1 价格", "v3-R1 广度", "v3-R1 VIX", "v3-R1 利率",
                    "v3-R1 信用", "v3-R1 总分", "v3-R1 阶段", "v3-R1 明确恶化", "预警(总分≥3)", "结果窗口",
                    "风险事件(是/否)", "贴近门槛的读数", "Remark：参数变化与数据问题", "数据来源",
-                   "标普500最低收盘跌幅(%)", "QQQ最低收盘跌幅(%)", "标普500最大收盘跌幅(%)", "QQQ最大收盘跌幅(%)",
+                   "标普500基准日口径跌幅(%)", "QQQ基准日口径跌幅(%)", "标普500峰谷回撤(%)", "QQQ峰谷回撤(%)",
                    "接近事件(仅参考)"]
 
 
@@ -284,8 +284,8 @@ def write_history_xlsx(path: Path, samples: list[Sample], url: str) -> None:
         values.append("；".join(notes))
         values.append("截图" if s.data_source_type == "screenshot" else "程序")
         o = s.outcome
-        values += ([o.spx_min_close_drawdown, o.qqq_min_close_drawdown, o.spx_max_drawdown, o.qqq_max_drawdown,
-                    "是" if o.near_event else "否"] if o is not None else [None] * 5)
+        values += ([o.spx_drawdown_from_base, o.qqq_drawdown_from_base, o.spx_peak_to_trough_drawdown,
+                    o.qqq_peak_to_trough_drawdown, "是" if o.near_event else "否"] if o is not None else [None] * 5)
         for c, v in enumerate(values, start=1):
             ws.cell(r, c, v)
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -12,7 +12,7 @@ import pytest
 from conftest import load_sample_raw
 
 from market_risk import services
-from market_risk.config import load_settings
+from market_risk.config import load_settings, load_symbols
 from market_risk.models import BreadthReading
 from market_risk.storage import db, runs
 
@@ -110,7 +110,8 @@ def test_tv_services_with_injected_loader(ctx):
     raw_dir = ctx.paths.tv_raw_dir(D(2026, 9, 26))
     raw_dir.mkdir(parents=True)
     shutil.copyfile(FIX_TV / "iso" / "INDEX_S5FI, 1D.csv", raw_dir / "INDEX_S5FI, 1D.csv")
-    result = services.tv_import(ctx, raw_dir)
+    symbols = {k: dataclasses.replace(v, inception=None) for k, v in load_symbols().items()}
+    result = services.tv_import(ctx, raw_dir, symbols=symbols)
     assert result.processed == {"S5FI": 29} and as_json(result)
     assert services.tv_list(ctx)[0]["symbol"] == "S5FI"
     assert services.tv_validate(ctx, "S5FI").reports[0].symbol == "S5FI"

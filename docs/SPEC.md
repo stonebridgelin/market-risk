@@ -272,7 +272,7 @@ market-risk/
 - ALFRED 版本查询见5.6节第3条。
 - 备注：自2026年4月起 FRED 只提供 ICE 系列最近三年的观测，更早的日期取不到时要给出明确提示。
 - VIX 备用源：Cboe 官方 `VIX_History.csv` 的 `CLOSE` 列，使用规则见5.6节第7条。
-- OAS 长历史（`docs/TRADINGVIEW.md` 第6.2节）：`settings.yaml` 中 `oas.long_history_source` 取值 `none`（默认）或 `tradingview`。开启前必须先运行 `tv compare --symbol BAMLH0A0HYM2`，重叠日期数值须完全一致（两位小数），由用户决定是否开启。开启后只有 FRED API 取不到的日期才使用 TradingView 导出数据，并在 `data_notes` 中注明来源。
+- OAS 长历史（`docs/TRADINGVIEW.md` 第6.2节）：`settings.yaml` 中 `oas.long_history_source` 取值 `none`（默认）或 `tradingview`。开启前必须先运行 `tv compare --symbol BAMLH0A0HYM2`，重叠日期数值须完全一致（两位小数），由用户决定是否开启。开启后只有 FRED API 取不到的日期才使用 TradingView 导出数据，并在 `data_notes` 中注明来源。**2026-09-27 已开启**（比对结果见 `reports/tradingview_compare_BAMLH0A0HYM2.md`：787 天重叠、0 处不一致）。
 
 ### 6.4 财政部收益率（`treasury.py`）
 - 数据源：财政部 Daily Treasury Par Yield Curve Rates 的年度 CSV 下载（在 home.treasury.gov 的 Interest Rate Statistics 页面，按年份导出 CSV）。请先确认当前可用的下载 URL 格式，并在代码注释中写明。

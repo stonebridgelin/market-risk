@@ -12,6 +12,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import re
 import time
 from collections.abc import Callable
 from dataclasses import asdict
@@ -51,6 +52,14 @@ def redact_url(url: str, params: dict[str, Any] | None = None) -> str:
     return f"{url}?{query}" if query else url
 
 
+_SECRET_PARAM = re.compile(r"(?i)\b(api_key|apikey|key|token)=[^&\s'\")]+")
+
+
+def redact_text(text: str) -> str:
+    """把文字中 URL 查询参数里的密钥替换为 ***（错误信息、日志、data_notes 都经过此函数）。"""
+    return _SECRET_PARAM.sub(lambda m: f"{m.group(1)}=***", text)
+
+
 def with_retry[T](
     func: Callable[[], T],
     what: str,
@@ -67,9 +76,9 @@ def with_retry[T](
             last_exc = exc
             if attempt < max_retries:
                 wait = backoff_seconds * (2**attempt)
-                logger.warning("%s 失败（第%d次）：%s；%.1f 秒后重试", what, attempt + 1, exc, wait)
+                logger.warning("%s 失败（第%d次）：%s；%.1f 秒后重试", what, attempt + 1, redact_text(str(exc)), wait)
                 sleep(wait)
-    raise DataFetchError(f"{what} 在重试 {max_retries} 次后仍失败：{last_exc}") from last_exc
+    raise DataFetchError(redact_text(f"{what} 在重试 {max_retries} 次后仍失败：{last_exc}")) from None
 
 
 def http_get_text(
@@ -78,7 +87,8 @@ def http_get_text(
     timeout: float = 30.0,
 ) -> str:  # pragma: no cover - 网络请求
     resp = requests.get(url, params=params, headers={"User-Agent": USER_AGENT}, timeout=timeout)
-    resp.raise_for_status()
+    if not resp.ok:  # 不用 raise_for_status：其错误信息含带密钥的完整 URL
+        raise DataFetchError(f"HTTP {resp.status_code} {resp.reason}：{redact_text(resp.url)}")
     return resp.text
 
 

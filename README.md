@@ -122,7 +122,7 @@ uv run market-risk tv compare --symbol BAMLH0A0HYM2
 - 把导出的 CSV 原样放进 `data/manual/tradingview/raw/<导出日期>/`，**不要改文件名**（程序靠 `INDEX_S5FI, 1D.csv` 这样的默认文件名识别标的）。
 - `tv import` 打印汇总表（标的、起止日期、行数、校验结果、问题说明），据此判断是否需要重新导出。
 - `tv validate [--symbol S5FI]` 按 manifest 重新校验；原始文件被改动时会报错（sha256）。
-- 开启 OAS 长历史（`oas.long_history_source: tradingview`）之前，先用 `tv compare` 确认重叠日期完全一致。
+- OAS 长历史（`oas.long_history_source: tradingview`）已于 2026-09-27 开启（`tv compare` 787 天重叠、0 处不一致）：只有 FRED API 取不到的日期（早于三年）才使用 TradingView 数据，并在数据说明中注明。
 
 ### 4.7 正式记录、资料、标签
 
@@ -147,12 +147,12 @@ uv run market-risk outcome compute --date 2025-10-31
 ```
 
 ```bash
-uv run market-risk outcome add --date 2025-10-31 --spx -4.41 --qqq -6.90
+uv run market-risk outcome add --date 2025-10-31 --spx -4.41 --qqq -6.90 --qqq-peak-to-trough -7.34
 ```
 
 - 某基准日第一次运行、状态为 complete 或 pending、代码与配置没有未提交修改时，自动设为正式记录（reviewed=false）；复核后用 `official confirm`。
 - 结果标签由程序计算（SOP 9.5），只能在结果窗口（基准日后第20个交易日）结束后计算；用户抽查核对，手工录入与程序计算不一致时报告差异，统计以手工为准。
-- 标签另有辅助字段（仅参考）：窗口内最大收盘跌幅、"接近事件"（标普500 ≥4% 或 QQQ ≥6%）。
+- 标签字段：`drawdown_from_base`（基准日口径，风险事件按此判断）、`peak_to_trough_drawdown`（峰谷回撤，峰值起点包含基准日，仅参考）、"接近事件"（按基准日口径标普500 ≥4% 或 QQQ ≥6%，仅参考）。
 
 ### 4.8 导入旧记录、数据库、统计
 

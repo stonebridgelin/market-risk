@@ -334,3 +334,21 @@ def test_breadth_invalid_files(tmp_path, content, match):
     path.write_text(content, encoding="utf-8")
     with pytest.raises(br.BreadthError, match=match):
         br.read_breadth(path)
+
+
+def test_errors_never_contain_api_key(caplog):
+    """接口错误信息（含 URL）写入日志、data_notes 前必须脱敏。"""
+    url = "https://api.stlouisfed.org/fred/series/observations?series_id=X&api_key=abc123SECRET&file_type=json"
+    assert cache.redact_text(f"400 Client Error: Bad Request for url: {url}") == (
+        "400 Client Error: Bad Request for url: "
+        "https://api.stlouisfed.org/fred/series/observations?series_id=X&api_key=***&file_type=json"
+    )
+
+    def failing():
+        raise RuntimeError(f"400 Client Error for url: {url}")
+
+    with pytest.raises(DataFetchError) as info:
+        cache.with_retry(failing, "下载", 1, 0.0, sleep=no_sleep)
+    assert "abc123SECRET" not in str(info.value) and "api_key=***" in str(info.value)
+    assert info.value.__cause__ is None
+    assert "abc123SECRET" not in caplog.text

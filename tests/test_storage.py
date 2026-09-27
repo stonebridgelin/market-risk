@@ -186,7 +186,7 @@ def test_compute_outcome():
     spx = _closes(base, [100.0] + [99.0] * 5 + [94.9] + [98.0] * 14)     # 第6个交易日跌 5.1%
     qqq = _closes(base, [100.0] + [97.0] * 20)
     o = compute_outcome(base, spx, qqq, today_new_york=D(2026, 1, 1))
-    assert o.is_event and o.spx_min_close_drawdown == pytest.approx(-5.1)
+    assert o.is_event and o.spx_drawdown_from_base == pytest.approx(-5.1)
     assert o.event_date == sorted(spx)[6] and (o.window_start, o.window_end) == (D(2025, 11, 3), D(2025, 12, 1))
     calm = compute_outcome(base, _closes(base, [100.0] + [95.01] * 20), _closes(base, [100.0] + [93.01] * 20),
                            D(2026, 1, 1))
@@ -201,7 +201,7 @@ def test_compute_outcome():
 def test_manual_and_computed_outcomes(paths):
     manual = Outcome("MARKET", D(2025, 10, 31), D(2025, 11, 3), D(2025, 12, 1), -4.0, -6.0, False, None,
                      "manual", "t")
-    computed = dataclasses.replace(manual, spx_min_close_drawdown=-5.2, is_event=True, source="computed")
+    computed = dataclasses.replace(manual, spx_drawdown_from_base=-5.2, is_event=True, source="computed")
     assert record_outcome(paths.outcomes_csv, manual) == []
     diffs = record_outcome(paths.outcomes_csv, computed)
     assert len(diffs) == 1 and "标签不一致" in diffs[0]
@@ -346,18 +346,19 @@ def test_stats_unreviewed_and_mixed(paths):
 
 
 def test_max_drawdown_and_near_event(paths):
-    from market_risk.outcomes import is_near_event, max_drawdown
+    from market_risk.outcomes import is_near_event, peak_to_trough_drawdown
 
-    assert max_drawdown([100, 110, 99, 105]) == pytest.approx(-10.0)     # 110 → 99
-    assert max_drawdown([100, 101, 102]) == 0.0
+    assert peak_to_trough_drawdown([100, 110, 99, 105]) == pytest.approx(-10.0)     # 110 → 99
+    assert peak_to_trough_drawdown([100, 101, 102]) == 0.0
     base = D(2025, 10, 31)
     # 先涨后跌：基准日口径 −4.5%（接近事件），最大收盘跌幅 −9.5%（105 → 95.5）
     spx = _closes(base, [100.0, 105.0] + [100.0] * 5 + [95.5] + [99.0] * 13)
     qqq = _closes(base, [100.0] + [98.0] * 20)
     o = compute_outcome(base, spx, qqq, D(2026, 1, 1))
     assert not o.is_event and o.near_event
-    assert o.spx_min_close_drawdown == pytest.approx(-4.5) and o.spx_max_drawdown == pytest.approx(-9.0476, abs=1e-3)
-    assert o.qqq_max_drawdown == pytest.approx(-2.0)
+    assert o.spx_drawdown_from_base == pytest.approx(-4.5)
+    assert o.spx_peak_to_trough_drawdown == pytest.approx(-9.0476, abs=1e-3)
+    assert o.qqq_peak_to_trough_drawdown == pytest.approx(-2.0)
     assert not is_near_event(-5.5, -1.0, True)            # 已是事件，不再标"接近"
     assert is_near_event(-1.0, -6.0, False) and not is_near_event(-3.99, -5.99, False)
 
@@ -368,7 +369,7 @@ def test_max_drawdown_and_near_event(paths):
     row = db.dump(url)["outcomes"][0]
     cols = [c.name for c in db.schema.outcomes.c]
     rec = dict(zip(cols, row, strict=True))
-    assert rec["near_event"] is True and rec["spx_max_drawdown"] == Decimal("-9.0476")
+    assert rec["near_event"] is True and rec["spx_peak_to_trough_drawdown"] == Decimal("-9.0476")
 
 
 def test_stats_show_near_events(paths):
@@ -383,3 +384,60 @@ def test_stats_show_near_events(paths):
     assert headers[-1] == "接近事件(仅参考)"
     row = next(r for r in range(5, sheet.max_row + 1) if str(sheet.cell(r, 2).value).startswith("2025-10-31"))
     assert sheet.cell(row, len(headers)).value == "是"
+
+
+def test_peak_to_trough_peak_starts_at_base():
+    """峰值起点包含基准日：之后没有更高的收盘价时，峰值即基准日，峰谷回撤等于基准日口径跌幅。"""
+    from market_risk.outcomes import peak_to_trough_drawdown
+
+    assert peak_to_trough_drawdown([100.0, 98.0, 95.0, 99.0]) == pytest.approx(-5.0)
+    base = D(2025, 10, 31)
+    spx = _closes(base, [100.0] + [99.0] * 9 + [96.5] + [98.0] * 10)
+    qqq = _closes(base, [100.0] + [99.5] * 20)
+    o = compute_outcome(base, spx, qqq, D(2026, 1, 1))
+    assert o.spx_peak_to_trough_drawdown == pytest.approx(o.spx_drawdown_from_base) == pytest.approx(-3.5)
+    assert o.qqq_peak_to_trough_drawdown == pytest.approx(-0.5)
+
+
+def test_outcomes_csv_old_column_names(paths):
+    """2026-09-27 改名前的 outcomes.csv 仍可读取与重建数据库。"""
+    paths.outcomes_csv.parent.mkdir(parents=True)
+    paths.outcomes_csv.write_text(
+        "subject,base_date,window_start,window_end,spx_min_close_drawdown,qqq_min_close_drawdown,is_event,"
+        "event_date,spx_max_drawdown,qqq_max_drawdown,near_event,source,entered_at\n"
+        "MARKET,2025-10-31,2025-11-03,2025-12-01,-4.4069,-6.8991,否,,-4.5711,-7.3424,是,computed,t\n",
+        encoding="utf-8")
+    (o,) = read_outcomes(paths.outcomes_csv)
+    assert o.qqq_drawdown_from_base == -6.8991 and o.qqq_peak_to_trough_drawdown == -7.3424 and o.near_event
+    rows = db.dump(db.rebuild(paths, db.default_url(paths)))["outcomes"]
+    assert len(rows) == 1
+
+
+def test_migration_0003_keeps_data(paths):
+    """从 0002 升级到 0003：列改名，已有数据保留。"""
+    import sqlalchemy as sa
+    from alembic import command
+    from alembic.config import Config
+
+    url = db.default_url(paths)
+    paths.db_path.parent.mkdir(parents=True)
+    cfg = Config()
+    cfg.set_main_option("script_location", str(PROJECT_ROOT / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, "0002")
+    engine = db.make_engine(url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(sa.text(
+                "INSERT INTO outcomes (subject, base_date, source, window_start, window_end, spx_min_close_drawdown,"
+                " qqq_min_close_drawdown, is_event, spx_max_drawdown, qqq_max_drawdown, near_event)"
+                " VALUES ('MARKET', '2025-10-31', 'computed', '2025-11-03', '2025-12-01', -4.4069, -6.8991,"
+                " 0, -4.5711, -7.3424, 1)"))
+        command.upgrade(cfg, "head")
+        with engine.connect() as conn:
+            row = conn.execute(sa.text(
+                "SELECT qqq_drawdown_from_base, qqq_peak_to_trough_drawdown FROM outcomes")).one()
+        assert [round(float(x), 4) for x in row] == [-6.8991, -7.3424]
+    finally:
+        engine.dispose()
+    assert db.head_revision() == "0003"

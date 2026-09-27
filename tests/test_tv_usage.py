@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import shutil
 from pathlib import Path
@@ -22,7 +23,8 @@ from market_risk.storage.paths import StoragePaths
 
 FIX = Path(__file__).resolve().parent / "fixtures" / "tradingview"
 D = dt.date
-SYMBOLS = load_symbols()
+# 测试样本只有几十行：去掉登记的起始日期，避免"历史未完整加载"警告（该检查另有测试）
+SYMBOLS = {k: dataclasses.replace(v, inception=None) for k, v in load_symbols().items()}
 EXPORT = D(2026, 9, 26)
 
 
@@ -107,10 +109,10 @@ def test_fill_long_history_only_before_fred_start():
 def test_long_history_setting_parsed(tmp_path):
     from market_risk.config import ConfigError, load_settings
 
-    assert load_settings().oas_long_history_source == "none"
+    assert load_settings().oas_long_history_source == "tradingview"   # 2026-09-27 开启
     text = (Path(__file__).resolve().parents[1] / "config" / "settings.yaml").read_text("utf-8")
     bad = tmp_path / "s.yaml"
-    bad.write_text(text.replace("long_history_source: none", "long_history_source: yes please"), "utf-8")
+    bad.write_text(text.replace("long_history_source: tradingview", "long_history_source: yes please"), "utf-8")
     with pytest.raises(ConfigError, match="long_history_source"):
         load_settings(bad)
 

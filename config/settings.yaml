@@ -19,7 +19,8 @@ oas:
   revision_check: true         # SPEC 5.6 第3条：历史修订比对（ALFRED 基准日版本 vs 当前版本）
   # SPEC 6.3 / TRADINGVIEW 6.2：FRED 取不到的早期日期是否用 TradingView 导出数据补充（none / tradingview）
   # 开启前必须先运行 tv compare --symbol BAMLH0A0HYM2，由用户决定
-  long_history_source: none
+  # 2026-09-27 开启：tv compare 在 2023-09-26 至 2026-09-24 的787天重叠区间0处不一致
+  long_history_source: tradingview
 
 vix:
   series: VIXCLS

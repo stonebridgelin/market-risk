@@ -21,6 +21,7 @@
   unit: percent
   timezone: America/New_York
   calendar: nyse
+  inception: 2008-08-04   # TradingView 导出的最早日期（2026-09-26 导出，用户确认）
   known_values:          # 来自截图读数（SOP 第10节、SPEC 第9节）
     2025-08-29: 63.22
     2025-09-26: 54.67
@@ -36,6 +37,7 @@
   unit: percent
   timezone: America/New_York
   calendar: nyse
+  inception: 2008-07-24   # TradingView 导出的最早日期（2026-09-26 导出，用户确认）
   known_values:
     2025-08-29: 67.59
     2025-09-26: 51.09
@@ -100,6 +102,7 @@
   usage: crosscheck
   unit: percent
   calendar: bond
+  inception: 1996-12-31   # FRED 序列起点，TradingView 导出已含全部历史（用户确认）
   api_source: fred:BAMLH0A0HYM2
   tolerance: 0.0           # 重叠日期须完全一致（两位小数），TRADINGVIEW 6.2
   known_values: {2025-08-28: 2.75, 2025-09-18: 2.71, 2025-09-25: 2.76, 2025-10-23: 2.96,

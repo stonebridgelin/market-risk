@@ -444,7 +444,7 @@ def outcome_compute(ctx: Context, base: dt.date, refresh: bool = False, loader: 
 
 
 def outcome_add(ctx: Context, base: dt.date, spx: float, qqq: float, event_date: dt.date | None = None,
-                spx_max: float | None = None, qqq_max: float | None = None,
+                spx_peak_to_trough: float | None = None, qqq_peak_to_trough: float | None = None,
                 today: dt.date | None = None) -> OutcomeResult:
     """人工录入风险事件标签（与程序计算值不一致时返回差异）。"""
     from market_risk.data.cache import today_new_york
@@ -461,7 +461,8 @@ def outcome_add(ctx: Context, base: dt.date, spx: float, qqq: float, event_date:
         raise ServiceError(f"{base} 的结果窗口尚未结束")
     start, end = outcome_window(base)
     o = Outcome(MARKET, base, start, end, spx, qqq, spx <= SPX_THRESHOLD or qqq <= QQQ_THRESHOLD, event_date,
-                "manual", dt.datetime.now(dt.UTC).isoformat(timespec="seconds"), spx_max, qqq_max)
+                "manual", dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
+                spx_peak_to_trough, qqq_peak_to_trough)
     diffs = record_outcome(ctx.paths.outcomes_csv, o)
     _rebuild_db(ctx)
     return OutcomeResult(o, diffs)

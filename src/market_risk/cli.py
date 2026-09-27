@@ -346,9 +346,9 @@ def format_outcome(result: services.OutcomeResult) -> str:
         return "-" if v is None else f"{v}%"
 
     lines = [
-        f"{o.base_date}：标普500最低收盘跌幅 {o.spx_min_close_drawdown}%，QQQ {o.qqq_min_close_drawdown}%，"
+        f"{o.base_date}：基准日口径跌幅 标普500 {o.spx_drawdown_from_base}%、QQQ {o.qqq_drawdown_from_base}%，"
         f"风险事件={'是' if o.is_event else '否'}（结果窗口 {o.window_start} 至 {o.window_end}）",
-        f"  辅助（仅参考）：最大收盘跌幅 标普500 {pct(o.spx_max_drawdown)}、QQQ {pct(o.qqq_max_drawdown)}；"
+        f"  参考：峰谷回撤 标普500 {pct(o.spx_peak_to_trough_drawdown)}、QQQ {pct(o.qqq_peak_to_trough_drawdown)}；"
         f"接近事件={'是' if o.near_event else '否'}",
     ]
     return "\n".join(lines + [f"【差异】{d}" for d in result.differences])
@@ -369,12 +369,14 @@ def outcome_add(
     spx: Annotated[float, typer.Option("--spx", help="标普500最低收盘价跌幅（百分数，如 -5.2）")],
     qqq: Annotated[float, typer.Option("--qqq", help="QQQ 最低收盘价跌幅（百分数）")],
     event_date: Annotated[str | None, typer.Option("--event-date", help="首次达到门槛的日期（可选）")] = None,
-    spx_max: Annotated[float | None, typer.Option("--spx-max", help="标普500最大收盘跌幅（可选，辅助）")] = None,
-    qqq_max: Annotated[float | None, typer.Option("--qqq-max", help="QQQ 最大收盘跌幅（可选，辅助）")] = None,
+    spx_peak: Annotated[
+        float | None, typer.Option("--spx-peak-to-trough", help="标普500峰谷回撤（可选，参考）")
+    ] = None,
+    qqq_peak: Annotated[float | None, typer.Option("--qqq-peak-to-trough", help="QQQ 峰谷回撤（可选，参考）")] = None,
 ) -> None:
     """人工录入风险事件标签（与程序计算值不一致时报告差异）。"""
     result = _call(services.outcome_add, _ctx(), _parse_date(date), spx, qqq, _opt_date(event_date),
-                   spx_max, qqq_max)
+                   spx_peak, qqq_peak)
     typer.echo("已录入：" + format_outcome(result))
 
 

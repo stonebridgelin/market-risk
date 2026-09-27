@@ -73,6 +73,7 @@ def fetch_raw_inputs(
             ) from exc
         oas = {}
         notes.append(f"FRED 未返回 {settings.oas_series}（{exc}）")
+    fred_has_data = bool(oas)
     ice_note = fred.ice_history_note(settings.oas_series, start, oas)
     if ice_note:
         notes.append(ice_note)
@@ -86,7 +87,9 @@ def fetch_raw_inputs(
         notes.extend(fill_notes)
 
     oas_vintage = None
-    if settings.oas_revision_check:
+    if settings.oas_revision_check and not fred_has_data:
+        notes.append("FRED API 没有该区间的 OAS（早于三年），不做历史修订比对；不影响计分")
+    elif settings.oas_revision_check:
         try:
             oas_vintage, info = fred.fetch_series(
                 paths,

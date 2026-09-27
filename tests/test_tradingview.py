@@ -24,7 +24,8 @@ ISO_FILE = FIX / "iso" / "INDEX_S5FI, 1D.csv"
 UNIX_FILE = FIX / "unix" / "INDEX_S5TW, 1D.csv"
 NY = ZoneInfo("America/New_York")
 D = dt.date
-SYMBOLS = load_symbols()
+# 测试样本只有几十行：去掉登记的起始日期，避免"历史未完整加载"警告（该检查另有测试）
+SYMBOLS = {k: dataclasses.replace(v, inception=None) for k, v in load_symbols().items()}
 EXPORT = D(2026, 9, 26)
 
 
@@ -346,9 +347,11 @@ def test_import_dir_must_be_under_raw(paths, tmp_path):
 
 def test_cli_tv_import_list_validate(paths, monkeypatch):
     import market_risk.cli as cli
+    import market_risk.services as services
 
     settings = dataclasses.replace(load_settings(), storage_root=paths.root)
     monkeypatch.setattr(cli, "load_settings", lambda: settings)
+    monkeypatch.setattr(services, "load_symbols", lambda: SYMBOLS)
     put(paths, ISO_FILE)
     runner = CliRunner()
     r = runner.invoke(cli.app, ["tv", "import", "--dir", str(paths.tv_raw_dir(EXPORT))])
