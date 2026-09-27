@@ -232,7 +232,11 @@ def build_snapshot(
                 continue
             item = OasVintageValue(label, d, vintage_valued.get(d), oas_valued.get(d))
             vintage_values.append(item)
-            if item.revised:
+            if not item.comparable:
+                notes.add(
+                    f"OAS 历史修订比对：{label}（{d}）在基准日版本中没有数值，未能比对"
+                )
+            elif item.revised:
                 notes.add(
                     f"OAS 历史修订：{label}（{d}）基准日版本 {item.vintage_value}，"
                     f"当前版本 {item.current_value}；计分使用当前版本"

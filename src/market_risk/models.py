@@ -107,6 +107,55 @@ class ThreeSegmentResult:
 
 
 @dataclass(frozen=True)
+class DimensionScore:
+    """一个维度的评分（SPEC 第4节）。score 为 None 表示待补。"""
+
+    name: str                                  # 价格 / 广度 / VIX / 利率 / 信用
+    score: int | None
+    possible_scores: tuple[int, ...]           # 确定时只有一个元素
+    triggered_conditions: tuple[str, ...]      # 如 ("2分(a)",)
+    calculation: str
+    pending_reason: str | None = None
+
+
+@dataclass(frozen=True)
+class ScoreResult:
+    """一个规则版本的评分结果（SPEC 第4节）。"""
+
+    version: str                               # "v2-M" / "v3-R1"
+    price: DimensionScore
+    breadth: DimensionScore
+    vix: DimensionScore
+    rates: DimensionScore
+    credit: DimensionScore
+    total: int | None                          # 全部确定时
+    total_range: tuple[int, int]               # (下限, 上限)；确定时两者相等
+    stage: str | None                          # 范围跨越阶段时为 None
+    clear_deterioration: tuple[tuple[str, str], ...]  # 证据链：(项目, 是/否/无法核验)
+    notes: tuple[str, ...] = ()
+    review_flags: tuple[str, ...] = ()         # 需要用户判断的事项（不自动处理）
+
+    @property
+    def dimensions(self) -> tuple[DimensionScore, ...]:
+        return (self.price, self.breadth, self.vix, self.rates, self.credit)
+
+    @property
+    def pending(self) -> tuple[str, ...]:
+        return tuple(d.name for d in self.dimensions if d.score is None)
+
+
+@dataclass(frozen=True)
+class NearThresholdItem:
+    """贴近门槛的读数（SPEC 第7节）。"""
+
+    item: str                                  # 如 "SPY 收盘价 vs MA50"、"ΔOAS（v2-M）"
+    value: float
+    threshold: float
+    gap: float                                 # value − threshold，单位见 unit
+    unit: str                                  # "%"、"个百分点"、"bp" 等
+
+
+@dataclass(frozen=True)
 class OasVintageValue:
     """OAS 历史修订比对（SPEC 5.6 第3条）：某个 O1/O6 在基准日版本与当前版本中的数值。"""
 
@@ -116,8 +165,13 @@ class OasVintageValue:
     current_value: float | None      # 当前版本（计分使用）
 
     @property
+    def comparable(self) -> bool:
+        """两个版本都有数值才能比对。"""
+        return self.vintage_value is not None and self.current_value is not None
+
+    @property
     def revised(self) -> bool:
-        return self.vintage_value != self.current_value
+        return self.comparable and self.vintage_value != self.current_value
 
 
 @dataclass(frozen=True)

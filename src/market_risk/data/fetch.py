@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 # 逐日数据回看的自然日数：覆盖 T−45（约65个自然日）、T−20、O6
 DAILY_LOOKBACK_DAYS = 100
-VINTAGE_LOOKBACK_DAYS = 30
+VINTAGE_LOOKBACK_DAYS = DAILY_LOOKBACK_DAYS  # 与当前版本同一区间，保证覆盖两个口径的 O6
 
 
 def fetch_raw_inputs(
