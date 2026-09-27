@@ -62,10 +62,15 @@ def test_price_1_branches():
     assert v2m.score_price(make(etfs=two_below20), True).score == 1
 
 
-def test_price_ma_rounded_to_cents():
-    """MA50=98.004 按2位小数为 98.00，收盘价 98.00 不低于 MA50。"""
+def test_price_ma_is_exact_not_rounded():
+    """SPEC 5.3：均线是派生值，不取整。MA50=98.004 时收盘价 98.00 低于 MA50。"""
     etfs = {**DEFAULT_ETFS, "SPY": etf("SPY", 98.0, 100, 97, 98.004, 90),
             "QQQ": etf("QQQ", 98.0, 100, 97, 98.004, 90)}
+    p = v2m.score_price(make(etfs=etfs), True)
+    assert p.score == 2 and p.triggered_conditions == ("2分(a)",)
+    assert "MA50 98.00" in p.calculation  # 展示时保留两位
+    etfs = {**DEFAULT_ETFS, "SPY": etf("SPY", 98.0, 100, 97, 98.0, 90),
+            "QQQ": etf("QQQ", 98.0, 100, 97, 98.0, 90)}
     assert v2m.score_price(make(etfs=etfs), True).score == 0
 
 
@@ -137,6 +142,42 @@ def test_breadth_40_to_50_determinate_1():
     assert v2m.score_breadth(make(f=45.0, w=48.0)).score == 1
 
 
+def test_enumeration_uses_known_fields():
+    """SPEC 5.3：F 缺失、W 已知时，L=min(F,W) 不超过 W。W=45 时 L≥50 不可能，结果确定为1分。"""
+    from decimal import Decimal
+
+    from market_risk.scoring.common import Outcome, evaluate_dimension, grid
+
+    def rule(v):
+        low = min(v["F"], v["W"])
+        return Outcome(0, (), "") if low >= Decimal("50") else Outcome(1, (), "")
+
+    def cand(assigned):
+        return grid(Decimal("40"), Decimal("50"), *assigned.values(),
+                    lo=Decimal("0"), hi=Decimal("100"))
+
+    d = evaluate_dimension("广度", {"F": None, "W": Decimal("45.00")}, rule, {"F": cand}, {})
+    assert d.score == 1 and "不改变结果" in d.calculation
+    d = evaluate_dimension("广度", {"F": None, "W": Decimal("55.00")}, rule, {"F": cand}, {})
+    assert d.score is None and d.possible_scores == (0, 1)
+
+
+def test_grid_uses_critical_points():
+    from decimal import Decimal
+
+    from market_risk.scoring.common import grid
+
+    g = grid(Decimal("40"), Decimal("20.8") / Decimal("1.3"), lo=Decimal("0"), hi=Decimal("100"))
+    # 40 本身与两侧相邻值；16.0 为 20.80/1.3 的精确值；范围两端
+    assert {Decimal("39.99"), Decimal("40.00"), Decimal("40.01")} <= set(g)
+    assert {Decimal("15.99"), Decimal("16.00"), Decimal("16.01")} <= set(g)
+    assert {Decimal("0"), Decimal("100")} <= set(g)
+    # 临界点不是两位小数：取两侧最近的两位小数值及再外侧的值
+    g2 = grid(Decimal("26") / Decimal("1.3") + Decimal("0.001"), lo=Decimal("0"), hi=Decimal("50"))
+    assert {Decimal("19.99"), Decimal("20.00"), Decimal("20.01"), Decimal("20.02")} <= set(g2)
+    assert len(g2) == 6  # 4 个临界值 + 2 个端点，不按固定步长取样
+
+
 def test_breadth_reading_missing_is_pending():
     b = v2m.score_breadth(make(f=None, w=None))
     assert b.score is None and b.possible_scores == (0, 1, 2)
@@ -165,6 +206,26 @@ def test_breadth_reading_missing_is_pending():
 )
 def test_vix_branches_and_boundaries(v, v5, expected):
     assert v2m.score_vix(make(v=v, v5=v5)).score == expected
+
+
+def test_vix_g_is_exact_not_rounded():
+    """SPEC 5.3：g 精确计算、不取整。V5=20.00 时 V=25.99（g=29.95%）不满足 g≥30%，V=26.00 满足。"""
+    d = v2m.score_vix(make(v=25.99, v5=20.00))
+    assert "2分：V≥20且g≥30%" not in d.triggered_conditions
+    assert d.triggered_conditions == ("2分：V≥25",)
+    d = v2m.score_vix(make(v=26.00, v5=20.00))
+    assert "2分：V≥20且g≥30%" in d.triggered_conditions
+    assert "g=V÷V5−1=30%" in d.calculation
+
+
+def test_pct_change_is_not_rounded():
+    """g 在 29.995% 与 30% 之间时不得视为满足 g≥30%（先取整会误判）。"""
+    from decimal import Decimal
+
+    from market_risk.scoring.common import pct_change
+
+    g = pct_change(Decimal("200.00"), Decimal("153.85"))  # 29.9967…%
+    assert Decimal("29.995") < g < Decimal("30")
 
 
 def test_vix_v5_missing_enumeration():

@@ -9,7 +9,7 @@ from decimal import Decimal
 
 from market_risk.config import NearThreshold
 from market_risk.models import MarketSnapshot, NearThresholdItem
-from market_risk.scoring.common import bp, d2, pct_change
+from market_risk.scoring.common import bp, d2, exact, pct_change
 
 BREADTH_LEVELS = (Decimal("40"), Decimal("50"))
 VIX_LEVELS = (Decimal("18"), Decimal("20"), Decimal("25"))
@@ -35,7 +35,7 @@ def near_threshold_items(snapshot: MarketSnapshot, cfg: NearThreshold) -> list[N
 
     # 价格：收盘价与 MA20/MA50 ±1%；MA5 与 MA50 ±0.5%
     for sym, e in snapshot.etfs.items():
-        c, m5, m20, m50 = d2(e.close), d2(e.ma5), d2(e.ma20), d2(e.ma50)
+        c, m5, m20, m50 = d2(e.close), exact(e.ma5), exact(e.ma20), exact(e.ma50)
         assert c is not None and m5 is not None and m20 is not None and m50 is not None
         for name, ma in (("MA20", m20), ("MA50", m50)):
             _add(items, f"{sym} 收盘价 vs {name}", c, ma, pct_change(c, ma), "%",

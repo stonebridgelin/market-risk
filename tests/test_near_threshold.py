@@ -22,7 +22,7 @@ def test_sample2_near_threshold():
     assert items["ΔOAS（v2-M）"] == [(5.0, 0.0)]
     assert items["ΔOAS（v3-R1）"] == [(5.0, 0.0)]
     assert items["S5TW（W）"] == [(50.0, 1.09)]
-    assert items["RSP 收盘价 vs MA20"] == [(188.33, 0.13)]
+    assert items["RSP 收盘价 vs MA20"] == [(188.3315, 0.13)]  # 均线为精确值，不取整
 
 
 def test_sample3_near_threshold():

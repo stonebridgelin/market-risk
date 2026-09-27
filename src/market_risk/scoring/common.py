@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP, Decimal
 
 from market_risk.models import DimensionScore, OasVintageValue, ScoreResult
 
@@ -20,29 +20,46 @@ CandidateFn = Callable[[Values], Iterable[Decimal]]
 
 
 # ---------------------------------------------------------------------------
-# 精度：先四舍五入到数据本身的精度再比较（价格2位、百分数2位、bp 取整）
+# 精度（SPEC 5.3）：原始数据按公布精度（两位小数）读取；派生值精确计算、不取整，
+# 只在展示时保留两位。
 # ---------------------------------------------------------------------------
 
 
 def d2(x: float | Decimal | None) -> Decimal | None:
-    """转为2位小数的 Decimal（价格、百分数）。None 保持 None。"""
+    """原始数据（价格、VIX、OAS、收益率、广度）按公布的两位小数读取为 Decimal。"""
     if x is None:
         return None
     return Decimal(str(x)).quantize(CENT, rounding=ROUND_HALF_UP)
 
 
-def bp(a: Decimal, b: Decimal) -> int:
-    """100×(a − b)，单位 bp；a、b 为2位小数的百分数，结果为整数。"""
-    return int(((a - b) * 100).to_integral_value(rounding=ROUND_HALF_UP))
+def exact(x: float | Decimal | None) -> Decimal | None:
+    """派生值（如均线）转为 Decimal，不取整。
+
+    float 的最短十进制表示可还原两位小数价格的有限位平均值（如 670.4418）。
+    """
+    if x is None:
+        return None
+    return x if isinstance(x, Decimal) else Decimal(repr(float(x)))
+
+
+def bp(a: Decimal, b: Decimal) -> Decimal:
+    """100×(a − b)，单位 bp，精确计算不取整。"""
+    return (a - b) * 100
 
 
 def pct_change(v: Decimal, v0: Decimal) -> Decimal:
-    """g = v ÷ v0 − 1，以百分数表示并保留2位小数（SPEC 5.3）。"""
-    return ((v / v0 - 1) * 100).quantize(CENT, rounding=ROUND_HALF_UP)
+    """g = v ÷ v0 − 1，以百分数表示，精确计算不取整（SPEC 5.3）。"""
+    return (v / v0 - 1) * 100
 
 
-def fmt(x: Decimal | int | None) -> str:
-    return "缺失" if x is None else str(x)
+def show(x: Decimal | int | float | None) -> str:
+    """展示用：整数原样显示，其余保留两位小数。"""
+    if x is None:
+        return "缺失"
+    d = x if isinstance(x, Decimal) else Decimal(repr(x))
+    if d == d.to_integral_value():
+        return str(int(d))
+    return str(d.quantize(CENT, rounding=ROUND_HALF_UP))
 
 
 # ---------------------------------------------------------------------------
@@ -60,16 +77,19 @@ class Outcome:
 
 
 def grid(*points: Decimal | None, lo: Decimal, hi: Decimal) -> list[Decimal]:
-    """枚举候选值：每个关键点本身及其 ±0.01、±0.02，再加上下界。
+    """缺失字段的候选值：按临界点取值（SPEC 5.3），不按固定步长取样。
 
-    关键点取自门槛与其他已知字段，保证"满足/不满足"每一侧（含等号）都被覆盖。
+    - 每个临界点（门槛值，或由其他已知字段推出的门槛）：点本身及两侧相邻的两位小数值；
+      临界点不是两位小数时，取其两侧最近的两位小数值及再外侧的相邻值；
+    - 取值范围两端 lo、hi。
     """
     result = {lo, hi}
     for p in points:
         if p is None:
             continue
-        for k in (-2, -1, 0, 1, 2):
-            v = (p + CENT * k).quantize(CENT, rounding=ROUND_HALF_UP)
+        floor = p.quantize(CENT, rounding=ROUND_FLOOR)
+        ceil = p.quantize(CENT, rounding=ROUND_CEILING)
+        for v in (floor - CENT, floor, ceil, ceil + CENT):
             if lo <= v <= hi:
                 result.add(v)
     return sorted(result)

@@ -18,9 +18,11 @@ from market_risk.scoring.common import (
     bp,
     d2,
     evaluate_dimension,
+    exact,
     grid,
     pct_change,
     same_result,
+    show,
     vintage_or_current,
 )
 
@@ -55,15 +57,15 @@ def score_price(snapshot: MarketSnapshot, d1_includes_t_minus_20: bool) -> Dimen
     below50: list[str] = []
     below20: list[str] = []
     for sym, e in snapshot.etfs.items():
-        c, m20, m50 = d2(e.close), d2(e.ma20), d2(e.ma50)
+        c, m20, m50 = d2(e.close), exact(e.ma20), exact(e.ma50)  # 均线为派生值，不取整
         assert c is not None and m20 is not None and m50 is not None
         if c < m50:
             below50.append(sym)
         if c < m20:
             below20.append(sym)
-        lines.append(f"{sym} 收盘 {c}，MA20 {m20}，MA50 {m50}")
+        lines.append(f"{sym} 收盘 {c}，MA20 {show(m20)}，MA50 {show(m50)}")
     spy = snapshot.etfs["SPY"]
-    spy_c, spy_m200 = d2(spy.close), d2(spy.ma200)
+    spy_c, spy_m200 = d2(spy.close), exact(spy.ma200)
     assert spy_c is not None and spy_m200 is not None
     results = snapshot.three_segment[d1_includes_t_minus_20]
     completed = [r.symbol for r in results if r.completed]
@@ -80,7 +82,7 @@ def score_price(snapshot: MarketSnapshot, d1_includes_t_minus_20: bool) -> Dimen
         + f"。收盘价 < MA50：{'、'.join(below50) or '无'}（{len(below50)}只）；"
         + f"收盘价 < MA20：{'、'.join(below20) or '无'}（{len(below20)}只）；"
         + f"三环节（d1 候选 {scope}）完成：{'、'.join(completed) or '无'}；"
-        + f"SPY 收盘 {spy_c} {'<' if c_ else '≥'} MA200 {spy_m200}。"
+        + f"SPY 收盘 {spy_c} {'<' if c_ else '≥'} MA200 {show(spy_m200)}。"
     )
     if triggered:
         calc = detail + f"满足{'、'.join(triggered)} → 2分"
@@ -122,7 +124,8 @@ def score_breadth(snapshot: MarketSnapshot) -> DimensionScore:
     spy_c = d2(snapshot.etfs["SPY"].close)
     hi20 = d2(snapshot.spy_window_max_close)
     assert spy_c is not None and hi20 is not None
-    near_high = spy_c >= hi20 * SPY_NEAR_HIGH  # 乘积为精确的 Decimal
+    threshold = hi20 * SPY_NEAR_HIGH  # 精确乘积，不取整
+    near_high = spy_c >= threshold
 
     def rule(v: Values) -> Outcome:
         f, w, f5, w5 = v["F"], v["W"], v["F5"], v["W5"]
@@ -131,7 +134,7 @@ def score_breadth(snapshot: MarketSnapshot) -> DimensionScore:
         b = f < B40 and near_high
         calc = (
             f"F={f}，W={w}，L=min(F,W)={low}，F5={f5}，W5={w5}；"
-            f"SPY 收盘 {spy_c} vs 20日最高 {hi20}×0.98={hi20 * SPY_NEAR_HIGH}"
+            f"SPY 收盘 {spy_c} vs 20日最高 {hi20}×0.98={threshold}"
             f"（{'≥' if near_high else '<'}）。"
         )
         trig = tuple(x for x, hit in (("2分(a)", a), ("2分(b)", b)) if hit)
@@ -158,12 +161,15 @@ def score_vix(snapshot: MarketSnapshot) -> DimensionScore:
 
     def rule(v: Values) -> Outcome:
         vv, v5 = v["V"], v["V5"]
-        g = pct_change(vv, v5)
-        calc = f"V={vv}，V5={v5}，g=V÷V5−1={g}%。"
-        if vv >= V25:
-            return Outcome(2, ("2分：V≥25",), calc + "V≥25 → 2分")
-        if vv >= V20 and g >= G30:
-            return Outcome(2, ("2分：V≥20且g≥30%",), calc + "V≥20 且 g≥30% → 2分")
+        g = pct_change(vv, v5)  # 精确值，不取整
+        calc = f"V={vv}，V5={v5}，g=V÷V5−1={show(g)}%。"
+        trig = tuple(
+            x
+            for x, hit in (("2分：V≥25", vv >= V25), ("2分：V≥20且g≥30%", vv >= V20 and g >= G30))
+            if hit
+        )
+        if trig:
+            return Outcome(2, trig, calc + f"满足{'、'.join(trig)} → 2分")
         if vv < V18 and g < G20:
             return Outcome(0, ("0分",), calc + "V<18 且 g<20% → 0分")
         return Outcome(1, ("1分",), calc + "其余有效组合 → 1分")
@@ -203,7 +209,7 @@ def score_rates(snapshot: MarketSnapshot) -> DimensionScore:
         y, y20 = v["y"], v["y20"]
         h = y if h_others is None else max(h_others, y)
         dy = bp(y, y20)
-        calc = f"y={y}，H={h}，T−20 的 y={y20}，Δy=100×(y−T−20)={dy}bp。"
+        calc = f"y={y}，H={h}，T−20 的 y={y20}，Δy=100×(y−T−20)={show(dy)}bp。"
         if y == h and dy >= DY25:
             return Outcome(2, ("2分",), calc + "y=H 且 Δy≥25 → 2分")
         if y < h:
@@ -242,7 +248,7 @@ def _credit_rule(lag: int | None, o1_date: object, o6_date: object) -> Callable[
     def rule(v: Values) -> Outcome:
         o1, o6 = v["O1"], v["O6"]
         doas = bp(o1, o6)
-        calc = f"O1（{o1_date}）={o1}%，O6（{o6_date}）={o6}%，ΔOAS=100×(O1−O6)={doas}bp。"
+        calc = f"O1（{o1_date}）={o1}%，O6（{o6_date}）={o6}%，ΔOAS=100×(O1−O6)={show(doas)}bp。"
         if doas >= DOAS20 or o1 >= OAS_HIGH:
             trig = tuple(
                 x

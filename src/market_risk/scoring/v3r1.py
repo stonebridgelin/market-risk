@@ -18,8 +18,10 @@ from market_risk.scoring.common import (
     bp,
     d2,
     evaluate_dimension,
+    exact,
     grid,
     same_result,
+    show,
     vintage_or_current,
 )
 
@@ -45,7 +47,7 @@ def score_price(snapshot: MarketSnapshot) -> DimensionScore:
     below50: list[str] = []
     below20: list[str] = []
     for sym, e in snapshot.etfs.items():
-        c, m5, m20, m50 = d2(e.close), d2(e.ma5), d2(e.ma20), d2(e.ma50)
+        c, m5, m20, m50 = d2(e.close), exact(e.ma5), exact(e.ma20), exact(e.ma50)
         assert c is not None and m5 is not None and m20 is not None and m50 is not None
         if c < m50:
             below50.append(sym)
@@ -53,9 +55,9 @@ def score_price(snapshot: MarketSnapshot) -> DimensionScore:
                 both.append(sym)
         if c < m20:
             below20.append(sym)
-        lines.append(f"{sym} 收盘 {c}，MA5 {m5}，MA20 {m20}，MA50 {m50}")
+        lines.append(f"{sym} 收盘 {c}，MA5 {show(m5)}，MA20 {show(m20)}，MA50 {show(m50)}")
     spy = snapshot.etfs["SPY"]
-    spy_c, spy_m200 = d2(spy.close), d2(spy.ma200)
+    spy_c, spy_m200 = d2(spy.close), exact(spy.ma200)
     assert spy_c is not None and spy_m200 is not None
     a = len(both) >= 2
     b = spy_c < spy_m200
@@ -64,7 +66,7 @@ def score_price(snapshot: MarketSnapshot) -> DimensionScore:
         "；".join(lines)
         + f"。同时满足收盘价<MA50 与 MA5<MA50：{'、'.join(both) or '无'}（{len(both)}只）；"
         + f"收盘价<MA50：{'、'.join(below50) or '无'}；收盘价<MA20：{'、'.join(below20) or '无'}"
-        + f"（{len(below20)}只）；SPY 收盘 {spy_c} {'<' if b else '≥'} MA200 {spy_m200}。"
+        + f"（{len(below20)}只）；SPY 收盘 {spy_c} {'<' if b else '≥'} MA200 {show(spy_m200)}。"
     )
     if triggered:
         calc = detail + f"满足{'、'.join(triggered)} → 2分"
@@ -119,7 +121,7 @@ def _credit_rule(o1_date: object, o6_date: object) -> Callable[[Values], Outcome
     def rule(v: Values) -> Outcome:
         o1, o6 = v["O1"], v["O6"]
         doas = bp(o1, o6)
-        calc = f"O1（{o1_date}）={o1}%，O6（{o6_date}）={o6}%，ΔOAS=100×(O1−O6)={doas}bp。"
+        calc = f"O1（{o1_date}）={o1}%，O6（{o6_date}）={o6}%，ΔOAS=100×(O1−O6)={show(doas)}bp。"
         if doas >= DOAS20 or o1 >= OAS_HIGH:
             trig = tuple(
                 x
