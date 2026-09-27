@@ -1,0 +1,45 @@
+# 标的登记表（docs/TRADINGVIEW.md 第4节）
+#
+# 字段：
+#   symbol        程序内部使用的名称（清洗结果文件名）
+#   tv_symbol     TradingView 代码，如 INDEX:S5FI（导出文件名中的 INDEX_S5FI 还原而来）
+#   name          中文名称
+#   category      breadth / etf / volatility / rates / credit / other
+#   usage         scoring（参与评分）/ crosscheck（与接口数据互相校验）/ reference（只保存）
+#   unit          percent / index / price / ratio / count
+#   timezone      UNIX 时间戳换算日期所用的时区（默认 America/New_York）
+#   calendar      nyse（按 NYSE 交易日核对）/ bond（债市营业日，出现在股市休市日属正常）/ none
+#   inception     标的起始日期（可选），用于提示"历史是否已完整加载"
+#   filename_aliases  文件名无法按"交易所_代码, 周期.csv"解析时，在此登记文件名前缀
+#   known_values  已知读数（收盘值），用于校验数值与日期是否对齐（容差 0.005）
+
+- symbol: S5FI
+  tv_symbol: INDEX:S5FI
+  name: 标普500成分股站上50日均线比例
+  category: breadth
+  usage: scoring
+  unit: percent
+  timezone: America/New_York
+  calendar: nyse
+  known_values:          # 来自截图读数（SOP 第10节、SPEC 第9节）
+    2025-08-29: 63.22
+    2025-09-26: 54.67
+    2025-10-24: 52.88
+    2025-10-31: 40.15
+    2025-11-28: 58.44
+
+- symbol: S5TW
+  tv_symbol: INDEX:S5TW
+  name: 标普500成分股站上20日均线比例
+  category: breadth
+  usage: scoring
+  unit: percent
+  timezone: America/New_York
+  calendar: nyse
+  known_values:
+    2025-08-29: 67.59
+    2025-09-26: 51.09
+    # SOP 10.1 样本2备注"前一日S5TW为37.97%"（2025-09-25）未列入：来源不是截图读数，待用户确认后再加
+    2025-10-24: 57.65
+    2025-10-31: 38.56
+    2025-11-28: 76.73

@@ -17,7 +17,8 @@ RISK_SCORING = "risk_scoring"
 CACHE_SOURCES = ("yahoo", "fred", "treasury", "cboe")
 
 _SUBJECT_RE = re.compile(r"^[A-Z0-9]{1,10}([.\-][A-Z0-9]{1,5})?$")  # 如 NVDA、BRK.B
-_FRAMEWORK_RE = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
+_TV_SYMBOL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_\-]{0,39}$")  # 如 S5FI、ES1_、US10Y
+_FRAMEWORK_RE =re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 _CACHE_KEY_RE = re.compile(r"^[A-Za-z0-9]+([_.\-][A-Za-z0-9]+)*$")
 _COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
 _RUN_ID_RE = re.compile(r"^run_\d{8}T\d{6}Z_[0-9a-f]{7}(_\d+)?$")
@@ -111,6 +112,29 @@ class StoragePaths:
     @property
     def legacy_excel(self) -> Path:
         return self.root / "data" / "legacy" / "backtest_record_legacy.xlsx"
+
+    # ---- TradingView 导出数据（docs/TRADINGVIEW.md 第2节）----
+    @property
+    def tv_raw_root(self) -> Path:
+        """原始导出文件根目录（只读，提交 git）。"""
+        return self.manual_dir / "tradingview" / "raw"
+
+    def tv_raw_dir(self, export_date: dt.date) -> Path:
+        return self.tv_raw_root / export_date.isoformat()
+
+    @property
+    def tv_manifest(self) -> Path:
+        return self.manual_dir / "tradingview" / "manifest.csv"
+
+    @property
+    def tv_processed_dir(self) -> Path:
+        """清洗后的数据（不提交 git，可由原始文件重建）。"""
+        return self.root / "data" / "processed" / "tradingview"
+
+    def tv_processed_file(self, symbol: str) -> Path:
+        if not _TV_SYMBOL_RE.match(symbol):
+            raise PathError(f"TradingView 标的名不合法：{symbol!r}")
+        return self.tv_processed_dir / f"{symbol}.csv"
 
     # ---- data/materials ----
     def materials_dir(self, subject: str, base_date: dt.date) -> Path:

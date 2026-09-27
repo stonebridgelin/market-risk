@@ -68,6 +68,80 @@ def dates(date: Annotated[str, typer.Option("--date", help="基准日 YYYY-MM-DD
         typer.echo(f"日历核对：{note}", err=True)
 
 
+tv_app = typer.Typer(help="TradingView 导出数据：导入、校验、列表（docs/TRADINGVIEW.md）")
+app.add_typer(tv_app, name="tv")
+
+
+def _parse_datetime(value: str) -> dt.datetime:
+    try:
+        parsed = dt.datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise typer.BadParameter(f"时间格式应为 ISO，如 2026-09-26T15:30-04:00：{value}") from exc
+    if parsed.tzinfo is None:
+        raise typer.BadParameter("导出时间必须带时区偏移，如 2026-09-26T15:30-04:00")
+    return parsed
+
+
+@tv_app.command("import")
+def tv_import(
+    directory: Annotated[Path, typer.Option("--dir", help="原始文件目录 raw/<导出日期>/")],
+    export_date: Annotated[
+        str | None, typer.Option("--export-date", help="导出日期（默认取目录名）")
+    ] = None,
+    export_time: Annotated[
+        str | None,
+        typer.Option("--export-time", help="导出时间（带时区；默认取文件修改时间），用于判断不完整K线"),
+    ] = None,
+) -> None:
+    """导入并校验一个目录下的全部 TradingView 导出文件，打印汇总表。"""
+    from market_risk.config import load_symbols
+    from market_risk.data import tradingview as tv
+
+    settings = load_settings()
+    paths = StoragePaths(settings.storage_root)
+    try:
+        result = tv.import_directory(
+            directory,
+            paths,
+            load_symbols(),
+            _parse_date(export_date) if export_date else None,
+            _parse_datetime(export_time) if export_time else None,
+        )
+    except tv.TradingViewError as exc:
+        typer.echo(f"错误：{exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(tv.format_import_summary(result))
+    if any(r.status == tv.FAILED for r in result.reports) or result.merge_errors:
+        raise typer.Exit(code=2)
+
+
+@tv_app.command("validate")
+def tv_validate(
+    symbol: Annotated[str | None, typer.Option("--symbol", help="只校验该标的")] = None,
+) -> None:
+    """按 manifest 重新读取并校验已导入的原始文件，重建清洗结果。"""
+    from market_risk.config import load_symbols
+    from market_risk.data import tradingview as tv
+
+    paths = StoragePaths(load_settings().storage_root)
+    manifest = tv.read_manifest(paths.tv_manifest)
+    if not manifest:
+        typer.echo("尚未导入任何 TradingView 文件")
+        return
+    result = tv.rebuild(paths, load_symbols(), manifest)
+    if symbol:
+        result.reports = [r for r in result.reports if r.symbol.upper() == symbol.upper()]
+    typer.echo(tv.format_import_summary(result))
+
+
+@tv_app.command("list")
+def tv_list() -> None:
+    """列出已导入的标的、起止日期、校验状态。"""
+    from market_risk.data import tradingview as tv
+
+    typer.echo(tv.format_list(StoragePaths(load_settings().storage_root)))
+
+
 def format_snapshot_summary(snap: MarketSnapshot) -> str:
     """快照的文字摘要（供 fetch 命令核对数据）。"""
     r = snap.refs

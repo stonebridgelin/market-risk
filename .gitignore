@@ -3,6 +3,7 @@
 
 # 可重新下载的接口缓存、可由 results/ 重建的数据库（见 docs/STORAGE.md）
 data/cache/
+data/processed/
 db/
 
 # 截图（可选，不提交）

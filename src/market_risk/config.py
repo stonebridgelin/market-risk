@@ -143,6 +143,76 @@ def load_holidays(path: Path = DEFAULT_HOLIDAYS_PATH) -> MarketHolidays:
     )
 
 
+DEFAULT_SYMBOLS_PATH = PROJECT_ROOT / "config" / "symbols.yaml"
+_USAGES = {"scoring", "crosscheck", "reference"}
+_UNITS = {"percent", "index", "price", "ratio", "count"}
+_CALENDARS = {"nyse", "bond", "none"}
+
+
+@dataclass(frozen=True)
+class SymbolInfo:
+    """config/symbols.yaml 中的一个标的（docs/TRADINGVIEW.md 第4节）。"""
+
+    symbol: str
+    tv_symbol: str
+    name: str = ""
+    category: str = "other"
+    usage: str = "reference"
+    unit: str | None = None
+    timezone: str = "America/New_York"
+    calendar: str = "nyse"
+    inception: dt.date | None = None
+    filename_aliases: tuple[str, ...] = ()
+    known_values: dict[dt.date, float] | None = None
+
+
+def _one_date(value: Any, field: str) -> dt.date:
+    return next(iter(_date_set([value], field)))
+
+
+def load_symbols(path: Path = DEFAULT_SYMBOLS_PATH) -> dict[str, SymbolInfo]:
+    """读取标的登记表，返回 {tv_symbol: SymbolInfo}。"""
+    if not path.exists():
+        raise ConfigError(f"配置文件不存在：{path}")
+    with path.open(encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or []
+    if not isinstance(raw, list):
+        raise ConfigError(f"{path} 顶层应为列表")
+    result: dict[str, SymbolInfo] = {}
+    for i, item in enumerate(raw, start=1):
+        try:
+            info = SymbolInfo(
+                symbol=str(item["symbol"]),
+                tv_symbol=str(item["tv_symbol"]).upper(),
+                name=str(item.get("name", "")),
+                category=str(item.get("category", "other")),
+                usage=str(item.get("usage", "reference")),
+                unit=item.get("unit"),
+                timezone=str(item.get("timezone", "America/New_York")),
+                calendar=str(item.get("calendar", "nyse")),
+                inception=(
+                    _one_date(item["inception"], "inception") if item.get("inception") else None
+                ),
+                filename_aliases=tuple(str(a) for a in item.get("filename_aliases") or ()),
+                known_values={
+                    _one_date(d, "known_values"): float(v)
+                    for d, v in (item.get("known_values") or {}).items()
+                },
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ConfigError(f"{path} 第{i}个标的格式错误：{exc}") from exc
+        if info.usage not in _USAGES:
+            raise ConfigError(f"{info.symbol}：usage 应为 {sorted(_USAGES)}")
+        if info.unit is not None and info.unit not in _UNITS:
+            raise ConfigError(f"{info.symbol}：unit 应为 {sorted(_UNITS)}")
+        if info.calendar not in _CALENDARS:
+            raise ConfigError(f"{info.symbol}：calendar 应为 {sorted(_CALENDARS)}")
+        if info.tv_symbol in result:
+            raise ConfigError(f"{path} 中 {info.tv_symbol} 重复登记")
+        result[info.tv_symbol] = info
+    return result
+
+
 def get_fred_api_key(env_path: Path | None = None) -> str:
     """从 .env 或环境变量读取 FRED_API_KEY；缺失时报错，不使用任何默认值。"""
     load_dotenv(env_path or PROJECT_ROOT / ".env", override=False)
