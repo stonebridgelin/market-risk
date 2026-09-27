@@ -258,6 +258,12 @@ market-risk/
 
 ## 6. 数据获取（`data/`）
 
+任务1补充（负责人确认）：5.6第12条的裁定类型增加 `correct`，用于已批准的不复权收盘价修正。
+YAML 增加 `corrected_value` 与 `evidence_source`，迁移0005同步参考表。data build 先比较修正前来源原值，
+再同步修正价格序列的 value/close；manifest 保存原始行、修正值与证据，来源列标明 correct。
+获批修正无需另加 `--accept-revisions`，接口历史修订仍需显式接受。原始导出与缓存不修改。
+本任务不添加实际修正条目；待处理问题集中在 `reports/price_dispute_review.md`。
+
 ### 6.0 市场数据集（2026-09-27，`docs/decisions/0001-数据存储架构.md`）
 - **评分与逐日回测一律从 `data/market/` 读取**，不直接读取接口缓存；接口缓存只作为 `market-risk data build` 的输入。
 - `data build` 由缓存（按需下载；`--offline` 只用现有缓存）、TradingView 清洗结果和手工录入生成 `data/market/daily/<序列>.csv` 与 `manifest.json`（来源、下载时间、行数、起止日期、sha256）。列：`date, value, source`，ETF 另含 `open, high, low, close, volume`（`value` = 不复权 Close）。

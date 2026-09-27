@@ -662,6 +662,6 @@ INSERT INTO market_holidays (market, date, kind, note) VALUES ('bond', '2026-07-
 INSERT INTO market_holidays (market, date, kind, note) VALUES ('bond', '2026-09-04', 'early_close', '劳动节前（长周末）');
 
 -- data_decisions：3 行
-INSERT INTO data_decisions (date, symbol, decision, reason, decided_on) VALUES ('2015-01-19', 'BAMLH0A0HYM2', 'exclude', '马丁·路德·金纪念日；SIFMA 建议全天休市，财政部无数据，已确认为债市休市日', '2026-09-27');
-INSERT INTO data_decisions (date, symbol, decision, reason, decided_on) VALUES ('2026-06-18', 'PCCE', 'invalid', '数据源错误：最低价与收盘价为 0（TradingView USI:PCCE，2026-09-26 导出），不重新导出', '2026-09-27');
-INSERT INTO data_decisions (date, symbol, decision, reason, decided_on) VALUES ('2026-07-02', 'PCCE', 'invalid', '数据源错误：最低价与收盘价为 0（TradingView USI:PCCE，2026-09-26 导出），不重新导出', '2026-09-27');
+INSERT INTO data_decisions (date, symbol, decision, reason, decided_on, corrected_value, evidence_source) VALUES ('2015-01-19', 'BAMLH0A0HYM2', 'exclude', '马丁·路德·金纪念日；SIFMA 建议全天休市，财政部无数据，已确认为债市休市日', '2026-09-27', NULL, NULL);
+INSERT INTO data_decisions (date, symbol, decision, reason, decided_on, corrected_value, evidence_source) VALUES ('2026-06-18', 'PCCE', 'invalid', '数据源错误：最低价与收盘价为 0（TradingView USI:PCCE，2026-09-26 导出），不重新导出', '2026-09-27', NULL, NULL);
+INSERT INTO data_decisions (date, symbol, decision, reason, decided_on, corrected_value, evidence_source) VALUES ('2026-07-02', 'PCCE', 'invalid', '数据源错误：最低价与收盘价为 0（TradingView USI:PCCE，2026-09-26 导出），不重新导出', '2026-09-27', NULL, NULL);

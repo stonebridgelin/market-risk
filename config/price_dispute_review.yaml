@@ -1,0 +1,24 @@
+# 任务1：负责人确认的残差法参数。修改门槛必须先经负责人确认。
+window_sessions: 20
+mad_scale: '1.4826'
+sigma_floor: '0.0001'
+abnormal_z: '6'
+normal_z: '3'
+high_abnormal_z: '10'
+high_normal_z: '2'
+reversal_min: '0.5'
+reversal_max: '1.5'
+index_tolerance: '0.02'
+benchmarks: {SPY: SPX, QQQ: NDX, RSP: SPX}
+index_tickers: {SPX: '^GSPC', NDX: '^NDX'}
+cases:
+  - {symbol: SPY, date: 2009-07-16}
+  - {symbol: SPY, date: 2009-10-01}
+  - {symbol: SPY, date: 2012-01-20}
+  - {symbol: SPY, date: 2015-08-21}
+  - {symbol: SPY, date: 2015-08-24}
+  - {symbol: SPY, date: 2016-06-24}
+  - {symbol: SPY, date: 2019-07-16}
+  - {symbol: QQQ, date: 2008-09-08}
+  - {symbol: QQQ, date: 2010-11-26}
+  - {symbol: RSP, date: 2016-06-24}

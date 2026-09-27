@@ -316,7 +316,8 @@ def reference_rows(config_dir: Path | None = None) -> dict[str, list[dict[str, A
         "known_values": json.dumps({d.isoformat(): v for d, v in sorted((s.known_values or {}).items())}),
     } for s in sorted(load_symbols(cfg / "symbols.yaml").values(), key=lambda s: s.symbol)]
     decisions = [{"date": d.date, "symbol": d.symbol, "decision": d.decision, "reason": d.reason,
-                  "decided_on": d.decided_on}
+                  "decided_on": d.decided_on, "corrected_value": d.corrected_value,
+                  "evidence_source": d.evidence_source}
                  for d in sorted(load_data_decisions(cfg / "data_decisions.yaml"), key=lambda d: (d.date, d.symbol))]
     return {"symbols": symbols, "market_holidays": holiday_rows(cfg / "holidays.yaml"),
             "data_decisions": decisions}

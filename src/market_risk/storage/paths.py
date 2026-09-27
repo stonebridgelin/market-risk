@@ -235,6 +235,10 @@ class StoragePaths:
         return self.reports_dir / "tradingview_crosscheck.md"
 
     @property
+    def price_dispute_review_md(self) -> Path:
+        return self.reports_dir / "price_dispute_review.md"
+
+    @property
     def holiday_audit_md(self) -> Path:
         return self.reports_dir / "holiday_calendar_audit.md"
 

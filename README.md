@@ -129,6 +129,19 @@ uv run market-risk tv crosscheck
 ```
 
 ```bash
+uv run market-risk tv review-prices
+```
+
+`tv review-prices` 按 `config/price_dispute_review.yaml` 的固定日收益率残差法，核查10个争议收盘价，
+写入 `reports/price_dispute_review.md`。ETF 从市场数据集读取（已有人工修正时恢复来源原值用于审查），
+参照指数从 TradingView 读取；Yahoo 指数和 ETF 除息记录只下载到审计缓存。
+配置了 Tiingo 密钥时复用原有第三方核对。不调整门槛，不写入实际修正裁定。
+
+批准价格修正后，在 `config/data_decisions.yaml` 登记 `decision: correct`、`corrected_value`、
+`evidence_source`、`reason`、标的、日期及裁定日期，再运行 `data build`。构建先比较来源原值，
+随后应用裁定；获批修正不要求额外 `--accept-revisions`，接口历史修订仍需此参数。
+
+```bash
 uv run market-risk tv compare --symbol BAMLH0A0HYM2
 ```
 
@@ -241,6 +254,7 @@ uv run market-risk stats --from 2025-08-01 --to 2026-09-30
 ## 7. 常见问题
 
 - **提示"未配置 FRED_API_KEY"**：见 2.1 节。
+- **Windows 输出报 GBK 无法编码字符**：PowerShell 中执行 `$env:PYTHONIOENCODING = 'utf-8'` 后重跑命令。
 - **财政部或 FRED 暂时访问失败**：程序会重试 3 次；财政部失败时自动改用 DGS10 并在数据说明中注明。
 - **提示"需要补录 YYYY-MM-DD 的 S5FI、S5TW 读数"**：规则需要 5 日前读数，用 `breadth add` 或 `score --s5fi-t5 --s5tw-t5` 补录后重新运行。
 - **tv import 报"疑似日期偏移"**：多半是 UNIX 时间戳为 UTC 午夜；把 `symbols.yaml` 中该标的的 `timezone` 改为 `UTC` 后运行 `tv validate`。

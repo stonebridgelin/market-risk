@@ -7,6 +7,11 @@
 #               / invalid（无效数据：数据源错误，TradingView 导入时排除该行，对该标的该日期的所有导出文件生效）
 #   reason      理由
 #   decided_on  裁定日期
+#   correct     人工批准的价格修正：仅 data build 应用，不修改原始导出或接口缓存
+#   corrected_value  修正后的不复权收盘价（正数，最多4位小数；仅 correct 必填）
+#   evidence_source  证据来源（仅 correct 必填）
+# 修正前整行及修正值保存在市场数据 manifest；历史修订检测比较修正前的来源原值。
+# 当前不登记实际 correct 条目，须由负责人审阅 reports/price_dispute_review.md 后批准。
 #
 # 2026-09-27 起债市休市日的 OAS 观测按统一规则处理（SPEC 5.6 第10条）：一律排除，自然月末例外（v2-M 计入，v3-R1 不计入）。
 # 本表只用于规则无法覆盖或需要偏离规则的日期；表中裁定优先于规则。清单见 reports/holiday_calendar_audit.md 第三部分。

@@ -13,7 +13,7 @@ import datetime as dt
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from market_risk import calendar as mcal
 from market_risk.config import (
@@ -29,6 +29,10 @@ from market_risk.models import BreadthReading, DateReferences, MarketSnapshot
 from market_risk.storage.paths import MARKET, RISK_SCORING, StoragePaths
 
 MODES = ("backtest", "daily")
+
+if TYPE_CHECKING:
+    from market_risk.data.price_review import ReviewConfig, ReviewResult
+    from market_risk.data.price_review_inputs import ReviewInputs
 
 
 class ServiceError(ValueError):
@@ -154,7 +158,8 @@ def data_build(ctx: Context, offline: bool = False, refresh: bool = False, accep
         raise ServiceError(f"数据集生成失败：{exc}") from exc
     names = {s.name for s in series}
     result = market.build_dataset(ctx.paths, series, accept_revisions,
-                                  conflicts if names & {"S5FI", "S5TW"} else None, now)
+                                  conflicts if names & {"S5FI", "S5TW"} else None, now,
+                                  decisions=load_data_decisions())
     rev_path = None
     if result.revisions:
         stamp = (now or dt.datetime.now(dt.UTC)).isoformat(timespec="seconds")
@@ -465,6 +470,58 @@ def third_party_checks(results: list[Any], infos: Mapping[str, SymbolInfo],
             continue
         r.third_party_note = f"{source} 已用已知读数验证为不复权（{len(known)} 个读数全部相符）"
         r.third_party = [ThirdPartyCheck(d, a, b, closes.get(d), source) for d, a, b, _ in items]
+
+
+@dataclass(frozen=True)
+class PriceReviewReport:
+    results: tuple[ReviewResult, ...]
+    text: str
+    path: Path
+
+
+def review_price_disputes(
+    ctx: Context, refresh: bool = False, config: ReviewConfig | None = None, inputs: ReviewInputs | None = None,
+    third_party: tuple[ThirdPartyLoader | None, str] | None = None,
+) -> PriceReviewReport:
+    """固定残差法审查；网络数据只用于审计，不应用价格修正、不调用评分或标签。"""
+    from market_risk.data.price_review import ReviewResult, load_review_config, render_review, review_case
+    from market_risk.data.price_review_inputs import collect_review_inputs
+    from market_risk.data.tv_compare import CompareResult
+
+    config = config or load_review_config()
+    inputs = inputs or collect_review_inputs(ctx.paths, ctx.settings, config, refresh)
+    results = []
+    comparisons = {}
+    infos = {info.symbol: info for info in load_symbols().values()}
+    for symbol, day in config.cases:
+        benchmark = config.benchmarks[symbol]
+        error = inputs.errors.get(symbol) or inputs.errors.get(benchmark)
+        if symbol not in inputs.dividends:
+            error = error or "除息记录未取得，不能假定无除息日"
+        if error:
+            result = ReviewResult(symbol, day, mcal.shift_trading_days(day, 1), benchmark, None, None, (),
+                                  "无法判定", "不适用", error)
+        else:
+            result = review_case(symbol, day, inputs.tv.get(symbol, {}), inputs.yahoo.get(symbol, {}),
+                                 inputs.tv.get(benchmark, {}), inputs.yahoo_indices.get(benchmark, {}),
+                                 inputs.dividends.get(symbol, frozenset()), config)
+        results.append(result)
+        info = infos[symbol]
+        comparison = comparisons.setdefault(symbol, CompareResult(symbol, info.tv_symbol, info.api_source or "", 0.02))
+        a, b = inputs.tv.get(symbol, {}).get(day), inputs.yahoo.get(symbol, {}).get(day)
+        if a is not None and b is not None:
+            comparison.mismatches.append((day, float(a), float(b), float(a - b)))
+    loader, source = third_party if third_party is not None else _default_third_party(ctx, refresh)
+    third_party_checks(list(comparisons.values()), infos, loader, source)
+    evidence = {}
+    for symbol, comparison in comparisons.items():
+        for _, day in (case for case in config.cases if case[0] == symbol):
+            evidence[symbol, day] = comparison.third_party_note or source
+        for check in comparison.third_party:
+            evidence[symbol, check.date] += f"；close={check.third}，{check.verdict}"
+    text = render_review(tuple(results), config, list(inputs.provenance), evidence)
+    _write_report(ctx.paths.price_dispute_review_md, text)
+    return PriceReviewReport(tuple(results), text, ctx.paths.price_dispute_review_md)
 
 
 def tv_crosscheck(ctx: Context, refresh: bool = False, loader: ApiLoader | None = None,

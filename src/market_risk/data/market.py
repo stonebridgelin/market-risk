@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from market_risk import calendar as mcal
-from market_risk.config import Settings
+from market_risk.config import DataDecision, Settings
 from market_risk.data.cache import NEW_YORK, Series, utc_now
 from market_risk.models import BreadthReading, SourceInfo
 from market_risk.storage.paths import StoragePaths
@@ -183,6 +183,7 @@ def build_dataset(
     accept_revisions: bool = False,
     breadth_conflicts: Mapping[dt.date, str] | None = None,
     now: dt.datetime | None = None,
+    decisions: tuple[DataDecision, ...] = (),
 ) -> BuildResult:
     """把新数据与 data/market/ 的上一版合并并写入；有未接受的修订时保留旧值并列出清单。"""
     manifest = read_manifest(paths)
@@ -191,15 +192,32 @@ def build_dataset(
     changed: list[str] = []
     notes: list[str] = []
     stamp = (now or utc_now()).astimezone(dt.UTC).isoformat(timespec="seconds")
-    for s in new_series:
+    from market_risk.data.corrections import apply_corrections, restore_originals
+
+    # 全部预检后再写文件，裁定无效时不得留下已写入的部分序列。
+    prepared = []
+    incoming = list(new_series)
+    rebuilding = {s.name for s in incoming}
+    affected = {d.symbol for d in decisions if d.decision == "correct"}
+    affected |= {name for name, entry in entries.items() if entry.get("corrections")}
+    for name in sorted(affected - rebuilding):
+        if name not in entries:
+            raise MarketDataError(f"修正标的不存在：{name}")
+        # 即使本次没有取得该序列的新缓存，也须在已有来源原值上应用/撤销裁定。
+        incoming.append(NewSeries(name, entries[name]["kind"], {}, ""))
+    for s in incoming:
         path = paths.market_daily_file(s.name)
         old = read_series_file(path)[1] if path.exists() else None
+        prev = entries.get(s.name, {})
+        old = restore_originals(old or {}, prev.get("corrections", []))
         merged, revs = merge_rows(s, old, accept_revisions)
+        merged, audit = apply_corrections(s.name, s.kind, merged, decisions)
+        prepared.append((s, path, prev, merged, revs, audit))
+    for s, path, prev, merged, revs, audit in prepared:
         revisions += revs
         notes += s.notes
         text = series_text(merged, s.columns)
         digest = sha256_text(text)
-        prev = entries.get(s.name, {})
         if prev.get("sha256") != digest or not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
@@ -208,6 +226,8 @@ def build_dataset(
         for r in merged.values():
             sources[str(r.get("source"))] = sources.get(str(r.get("source")), 0) + 1
         downloaded = max((i.downloaded_at_utc for i in s.inputs if i.downloaded_at_utc), default=None)
+        if not s.rows and prev:
+            downloaded = prev.get("downloaded_at_utc")
         if downloaded is None and s.name in changed:
             downloaded = stamp          # 只有本地输入（TradingView、手工录入）：记录生成时间
         entries[s.name] = {
@@ -215,12 +235,13 @@ def build_dataset(
             "kind": s.kind,
             "sources": dict(sorted(sources.items())),
             "downloaded_at_utc": downloaded if s.name in changed or not prev else prev.get("downloaded_at_utc"),
-            "inputs": sorted({i.cache_file or i.url for i in s.inputs}) if s.name in changed or not prev
+            "inputs": sorted({i.cache_file or i.url for i in s.inputs}) if (s.name in changed and s.inputs) or not prev
             else prev.get("inputs", []),
             "rows": len(merged),
             "first_date": min(merged).isoformat() if merged else None,
             "last_date": max(merged).isoformat() if merged else None,
             "sha256": digest,
+            **({"corrections": audit} if audit else {}),
         }
     new_manifest = {
         **manifest,

@@ -304,6 +304,16 @@ def tv_crosscheck(
     typer.echo(f"已写入 {report.path}")
 
 
+@tv_app.command("review-prices")
+def tv_review_prices(
+    refresh: Annotated[bool, typer.Option("--refresh", help="刷新审计用指数和除息记录")] = False,
+) -> None:
+    """按固定残差法核查争议收盘价，写入 reports/price_dispute_review.md。"""
+    report = _call(services.review_price_disputes, _ctx(), refresh)
+    typer.echo(report.text)
+    typer.echo(f"已写入 {report.path}")
+
+
 # ---------------------------------------------------------------------------
 # 正式记录、资料、广度、结果标签
 # ---------------------------------------------------------------------------

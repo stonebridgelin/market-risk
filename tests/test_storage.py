@@ -440,4 +440,4 @@ def test_migration_0003_keeps_data(paths):
         assert [round(float(x), 4) for x in row] == [-6.8991, -7.3424]
     finally:
         engine.dispose()
-    assert db.head_revision() == "0004"
+    assert db.head_revision() == "0005"  # 任务1已批准新增价格裁定字段迁移

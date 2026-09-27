@@ -175,6 +175,10 @@ market-risk/
 
 ### 4.3 MySQL 兼容性验证
 
+任务1迁移0005在 `data_decisions` 增加 `corrected_value Numeric(20, 8)` 与 `evidence_source Text`。
+两字段随 YAML 重建及 SQL 导出；已有裁定保持 NULL。阶段6回测结构迁移顺延为0006（负责人已确认）。
+价格数据集保留修正前整行与裁定的方式见 `data/market/README.md`，数据库仍不保存市场价格序列。
+
 - 命令 `market-risk db verify-mysql`（需 `uv sync --extra mysql` 安装 pymysql）：连接地址从 `.env` 的 `MYSQL_VERIFY_URL` 读取，未设置时跳过、不报错；**地址、账户、密码不得输出到任何文件、日志或汇报**，错误信息脱敏。
 - 验证库必须专用：库中只允许本项目的表，否则拒绝清空。
 - 流程：在验证库上执行 Alembic 迁移与 `rebuild-db`，与临时 SQLite 的 `rebuild-db` 逐表逐行比对（小数按数值、布尔、日期规范化后比较）；再用 `db/sql/` 的 SQL 建库核对参考表；报告字符集（utf8mb4）、排序规则与大小写敏感性。

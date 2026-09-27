@@ -125,3 +125,22 @@ def test_snapshot_module_does_not_import_network_or_outcomes():
     source = inspect.getsource(snapshot)
     for forbidden in ("requests", "yfinance", "outcomes", "open(", "read_text"):
         assert forbidden not in source, forbidden
+
+
+def test_scoring_never_imports_two_sided_price_audit():
+    """双侧残差审计不能进入评分依赖链；指数核查与除息记录也不能作为评分输入。"""
+    import ast
+
+    from market_risk.config import PROJECT_ROOT
+
+    root = PROJECT_ROOT / 'src' / 'market_risk'
+    files = [*root.joinpath('scoring').glob('*.py'), root / 'indicators.py', root / 'pipeline.py',
+             root / 'data' / 'snapshot.py', root / 'data' / 'market.py']
+    for path in files:
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                assert 'price_review' not in (node.module or ''), path
+                assert all('price_review' not in name.name for name in node.names), path
+            elif isinstance(node, ast.Import):
+                assert all('price_review' not in name.name for name in node.names), path

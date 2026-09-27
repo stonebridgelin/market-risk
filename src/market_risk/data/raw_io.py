@@ -11,6 +11,7 @@ from __future__ import annotations
 import dataclasses
 import datetime as dt
 import json
+from decimal import Decimal
 from pathlib import Path
 
 from market_risk.config import DataDecision
@@ -54,7 +55,8 @@ def save_raw_inputs(raw: RawInputs, directory: Path) -> None:
         "notes": list(raw.notes),
         "oas_symbol": raw.oas_symbol,
         "decisions": [
-            {**dataclasses.asdict(d), "date": d.date.isoformat(), "decided_on": d.decided_on.isoformat()}
+            {**dataclasses.asdict(d), "date": d.date.isoformat(), "decided_on": d.decided_on.isoformat(),
+             "corrected_value": str(d.corrected_value) if d.corrected_value is not None else None}
             for d in raw.decisions
         ],
     }
@@ -96,7 +98,9 @@ def load_raw_inputs(
         mode=meta["mode"],
         decisions=tuple(
             DataDecision(dt.date.fromisoformat(d["date"]), d["symbol"], d["decision"], d["reason"],
-                         dt.date.fromisoformat(d["decided_on"]))
+                         dt.date.fromisoformat(d["decided_on"]),
+                         Decimal(d["corrected_value"]) if d.get("corrected_value") is not None else None,
+                         d.get("evidence_source"))
             for d in meta.get("decisions", [])
         ),
         oas_symbol=meta.get("oas_symbol", "BAMLH0A0HYM2"),

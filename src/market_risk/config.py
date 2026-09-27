@@ -8,6 +8,7 @@ from __future__ import annotations
 import datetime as dt
 import os
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -179,7 +180,7 @@ class SymbolInfo:
 
 
 DEFAULT_DECISIONS_PATH = PROJECT_ROOT / "config" / "data_decisions.yaml"
-_DECISIONS = {"exclude", "keep", "invalid"}
+_DECISIONS = {"exclude", "keep", "invalid", "correct"}
 
 
 @dataclass(frozen=True)
@@ -188,9 +189,24 @@ class DataDecision:
 
     date: dt.date
     symbol: str
-    decision: str          # exclude / keep / invalid（无效数据：TradingView 导入时排除该行）
+    decision: str          # exclude / keep / invalid / correct（人工价格修正）
     reason: str
     decided_on: dt.date
+    corrected_value: Decimal | None = None
+    evidence_source: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.decision == "correct":
+            value = self.corrected_value
+            if value is None or not value.is_finite():
+                raise ConfigError("correct 必须提供有限数值 corrected_value")
+            if (not isinstance(self.evidence_source, str) or not self.evidence_source.strip()
+                    or not self.reason.strip()):
+                raise ConfigError("correct 必须提供 evidence_source 和 reason")
+            if value <= 0 or value >= Decimal('1000000000000') or value != value.quantize(Decimal('0.0001')):
+                raise ConfigError("价格修正值必须为正数、最多4位小数，且能存入 Numeric(20, 8)")
+        elif self.corrected_value is not None or self.evidence_source is not None:
+            raise ConfigError("只有 correct 可以包含 corrected_value 和 evidence_source")
 
 
 def load_data_decisions(path: Path = DEFAULT_DECISIONS_PATH) -> tuple[DataDecision, ...]:
@@ -206,8 +222,10 @@ def load_data_decisions(path: Path = DEFAULT_DECISIONS_PATH) -> tuple[DataDecisi
     for i, item in enumerate(raw, start=1):
         try:
             d = DataDecision(_one_date(item["date"], "date"), str(item["symbol"]), str(item["decision"]),
-                             str(item.get("reason", "")), _one_date(item["decided_on"], "decided_on"))
-        except (KeyError, TypeError) as exc:
+                             str(item.get("reason", "")), _one_date(item["decided_on"], "decided_on"),
+                             Decimal(str(item["corrected_value"])) if "corrected_value" in item else None,
+                             item.get("evidence_source"))
+        except (KeyError, TypeError, InvalidOperation) as exc:
             raise ConfigError(f"{path} 第{i}条格式错误：{exc}") from exc
         if d.decision not in _DECISIONS:
             raise ConfigError(f"{path} 第{i}条：decision 应为 {sorted(_DECISIONS)}")

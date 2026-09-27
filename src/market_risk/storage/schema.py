@@ -176,9 +176,11 @@ data_decisions = Table(
     "data_decisions", metadata,
     Column("date", Date, primary_key=True),
     Column("symbol", String(40), primary_key=True),
-    Column("decision", String(16), nullable=False),    # exclude / keep / invalid
+    Column("decision", String(16), nullable=False),    # exclude / keep / invalid / correct
     Column("reason", Text),
     Column("decided_on", Date, nullable=False),
+    Column("corrected_value", DECIMAL),
+    Column("evidence_source", Text),
 )
 
 TABLES = (runs, officials, dimension_scores, totals, metrics, near_threshold, outcomes, materials, reviews,

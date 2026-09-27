@@ -1,5 +1,5 @@
 -- 由 `market-risk db export-sql` 自动生成，不得手工修改。
--- 表结构：Alembic 版本 0004（migrations/versions/），数据库：sqlite。
+-- 表结构：Alembic 版本 0005（migrations/versions/），数据库：sqlite。
 -- 具体数据不在此导出，见 db/sql/README.md。
 
 CREATE TABLE data_decisions (
@@ -8,6 +8,8 @@ CREATE TABLE data_decisions (
 	decision VARCHAR(16) NOT NULL,
 	reason TEXT,
 	decided_on DATE NOT NULL,
+	corrected_value NUMERIC(20, 8),
+	evidence_source TEXT,
 	PRIMARY KEY (date, symbol)
 );
 
@@ -165,4 +167,4 @@ CREATE TABLE totals (
 );
 
 CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL, PRIMARY KEY (version_num));
-INSERT INTO alembic_version (version_num) VALUES ('0004');
+INSERT INTO alembic_version (version_num) VALUES ('0005');
