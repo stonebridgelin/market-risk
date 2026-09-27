@@ -26,8 +26,11 @@ material_app = typer.Typer(help="资料管理")
 breadth_app = typer.Typer(help="广度读数录入")
 outcome_app = typer.Typer(help="风险事件标签（结果窗口结束后）")
 audit_app = typer.Typer(help="数据审计（休市日历、债市休市日 OAS）")
+data_app = typer.Typer(help="市场数据集 data/market/（评分输入）")
+db_app = typer.Typer(help="数据库：SQL 导出、MySQL 兼容性验证")
 for sub, name in ((tv_app, "tv"), (official_app, "official"), (material_app, "material"),
-                  (breadth_app, "breadth"), (outcome_app, "outcome"), (audit_app, "audit")):
+                  (breadth_app, "breadth"), (outcome_app, "outcome"), (audit_app, "audit"),
+                  (data_app, "data"), (db_app, "db")):
     app.add_typer(sub, name=name)
 
 MATERIAL_TYPES_HELP = ("tiger_ai_background", "chatgpt_response", "claude_review", "notes", "screenshot", "other")
@@ -150,7 +153,7 @@ def fetch(
         Path | None, typer.Option("--save-raw", help="把原始数据另存到该目录（制作离线测试数据用）")
     ] = None,
 ) -> None:  # pragma: no cover - 网络请求
-    """下载基准日所需的全部数据，截断到基准日并显示核对摘要。"""
+    """按需下载并更新数据集 data/market/（含正式样本的 ALFRED 基准日版本），截断到基准日并显示核对摘要。"""
     result = _call(services.fetch_data, _ctx(), _parse_date(date), mode, refresh, save_raw)
     if save_raw is not None:
         typer.echo(f"原始数据已保存到 {save_raw}", err=True)
@@ -181,12 +184,42 @@ def score(
     s5fi_t5: Annotated[float | None, typer.Option("--s5fi-t5", help="5个交易日前 S5FI")] = None,
     s5tw_t5: Annotated[float | None, typer.Option("--s5tw-t5", help="5个交易日前 S5TW")] = None,
     mode: Annotated[str, typer.Option("--mode", help="backtest 或 daily")] = "backtest",
-    refresh: Annotated[bool, typer.Option("--refresh", help="忽略缓存，强制重新下载")] = False,
-) -> None:  # pragma: no cover - 联网；离线部分见 services 与 pipeline 测试
-    """下载数据、计算两个版本的评分，生成运行目录下的全部输出。"""
+) -> None:  # pragma: no cover - 离线部分见 services 与 pipeline 测试
+    """从 data/market/ 读取数据、计算两个版本的评分，生成运行目录下的全部输出（数据集未覆盖基准日时先运行 fetch）。"""
     breadth = services.BreadthInput(s5fi, s5tw, s5fi_t5, s5tw_t5)
-    outcome = _call(services.score_date, _ctx(), _opt_date(date), mode, breadth, refresh)
+    outcome = _call(services.score_date, _ctx(), _opt_date(date), mode, breadth)
     typer.echo(format_run_outcome(outcome))
+
+
+def format_data_build(report: Any) -> str:
+    r = report.result
+    rows = [[name, str(e["rows"]), f"{e['first_date']} 至 {e['last_date']}",
+             "、".join(f"{k} {v}" for k, v in e["sources"].items()), "是" if name in r.changed else ""]
+            for name, e in r.series.items()]
+    lines = [f"数据集截止：{report.end}（{'离线：只用现有缓存' if report.offline else '按需下载'}）",
+             _table(["序列", "行数", "起止日期", "来源（行数）", "本次更新"], rows)]
+    lines += [f"说明：{n}" for n in r.notes]
+    if r.revisions:
+        verb = "已按 --accept-revisions 更新" if r.accepted else "未自动覆盖，保留旧值"
+        lines.append(f"历史修订 {len(r.revisions)} 处（{verb}），清单：{report.revisions_path}")
+    else:
+        lines.append("没有历史修订。")
+    lines.append(f"manifest：{r.manifest_path}")
+    return "\n".join(lines)
+
+
+@data_app.command("build")
+def data_build(
+    offline: Annotated[bool, typer.Option("--offline", help="只用现有缓存生成，不联网")] = False,
+    refresh: Annotated[bool, typer.Option("--refresh", help="忽略缓存，强制重新下载")] = False,
+    accept_revisions: Annotated[bool, typer.Option("--accept-revisions", help="接受历史修订，用新值覆盖")] = False,
+    end: Annotated[str | None, typer.Option("--end", help="截止日期（默认：已完整收盘的最近交易日）")] = None,
+) -> None:
+    """由接口缓存（按需下载）、TradingView 清洗结果和手工录入生成 data/market/ 与 manifest.json。"""
+    report = _call(services.data_build, _ctx(), offline, refresh, accept_revisions, _opt_date(end))
+    typer.echo(format_data_build(report))
+    if report.result.revisions and not accept_revisions:
+        raise typer.Exit(code=2)
 
 
 @app.command()

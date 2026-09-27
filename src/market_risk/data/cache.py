@@ -184,6 +184,79 @@ def cached_series(
     return series, info
 
 
+Rows = dict[dt.date, dict[str, float | None]]
+
+
+def rows_to_csv(rows: Rows, columns: list[str]) -> str:
+    """多列缓存格式：date,<列…>；缺失值留空。"""
+    lines = [",".join(["date", *columns])]
+    for d in sorted(rows):
+        vals = rows[d]
+        lines.append(",".join([d.isoformat(), *("" if vals.get(c) is None else repr(vals[c]) for c in columns)]))
+    return "\n".join(lines) + "\n"
+
+
+def rows_from_csv(text: str) -> Rows:
+    lines = text.strip().splitlines()
+    header = lines[0].split(",")[1:]
+    out: Rows = {}
+    for line in lines[1:]:
+        if not line.strip():
+            continue
+        cells = line.split(",")
+        out[dt.date.fromisoformat(cells[0])] = {
+            c: (float(v) if v.strip() else None) for c, v in zip(header, cells[1:], strict=True)}
+    return out
+
+
+def cached_rows(
+    paths: StoragePaths,
+    source: str,
+    key: str,
+    start: dt.date,
+    end: dt.date,
+    columns: list[str],
+    url_for_log: str,
+    download: Callable[[], Rows],
+    refresh: bool = False,
+    max_retries: int = 3,
+    backoff_seconds: float = 1.0,
+    now: dt.datetime | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> tuple[Rows, SourceInfo]:
+    """与 cached_series 相同，但每个日期有多列（如 ETF 的开高低收量）。"""
+    data_file = paths.cache_file(source, key, start, end)
+    if not refresh:
+        cached = read_cache(data_file)
+        if cached is not None and cache_usable(cached[1], end, now):
+            logger.info("使用缓存：%s", data_file)
+            return rows_from_csv(cached[0]), source_info_from_meta(cached[1])
+    rows = with_retry(download, f"下载 {source}:{key}", max_retries, backoff_seconds, sleep=sleep)
+    rows = {d: v for d, v in rows.items() if start <= d <= end}
+    if not rows:
+        raise DataFetchError(f"{source}:{key} 在 {start} 至 {end} 没有返回任何数据")
+    info = SourceInfo(
+        source=source, key=key, url=url_for_log,
+        downloaded_at_utc=(now or utc_now()).astimezone(dt.UTC).isoformat(timespec="seconds"),
+        rows=len(rows), data_start=min(rows), data_end=max(rows), from_cache=False,
+        cache_file=_relative(data_file, paths.root),
+    )
+    write_cache(data_file, rows_to_csv(rows, columns), info)
+    return rows, info
+
+
+def cached_files(paths: StoragePaths, source: str, key: str) -> list[tuple[Path, dict[str, Any]]]:
+    """某来源、某代码的全部缓存文件（按下载时间升序），供离线生成数据集使用。"""
+    directory = paths.cache_dir(source)
+    out = []
+    if directory.is_dir():
+        for f in directory.glob(f"{key}_????-??-??_????-??-??.csv"):
+            cached = read_cache(f)
+            if cached is not None:
+                out.append((f, cached[1]))
+    return sorted(out, key=lambda x: (x[1].get("downloaded_at_utc", ""), x[0].name))
+
+
 def _relative(path: Path, root: Path) -> str:
     try:
         return path.relative_to(root).as_posix()

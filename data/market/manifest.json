@@ -1,0 +1,247 @@
+{
+  "generated_at_utc": "2026-09-27T11:11:35+00:00",
+  "series": {
+    "BAMLH0A0HYM2": {
+      "file": "data/market/daily/BAMLH0A0HYM2.csv",
+      "kind": "value",
+      "sources": {
+        "fred": 795,
+        "tradingview": 6978
+      },
+      "downloaded_at_utc": "2026-09-27T11:02:08+00:00",
+      "inputs": [
+        "data/cache/fred/BAMLH0A0HYM2_1996-12-31_2026-09-25.csv",
+        "data/processed/tradingview/BAMLH0A0HYM2.csv"
+      ],
+      "rows": 7773,
+      "first_date": "1996-12-31",
+      "last_date": "2026-09-24",
+      "sha256": "17fc110cfa6875de05221285113763c9e79c840d53bbbe7603904500b92b5fc8"
+    },
+    "HYG": {
+      "file": "data/market/daily/HYG.csv",
+      "kind": "etf",
+      "sources": {
+        "yahoo": 4897
+      },
+      "downloaded_at_utc": "2026-09-27T11:01:49+00:00",
+      "inputs": [
+        "data/cache/yahoo/HYG_OHLCV_1990-01-01_2026-09-25.csv"
+      ],
+      "rows": 4897,
+      "first_date": "2007-04-11",
+      "last_date": "2026-09-25",
+      "sha256": "fa80fe7ae4d61aed974c71510db09155ebea90297d07f2c95074f67798e941fb"
+    },
+    "LQD": {
+      "file": "data/market/daily/LQD.csv",
+      "kind": "etf",
+      "sources": {
+        "yahoo": 6079
+      },
+      "downloaded_at_utc": "2026-09-27T11:01:53+00:00",
+      "inputs": [
+        "data/cache/yahoo/LQD_OHLCV_1990-01-01_2026-09-25.csv"
+      ],
+      "rows": 6079,
+      "first_date": "2002-07-30",
+      "last_date": "2026-09-25",
+      "sha256": "cb1aec2de1ed279caf1e6b83181ea87b4de5f574a2ee72b11348d87c5bcb27b6"
+    },
+    "QQQ": {
+      "file": "data/market/daily/QQQ.csv",
+      "kind": "etf",
+      "sources": {
+        "yahoo": 6930
+      },
+      "downloaded_at_utc": "2026-09-27T11:01:45+00:00",
+      "inputs": [
+        "data/cache/yahoo/QQQ_OHLCV_1990-01-01_2026-09-25.csv"
+      ],
+      "rows": 6930,
+      "first_date": "1999-03-10",
+      "last_date": "2026-09-25",
+      "sha256": "ba60219898897b7e7439a32a4cebbace109f47a2864e9d49f56d272c36e6088c"
+    },
+    "RSP": {
+      "file": "data/market/daily/RSP.csv",
+      "kind": "etf",
+      "sources": {
+        "yahoo": 5889
+      },
+      "downloaded_at_utc": "2026-09-27T11:01:47+00:00",
+      "inputs": [
+        "data/cache/yahoo/RSP_OHLCV_1990-01-01_2026-09-25.csv"
+      ],
+      "rows": 5889,
+      "first_date": "2003-05-01",
+      "last_date": "2026-09-25",
+      "sha256": "084953a99f23f74ee4715e022886578452e45612708d45e9a83a5887c8d4ffe4"
+    },
+    "S5FI": {
+      "file": "data/market/daily/S5FI.csv",
+      "kind": "value",
+      "sources": {
+        "tradingview": 4575
+      },
+      "downloaded_at_utc": "2026-09-27T11:11:35+00:00",
+      "inputs": [
+        "data/manual/breadth.csv",
+        "data/processed/tradingview/S5FI.csv"
+      ],
+      "rows": 4575,
+      "first_date": "2008-08-04",
+      "last_date": "2026-09-25",
+      "sha256": "5626b55d0c7d6ca0f8870b8152666b62e2072e20dfd247f9f50f7e16efca9cbb"
+    },
+    "S5TW": {
+      "file": "data/market/daily/S5TW.csv",
+      "kind": "value",
+      "sources": {
+        "tradingview": 4575
+      },
+      "downloaded_at_utc": "2026-09-27T11:11:35+00:00",
+      "inputs": [
+        "data/manual/breadth.csv",
+        "data/processed/tradingview/S5TW.csv"
+      ],
+      "rows": 4575,
+      "first_date": "2008-08-04",
+      "last_date": "2026-09-25",
+      "sha256": "ad977fe30931dbe5c223a4a3b4e7e747fae5c8dbda52c44c847ae409517bc904"
+    },
+    "SPY": {
+      "file": "data/market/daily/SPY.csv",
+      "kind": "etf",
+      "sources": {
+        "yahoo": 8472
+      },
+      "downloaded_at_utc": "2026-09-27T11:01:43+00:00",
+      "inputs": [
+        "data/cache/yahoo/SPY_OHLCV_1990-01-01_2026-09-25.csv"
+      ],
+      "rows": 8472,
+      "first_date": "1993-01-29",
+      "last_date": "2026-09-25",
+      "sha256": "186a9a13a0ea447b70615a2bef70447d6a38cd5da98af2c7389181ae9e50ffc2"
+    },
+    "UST10Y": {
+      "file": "data/market/daily/UST10Y.csv",
+      "kind": "value",
+      "sources": {
+        "treasury": 9190
+      },
+      "downloaded_at_utc": "2026-09-27T11:04:49+00:00",
+      "inputs": [
+        "data/cache/treasury/10Y_1990-01-01_1990-12-31.csv",
+        "data/cache/treasury/10Y_1991-01-01_1991-12-31.csv",
+        "data/cache/treasury/10Y_1992-01-01_1992-12-31.csv",
+        "data/cache/treasury/10Y_1993-01-01_1993-12-31.csv",
+        "data/cache/treasury/10Y_1994-01-01_1994-12-31.csv",
+        "data/cache/treasury/10Y_1995-01-01_1995-12-31.csv",
+        "data/cache/treasury/10Y_1996-01-01_1996-12-31.csv",
+        "data/cache/treasury/10Y_1997-01-01_1997-12-31.csv",
+        "data/cache/treasury/10Y_1998-01-01_1998-12-31.csv",
+        "data/cache/treasury/10Y_1999-01-01_1999-12-31.csv",
+        "data/cache/treasury/10Y_2000-01-01_2000-12-31.csv",
+        "data/cache/treasury/10Y_2001-01-01_2001-12-31.csv",
+        "data/cache/treasury/10Y_2002-01-01_2002-12-31.csv",
+        "data/cache/treasury/10Y_2003-01-01_2003-12-31.csv",
+        "data/cache/treasury/10Y_2004-01-01_2004-12-31.csv",
+        "data/cache/treasury/10Y_2005-01-01_2005-12-31.csv",
+        "data/cache/treasury/10Y_2006-01-01_2006-12-31.csv",
+        "data/cache/treasury/10Y_2007-01-01_2007-12-31.csv",
+        "data/cache/treasury/10Y_2008-01-01_2008-12-31.csv",
+        "data/cache/treasury/10Y_2009-01-01_2009-12-31.csv",
+        "data/cache/treasury/10Y_2010-01-01_2010-12-31.csv",
+        "data/cache/treasury/10Y_2011-01-01_2011-12-31.csv",
+        "data/cache/treasury/10Y_2012-01-01_2012-12-31.csv",
+        "data/cache/treasury/10Y_2013-01-01_2013-12-31.csv",
+        "data/cache/treasury/10Y_2014-01-01_2014-12-31.csv",
+        "data/cache/treasury/10Y_2015-01-01_2015-12-31.csv",
+        "data/cache/treasury/10Y_2016-01-01_2016-12-31.csv",
+        "data/cache/treasury/10Y_2017-01-01_2017-12-31.csv",
+        "data/cache/treasury/10Y_2018-01-01_2018-12-31.csv",
+        "data/cache/treasury/10Y_2019-01-01_2019-12-31.csv",
+        "data/cache/treasury/10Y_2020-01-01_2020-12-31.csv",
+        "data/cache/treasury/10Y_2021-01-01_2021-12-31.csv",
+        "data/cache/treasury/10Y_2022-01-01_2022-12-31.csv",
+        "data/cache/treasury/10Y_2023-01-01_2023-12-31.csv",
+        "data/cache/treasury/10Y_2024-01-01_2024-12-31.csv",
+        "data/cache/treasury/10Y_2025-01-01_2025-12-31.csv",
+        "data/cache/treasury/10Y_2026-01-01_2026-09-25.csv"
+      ],
+      "rows": 9190,
+      "first_date": "1990-01-02",
+      "last_date": "2026-09-25",
+      "sha256": "8a6c0758f373b57d6251e14c9db9516a23e392601e422b464bf9d34c54a222dd"
+    },
+    "VIXCLS": {
+      "file": "data/market/daily/VIXCLS.csv",
+      "kind": "value",
+      "sources": {
+        "cboe": 3,
+        "fred": 9581
+      },
+      "downloaded_at_utc": "2026-09-27T11:02:00+00:00",
+      "inputs": [
+        "data/cache/cboe/VIX_1990-01-01_2026-09-25.csv",
+        "data/cache/fred/VIXCLS_1990-01-01_2026-09-25.csv"
+      ],
+      "rows": 9584,
+      "first_date": "1990-01-02",
+      "last_date": "2026-09-25",
+      "sha256": "a10d321562220b37b12be54c760dd3e3c917d6fe0040ab6627705f351055bb69"
+    },
+    "VIX_CBOE": {
+      "file": "data/market/daily/VIX_CBOE.csv",
+      "kind": "value",
+      "sources": {
+        "cboe": 9281
+      },
+      "downloaded_at_utc": "2026-09-27T11:02:00+00:00",
+      "inputs": [
+        "data/cache/cboe/VIX_1990-01-01_2026-09-25.csv"
+      ],
+      "rows": 9281,
+      "first_date": "1990-01-02",
+      "last_date": "2026-09-25",
+      "sha256": "aca2a76733267becad5fc79393e7e72ee0c75d693dd71101ebab1591d0e0d664"
+    }
+  },
+  "vintage": {
+    "BAMLH0A0HYM2_2025-08-29.csv": {
+      "file": "data/market/vintage/BAMLH0A0HYM2_2025-08-29.csv",
+      "series": "BAMLH0A0HYM2",
+      "base_date": "2025-08-29",
+      "downloaded_at_utc": "2026-09-27T00:49:14+00:00",
+      "rows": 74,
+      "sha256": "9a16b980a3b7b910c72cdfcf24cf4b58ddb7c52091d2800aa02cc1a1e1476631"
+    },
+    "BAMLH0A0HYM2_2025-09-26.csv": {
+      "file": "data/market/vintage/BAMLH0A0HYM2_2025-09-26.csv",
+      "series": "BAMLH0A0HYM2",
+      "base_date": "2025-09-26",
+      "downloaded_at_utc": "2026-09-27T00:49:17+00:00",
+      "rows": 74,
+      "sha256": "0acfc61e0e4faa25c33e253d5f5fa80233dd39c179079d88b5c9cc6f61a2d950"
+    },
+    "BAMLH0A0HYM2_2025-10-31.csv": {
+      "file": "data/market/vintage/BAMLH0A0HYM2_2025-10-31.csv",
+      "series": "BAMLH0A0HYM2",
+      "base_date": "2025-10-31",
+      "downloaded_at_utc": "2026-09-27T00:49:20+00:00",
+      "rows": 74,
+      "sha256": "8e19e24085a6cf823b5aebf47bfde7b54d7924e2bc22942076087e6a876a8829"
+    },
+    "BAMLH0A0HYM2_2025-11-28.csv": {
+      "file": "data/market/vintage/BAMLH0A0HYM2_2025-11-28.csv",
+      "series": "BAMLH0A0HYM2",
+      "base_date": "2025-11-28",
+      "downloaded_at_utc": "2026-09-27T10:13:19+00:00",
+      "rows": 74,
+      "sha256": "e2369b72aa10e84e4c321479c1cf155806813134b13901e71e32daab73a0c67d"
+    }
+  },
+  "breadth_conflicts": {}
+}

@@ -17,6 +17,7 @@ from market_risk.data.raw_io import load_raw_inputs
 from market_risk.data.snapshot import RawInputs, build_snapshot
 from market_risk.models import BreadthReading, MarketSnapshot, ScoreResult
 from market_risk.pipeline import score_snapshot
+from market_risk.storage.paths import StoragePaths
 
 EXPECTED_PATH = PROJECT_ROOT / "tests" / "fixtures" / "regression" / "expected.json"
 RAW_DIR = PROJECT_ROOT / "tests" / "fixtures" / "raw"
@@ -114,7 +115,8 @@ def compare_sample(
 
 
 def validate_all(settings: Settings, expected_path: Path = EXPECTED_PATH,
-                 raw_dir: Path = RAW_DIR) -> list[Check]:
+                 raw_dir: Path = RAW_DIR, market_paths: StoragePaths | None = None) -> list[Check]:
+    """离线样本比对；给出 market_paths 时，另用 data/market/ 对同一样本重新计分并逐项比对（B1-5）。"""
     spec = load_expected(expected_path)
     tol = float(spec["tolerance_price"])
     checks: list[Check] = []
@@ -122,4 +124,27 @@ def validate_all(settings: Settings, expected_path: Path = EXPECTED_PATH,
         snap = build_snapshot(sample_raw(sample, exp, raw_dir), settings.scored_symbols)
         results, _ = score_snapshot(snap, settings)
         checks += compare_sample(sample, exp, snap, results, tol)
+        if market_paths is not None:
+            checks += compare_market(sample, exp, settings, market_paths, snap, results, tol)
+    return checks
+
+
+def compare_market(sample: str, exp: dict[str, Any], settings: Settings, paths: StoragePaths,
+                   offline: MarketSnapshot, offline_results: tuple[ScoreResult, ...], tol: float) -> list[Check]:
+    """用 data/market/ 组装同一基准日的输入：与截图读数比对，并与离线样本的分数、阶段逐项比对。"""
+    from market_risk.data.market import MarketDataError, load_raw_inputs
+
+    label = f"{sample}（data/market）"
+    try:
+        raw = load_raw_inputs(paths, settings, dt.date.fromisoformat(sample), revision_check=False)
+    except MarketDataError as exc:
+        return [Check(label, "数据集", "覆盖基准日", str(exc), "", False)]
+    snap = build_snapshot(raw, settings.scored_symbols)
+    results, _ = score_snapshot(snap, settings)
+    checks = compare_sample(label, exp, snap, results, tol)
+    for a, b in zip(offline_results, results, strict=True):
+        same = [d.score for d in a.dimensions] == [d.score for d in b.dimensions] and a.stage == b.stage \
+            and a.total == b.total
+        checks.append(Check(label, f"{b.version} 与离线样本", f"{[d.score for d in a.dimensions]} {a.stage}",
+                            f"{[d.score for d in b.dimensions]} {b.stage}", "", same))
     return checks

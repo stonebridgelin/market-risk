@@ -69,7 +69,8 @@ def test_score_raw_returns_serializable_outcome(ctx):
 
 def test_validate_samples():
     report = services.validate_samples()
-    assert report.ok and len(report.checks) == 128
+    # 离线样本 128 项；仓库中已有 data/market/ 时另有用数据集重新计分的比对（B1-5）
+    assert report.ok and sum(1 for c in report.checks if "data/market" not in c.sample) == 128
     assert as_json(report)
 
 

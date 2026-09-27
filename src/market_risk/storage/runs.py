@@ -18,6 +18,8 @@ from market_risk.storage.paths import RUN_FILES, StoragePaths, make_run_id, uniq
 STATUS_COMPLETE, STATUS_PENDING, STATUS_FAILED = "complete", "pending", "failed"
 UNKNOWN_COMMIT = "0000000"
 DIRTY_CHECK_EXCLUDES = ("results", "reports", "data", "db")
+# data/ 下的例外：市场数据集是计分输入，有未提交修改时运行结果不能自动设为正式记录（STORAGE 2.1）
+DIRTY_CHECK_INCLUDES = ("data/market",)
 # 本机 git 可能不在 PATH 中（CLAUDE.md 第11条）
 _GIT_CANDIDATES = ("git", r"C:\Execute\Git\bin\git.exe", r"C:\Program Files\Git\bin\git.exe")
 
@@ -48,9 +50,13 @@ def git_info(repo: Path) -> GitInfo:  # pragma: no cover - 依赖本机 git
         commit = subprocess.run(
             [git, "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
         ).stdout.strip()
-        # 只检查代码与配置：结果、报表、数据、数据库不算"未提交的修改"（STORAGE 2.1）
+        # 只检查代码、配置与市场数据集：结果、报表、其他数据、数据库不算"未提交的修改"（STORAGE 2.1）
         status = subprocess.run(
             [git, "status", "--porcelain", "--", ".", *(f":!{p}" for p in DIRTY_CHECK_EXCLUDES)],
+            cwd=repo, capture_output=True, text=True, check=True,
+        ).stdout
+        status += subprocess.run(
+            [git, "status", "--porcelain", "--", *DIRTY_CHECK_INCLUDES],
             cwd=repo, capture_output=True, text=True, check=True,
         ).stdout
     except (OSError, subprocess.CalledProcessError):

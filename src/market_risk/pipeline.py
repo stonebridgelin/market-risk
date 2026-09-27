@@ -85,6 +85,11 @@ def run_scoring(
         "oas.long_history_source": settings.oas_long_history_source,
     }
     meta["sources"] = to_jsonable(list(raw.sources))
+    if any(s.source == "market" for s in raw.sources):
+        # 数据集版本：data/market/manifest.json 的 sha256（B1-6）
+        from market_risk.data.market import manifest_sha256
+
+        meta["market_manifest_sha256"] = manifest_sha256(paths)
     if git.dirty:
         meta["warnings"] = ["git 工作区有未提交的修改，结果对应的代码版本不完全等于 git_commit"]
     try:

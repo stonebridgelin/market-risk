@@ -1,3 +1,6 @@
 # TradingView 原始导出文件必须逐字节保持不变（manifest 记录了 sha256），git 不做换行转换
 data/manual/tradingview/raw/** -text
 data/legacy/** -text
+# 市场数据集与导出的 SQL：保持字节不变（manifest 记录 sha256；SQL 由测试比对）
+data/market/** -text
+db/sql/** -text

@@ -150,6 +150,41 @@ class StoragePaths:
             raise PathError(f"TradingView 标的名不合法：{symbol!r}")
         return self.tv_processed_dir / f"{symbol}.csv"
 
+    # ---- data/market：市场数据集（计分输入，提交 git；docs/decisions/0001）----
+    @property
+    def market_dir(self) -> Path:
+        return self.root / "data" / "market"
+
+    def market_daily_file(self, series: str) -> Path:
+        """逐日序列：data/market/daily/<序列>.csv，如 SPY.csv、VIXCLS.csv、UST10Y.csv。"""
+        if not _TV_SYMBOL_RE.match(series):
+            raise PathError(f"序列名不合法：{series!r}")
+        return self.market_dir / "daily" / f"{series}.csv"
+
+    def market_vintage_file(self, series: str, base_date: dt.date) -> Path:
+        """基准日版本（ALFRED）：data/market/vintage/<序列>_<基准日>.csv，只用于正式样本的历史修订比对。"""
+        if not _TV_SYMBOL_RE.match(series):
+            raise PathError(f"序列名不合法：{series!r}")
+        return self.market_dir / "vintage" / f"{series}_{base_date.isoformat()}.csv"
+
+    @property
+    def market_manifest(self) -> Path:
+        return self.market_dir / "manifest.json"
+
+    @property
+    def market_readme(self) -> Path:
+        return self.market_dir / "README.md"
+
+    @property
+    def market_revisions_md(self) -> Path:
+        """data build 发现的历史修订清单（未自动覆盖，待确认）。"""
+        return self.reports_dir / "market_data_revisions.md"
+
+    # ---- db/sql：由程序导出的 SQL 文件（提交 git）----
+    @property
+    def db_sql_dir(self) -> Path:
+        return self.root / "db" / "sql"
+
     # ---- data/materials ----
     def materials_dir(self, subject: str, base_date: dt.date) -> Path:
         return (

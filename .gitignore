@@ -4,7 +4,9 @@
 # 可重新下载的接口缓存、可由 results/ 重建的数据库（见 docs/STORAGE.md）
 data/cache/
 data/processed/
-db/
+# 数据库文件不提交；db/sql/ 下由程序导出的 SQL 文件提交（docs/decisions/0001）
+db/*
+!db/sql/
 
 # 截图（可选，不提交）
 data/materials/**/screenshots/

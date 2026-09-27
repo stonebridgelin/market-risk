@@ -16,6 +16,8 @@ from market_risk.models import SourceInfo
 from market_risk.storage.paths import StoragePaths
 
 PRICE_DECIMALS = 2
+STORE_DECIMALS = 4          # data/market 中的价格：四舍五入到4位小数（去掉浮点表示误差，保留全部真实价格）
+OHLCV_COLUMNS = ["open", "high", "low", "close", "volume"]
 
 Downloader = Callable[[str, dt.date, dt.date], pd.DataFrame]
 
@@ -52,6 +54,57 @@ def close_series_from_frame(frame: pd.DataFrame, symbol: str) -> Series:
             raise DataFetchError(f"{symbol}：{d} 的 Close 缺失")
         result[d] = round(float(value), PRICE_DECIMALS)
     return result
+
+
+def ohlcv_rows_from_frame(frame: pd.DataFrame, symbol: str) -> dict[dt.date, dict[str, float | None]]:
+    """从 yfinance 结果中取开高低收量（不复权 Close），价格四舍五入到4位小数；Close 缺失报错，不插值。"""
+    if frame is None or frame.empty:
+        raise DataFetchError(f"{symbol}：yfinance 没有返回数据")
+    if isinstance(frame.columns, pd.MultiIndex):
+        frame = frame.xs(symbol, axis=1, level=-1) if symbol in frame.columns.get_level_values(-1) \
+            else frame.droplevel(-1, axis=1)
+    missing = [c for c in ("Open", "High", "Low", "Close", "Volume") if c not in frame.columns]
+    if missing:
+        raise DataFetchError(f"{symbol}：返回数据中没有 {missing} 列")
+
+    def num(v: object, decimals: int | None) -> float | None:
+        if v is None or (isinstance(v, float) and math.isnan(v)):
+            return None
+        x = float(v)  # type: ignore[arg-type]
+        return round(x, decimals) if decimals is not None else float(int(x))
+
+    rows: dict[dt.date, dict[str, float | None]] = {}
+    for ts, r in frame.iterrows():
+        d = pd.Timestamp(ts).date()
+        close = num(r["Close"], STORE_DECIMALS)
+        if close is None:
+            raise DataFetchError(f"{symbol}：{d} 的 Close 缺失")
+        rows[d] = {"open": num(r["Open"], STORE_DECIMALS), "high": num(r["High"], STORE_DECIMALS),
+                   "low": num(r["Low"], STORE_DECIMALS), "close": close, "volume": num(r["Volume"], None)}
+    return rows
+
+
+def fetch_ohlcv(
+    paths: StoragePaths,
+    symbol: str,
+    start: dt.date,
+    end: dt.date,
+    refresh: bool = False,
+    downloader: Downloader = yfinance_download,
+    max_retries: int = 3,
+    backoff_seconds: float = 1.0,
+) -> tuple[dict[dt.date, dict[str, float | None]], SourceInfo]:
+    """下载 [start, end] 的日线开高低收量（data build 使用；缓存代码 <标的>_OHLCV）。"""
+    from market_risk.data.cache import cached_rows
+
+    symbol = symbol.upper()
+    end_exclusive = end + dt.timedelta(days=1)
+    return cached_rows(
+        paths, "yahoo", f"{symbol}_OHLCV", start, end, OHLCV_COLUMNS,
+        url_for_log=f"yfinance.download({symbol!r}, start={start}, end={end_exclusive}, auto_adjust=False) → OHLCV",
+        download=lambda: ohlcv_rows_from_frame(downloader(symbol, start, end_exclusive), symbol),
+        refresh=refresh, max_retries=max_retries, backoff_seconds=backoff_seconds,
+    )
 
 
 def fetch_closes(

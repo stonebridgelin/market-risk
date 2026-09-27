@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -115,16 +115,107 @@ class FetchResult:
     snapshot: MarketSnapshot
 
 
+@dataclass(frozen=True)
+class DataBuildReport:
+    result: Any                    # market.BuildResult
+    end: dt.date
+    offline: bool
+    revisions_path: Path | None    # 有修订时写出的清单
+
+
+def data_build(ctx: Context, offline: bool = False, refresh: bool = False, accept_revisions: bool = False,
+               end: dt.date | None = None, only: Collection[str] | None = None,
+               collect: Callable[..., Any] | None = None, now: dt.datetime | None = None) -> DataBuildReport:
+    """由接口缓存（按需下载）、TradingView 清洗结果和手工录入生成 data/market/（B1）。
+
+    collect：测试时注入，签名 (end) -> (序列列表, 广度冲突)。
+    """
+    from market_risk.data import market
+    from market_risk.data.cache import DataFetchError
+
+    day = end or market.last_completed_trading_day(now)
+    if collect is None:
+        if offline:
+            from market_risk.data.market_build import collect_offline
+
+            def collect(e: dt.date) -> Any:
+                return collect_offline(ctx.paths, ctx.settings, e, only)
+        else:  # pragma: no cover - 联网
+            from market_risk.config import get_fred_api_key
+            from market_risk.data.market_build import collect_online
+
+            key = get_fred_api_key()
+
+            def collect(e: dt.date) -> Any:
+                return collect_online(ctx.paths, ctx.settings, e, key, refresh, only)
+    try:
+        series, conflicts = collect(day)
+    except DataFetchError as exc:
+        raise ServiceError(f"数据集生成失败：{exc}") from exc
+    names = {s.name for s in series}
+    result = market.build_dataset(ctx.paths, series, accept_revisions,
+                                  conflicts if names & {"S5FI", "S5TW"} else None, now)
+    rev_path = None
+    if result.revisions:
+        stamp = (now or dt.datetime.now(dt.UTC)).isoformat(timespec="seconds")
+        _write_report(ctx.paths.market_revisions_md, market.render_revisions(result, stamp))
+        rev_path = ctx.paths.market_revisions_md
+    return DataBuildReport(result, day, offline, rev_path)
+
+
+def load_market_inputs(ctx: Context, base: dt.date, mode: str = "backtest") -> Any:
+    """从 data/market/ 组装基准日的 RawInputs；数据集未覆盖基准日时报错（提示先运行 fetch）。"""
+    from market_risk.data import market
+
+    try:
+        return market.load_raw_inputs(ctx.paths, ctx.settings, base, mode, load_data_decisions())
+    except market.MarketDataError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def fetch_vintage(ctx: Context, base: dt.date, refresh: bool = False) -> str | None:  # pragma: no cover - 联网
+    """为正式样本取得 OAS 的 ALFRED 基准日版本，存入 data/market/vintage/（B1-3）。返回说明（未取得时）。"""
+    from market_risk.config import get_fred_api_key
+    from market_risk.data import fred, market
+    from market_risk.data.cache import DataFetchError
+
+    if not ctx.settings.oas_revision_check:
+        return None
+    start = base - dt.timedelta(days=market.DAILY_LOOKBACK_DAYS)
+    rows = market.read_series_file(ctx.paths.market_daily_file(ctx.settings.oas_series))[1]
+    if not any(r["source"] == "fred" for d, r in rows.items() if start <= d <= base):
+        return None     # 早于 FRED 提供的三年：不做历史修订比对（load_raw_inputs 会注明）
+    try:
+        values, info = fred.fetch_series(ctx.paths, ctx.settings.oas_series, start, base, get_fred_api_key(),
+                                         realtime=base, refresh=refresh, max_retries=ctx.settings.max_retries,
+                                         backoff_seconds=ctx.settings.backoff_seconds)
+    except DataFetchError as exc:
+        return f"ALFRED 基准日版本无法取得（{exc}），不做历史修订比对；不影响计分"
+    market.write_vintage(ctx.paths, ctx.settings.oas_series, base, values, info)
+    return None
+
+
 def fetch_data(ctx: Context, base: dt.date, mode: str = "backtest", refresh: bool = False,
                save_raw: Path | None = None) -> FetchResult:  # pragma: no cover - 联网
-    """下载基准日所需的全部数据，截断到基准日并生成快照。"""
-    from market_risk.config import get_fred_api_key
-    from market_risk.data.fetch import fetch_raw_inputs
+    """fetch = 按需下载并生成数据集（B1-2）+ 正式样本的 ALFRED 基准日版本，再从 data/market/ 截断到基准日生成快照。"""
+    from market_risk.data import market
     from market_risk.data.raw_io import save_raw_inputs
     from market_risk.data.snapshot import build_snapshot
 
     _check_mode(mode)
-    raw = fetch_raw_inputs(base, ctx.settings, ctx.paths, get_fred_api_key(), mode, refresh)
+    notes: list[str] = []
+    if refresh or market.coverage_error(ctx.paths, ctx.settings, base):
+        report = data_build(ctx, refresh=refresh)
+        if report.revisions_path:
+            notes.append(f"数据集发现 {len(report.result.revisions)} 处历史修订，"
+                         f"未自动覆盖（见 {report.revisions_path}）")
+    vintage_note = fetch_vintage(ctx, base, refresh)
+    raw = load_market_inputs(ctx, base, mode)
+    extra = [n for n in (*notes, vintage_note) if n]
+    if extra:
+        import dataclasses
+
+        raw = dataclasses.replace(raw, notes=(*raw.notes, *extra))
     if save_raw is not None:
         save_raw_inputs(raw, save_raw)
     snap = build_snapshot(raw, ctx.settings.scored_symbols, tuple(ctx.settings.reference_symbols[:2]),
@@ -179,15 +270,24 @@ def score_raw(ctx: Context, raw: Any, git: Any = None) -> Any:
 
 
 def score_date(ctx: Context, base: dt.date | None, mode: str = "backtest",
-               breadth: BreadthInput | None = None, refresh: bool = False) -> Any:  # pragma: no cover - 联网
-    """下载数据、计算两个版本的评分，生成运行目录下的全部输出。返回 pipeline.RunOutcome。"""
-    from market_risk.config import get_fred_api_key
-    from market_risk.data.fetch import fetch_raw_inputs
+               breadth: BreadthInput | None = None) -> Any:
+    """从 data/market/ 读取数据（不直接读接口缓存）、计算两个版本的评分，生成运行目录下的全部输出。
 
+    传入的广度读数先写入 data/manual/breadth.csv，再离线更新数据集中的 S5FI、S5TW。
+    数据集未覆盖基准日时报错，提示先运行 fetch。返回 pipeline.RunOutcome。
+    """
     day = resolve_base_date(base, mode)
-    record_breadth_inputs(ctx, day, breadth or BreadthInput())
-    raw = fetch_raw_inputs(day, ctx.settings, ctx.paths, get_fred_api_key(), mode, refresh)
-    return score_raw(ctx, raw)
+    breadth = breadth or BreadthInput()
+    record_breadth_inputs(ctx, day, breadth)
+    if any(v is not None for v in (breadth.s5fi, breadth.s5tw, breadth.s5fi_t5, breadth.s5tw_t5)):
+        data_build(ctx, offline=True, only=("S5FI", "S5TW"), end=max(day, _last_completed()))
+    return score_raw(ctx, load_market_inputs(ctx, day, mode))
+
+
+def _last_completed() -> dt.date:
+    from market_risk.data.market import last_completed_trading_day
+
+    return last_completed_trading_day()
 
 
 @dataclass(frozen=True)
@@ -204,7 +304,9 @@ def validate_samples(settings: Settings | None = None) -> ValidationReport:
     """用离线样本比对程序值与截图读数（SPEC 第9节阶段4）。"""
     from market_risk.validation import validate_all
 
-    checks = validate_all(settings or load_settings())
+    settings = settings or load_settings()
+    paths = StoragePaths(settings.storage_root)
+    checks = validate_all(settings, market_paths=paths if paths.market_manifest.exists() else None)
     return ValidationReport(checks, sum(not c.ok for c in checks))
 
 
