@@ -69,6 +69,8 @@ def to_jsonable(obj: Any) -> Any:
         return obj.isoformat()
     if isinstance(obj, Decimal):
         return float(obj)
+    if isinstance(obj, Path):
+        return obj.as_posix()
     if isinstance(obj, dict):
         return {str(k).lower() if isinstance(k, bool) else str(k): to_jsonable(v) for k, v in obj.items()}
     if isinstance(obj, list | tuple | set | frozenset):

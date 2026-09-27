@@ -134,9 +134,9 @@ def test_summary_and_list_are_readable(paths):
     for word in ("标的", "起止日期", "行数", "结果", "主要问题", "S5FI", "2025-10-20 至 2025-11-28",
                  "通过", "结论：2 个文件，通过 2，警告 0，失败 0"):
         assert word in text
-    listing = tv.format_list(paths)
+    listing = tv.format_list(tv.imported_symbols(paths))
     assert "S5FI" in listing and "INDEX:S5TW" in listing and "29" in listing
-    assert tv.format_list(StoragePaths(paths.root / "empty")) == "尚未导入任何 TradingView 文件"
+    assert tv.format_list(tv.imported_symbols(StoragePaths(paths.root / "empty"))) == "尚未导入任何 TradingView 文件"
 
 
 # ---------------------------------------------------------------------------

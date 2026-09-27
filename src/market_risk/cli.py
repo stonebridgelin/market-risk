@@ -1,27 +1,47 @@
-"""命令行入口（SPEC 第8节）。"""
+"""命令行入口（SPEC 第8节）。
+
+本模块只负责解析参数和格式化输出（CLAUDE.md 第12条）；业务逻辑全部在 services.py。
+"""
 
 from __future__ import annotations
 
 import dataclasses
 import datetime as dt
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any
 
 import typer
 
-from market_risk import calendar as mcal
-from market_risk.config import get_fred_api_key, load_holidays, load_settings
-from market_risk.data.snapshot import build_snapshot
+from market_risk import services
+from market_risk.config import load_settings
 from market_risk.models import MarketSnapshot
-from market_risk.storage.paths import StoragePaths
+from market_risk.storage.runs import to_jsonable
 
 app = typer.Typer(help="美股大盘风险评分：数据准备、机械计算与 prompt 生成", no_args_is_help=True)
+tv_app = typer.Typer(help="TradingView 导出数据：导入、校验、列表、比对（docs/TRADINGVIEW.md）")
+official_app = typer.Typer(help="正式记录（official.json）")
+material_app = typer.Typer(help="资料管理")
+breadth_app = typer.Typer(help="广度读数录入")
+outcome_app = typer.Typer(help="风险事件标签（结果窗口结束后）")
+for sub, name in ((tv_app, "tv"), (official_app, "official"), (material_app, "material"),
+                  (breadth_app, "breadth"), (outcome_app, "outcome")):
+    app.add_typer(sub, name=name)
+
+MATERIAL_TYPES_HELP = ("tiger_ai_background", "chatgpt_response", "claude_review", "notes", "screenshot", "other")
+SubjectOpt = Annotated[str, typer.Option("--subject", help="MARKET 或股票代码")]
+FrameworkOpt = Annotated[str, typer.Option("--framework", help="分析框架")]
 
 
 @app.callback()
 def main() -> None:
     """美股大盘风险评分（v2-M 与 v3-R1 并行）。"""
+
+
+# ---------------------------------------------------------------------------
+# 参数解析与公共输出
+# ---------------------------------------------------------------------------
 
 
 def _parse_date(value: str) -> dt.date:
@@ -33,43 +53,8 @@ def _parse_date(value: str) -> dt.date:
         raise typer.BadParameter(f"日期格式应为 YYYY-MM-DD：{value}") from exc
 
 
-def _jsonable(obj: Any) -> Any:
-    if isinstance(obj, dt.date):
-        return obj.isoformat()
-    if isinstance(obj, tuple | list):
-        return [_jsonable(x) for x in obj]
-    if isinstance(obj, dict):
-        return {k: _jsonable(v) for k, v in obj.items()}
-    return obj
-
-
-@app.command()
-def dates(date: Annotated[str, typer.Option("--date", help="基准日 YYYY-MM-DD")]) -> None:
-    """计算基准日的全部日期参照（离线：债市日历暂按 holidays.yaml 推出）。"""
-    base = _parse_date(date)
-    holidays = load_holidays()
-    # 债市日历覆盖范围：足够覆盖 O6 与 T−45 的区间
-    bond_cal = mcal.bond_calendar_from_holidays(
-        holidays, base - dt.timedelta(days=120), base
-    )
-    try:
-        refs = mcal.compute_date_references(base, bond_cal)
-    except mcal.CalendarError as exc:
-        typer.echo(f"错误：{exc}", err=True)
-        raise typer.Exit(code=1) from exc
-    result = _jsonable(dataclasses.asdict(refs))
-    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
-    typer.echo(
-        "注意：债市营业日暂按 config/holidays.yaml 推出，未经财政部数据核实；"
-        "v2-M 的 O6 需接入 FRED 观测列表后才能确定。",
-        err=True,
-    )
-    for note in mcal.check_stock_calendar(holidays, refs.three_segment_query_start, base):
-        typer.echo(f"日历核对：{note}", err=True)
-
-
-tv_app = typer.Typer(help="TradingView 导出数据：导入、校验、列表（docs/TRADINGVIEW.md）")
-app.add_typer(tv_app, name="tv")
+def _opt_date(value: str | None) -> dt.date | None:
+    return _parse_date(value) if value else None
 
 
 def _parse_datetime(value: str) -> dt.datetime:
@@ -82,135 +67,45 @@ def _parse_datetime(value: str) -> dt.datetime:
     return parsed
 
 
-@tv_app.command("import")
-def tv_import(
-    directory: Annotated[Path, typer.Option("--dir", help="原始文件目录 raw/<导出日期>/")],
-    export_date: Annotated[
-        str | None, typer.Option("--export-date", help="导出日期（默认取目录名）")
-    ] = None,
-    export_time: Annotated[
-        str | None,
-        typer.Option("--export-time", help="导出时间（带时区；默认取文件修改时间），用于判断不完整K线"),
-    ] = None,
-) -> None:
-    """导入并校验一个目录下的全部 TradingView 导出文件，打印汇总表。"""
-    from market_risk.config import load_symbols
-    from market_risk.data import tradingview as tv
+def _ctx() -> services.Context:
+    return services.Context.from_settings(load_settings())
 
-    settings = load_settings()
-    paths = StoragePaths(settings.storage_root)
+
+def _call[T](func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+    """调用业务函数；ServiceError 转为"错误：…"并以退出码 1 结束。"""
     try:
-        result = tv.import_directory(
-            directory,
-            paths,
-            load_symbols(),
-            _parse_date(export_date) if export_date else None,
-            _parse_datetime(export_time) if export_time else None,
-        )
-    except tv.TradingViewError as exc:
+        return func(*args, **kwargs)
+    except services.ServiceError as exc:
         typer.echo(f"错误：{exc}", err=True)
         raise typer.Exit(code=1) from exc
-    typer.echo(tv.format_import_summary(result))
-    if any(r.status == tv.FAILED for r in result.reports) or result.merge_errors:
-        raise typer.Exit(code=2)
 
 
-@tv_app.command("validate")
-def tv_validate(
-    symbol: Annotated[str | None, typer.Option("--symbol", help="只校验该标的")] = None,
-) -> None:
-    """按 manifest 重新读取并校验已导入的原始文件，重建清洗结果。"""
-    from market_risk.config import load_symbols
-    from market_risk.data import tradingview as tv
+def _table(headers: list[str], rows: list[list[str]]) -> str:
+    from market_risk.data.tradingview import format_table
 
-    paths = StoragePaths(load_settings().storage_root)
-    manifest = tv.read_manifest(paths.tv_manifest)
-    if not manifest:
-        typer.echo("尚未导入任何 TradingView 文件")
-        return
-    result = tv.rebuild(paths, load_symbols(), manifest)
-    if symbol:
-        result.reports = [r for r in result.reports if r.symbol.upper() == symbol.upper()]
-    typer.echo(tv.format_import_summary(result))
+    return format_table(headers, rows)
 
 
-@tv_app.command("list")
-def tv_list() -> None:
-    """列出已导入的标的、起止日期、校验状态。"""
-    from market_risk.data import tradingview as tv
-
-    typer.echo(tv.format_list(StoragePaths(load_settings().storage_root)))
+# ---------------------------------------------------------------------------
+# 日期、数据、评分
+# ---------------------------------------------------------------------------
 
 
-
-def _run_compare(infos: list, paths: StoragePaths, settings: Any, refresh: bool) -> list:  # pragma: no cover - 联网
-    from market_risk.data import tradingview as tv
-    from market_risk.data.tv_compare import CompareResult, compare_series, fetch_api_series
-
-    try:
-        key: str | None = get_fred_api_key()
-    except Exception:
-        key = None
-    results = []
-    for info in infos:
-        series = tv.read_processed(paths, info.symbol)
-        if not series:
-            results.append(CompareResult(info.symbol, info.tv_symbol, info.api_source or "", info.tolerance,
-                                         error="尚未导入该标的的 TradingView 数据"))
-            continue
-        try:
-            api = fetch_api_series(info.api_source, min(series), max(series), settings, paths, key, refresh)
-        except Exception as exc:
-            results.append(CompareResult(info.symbol, info.tv_symbol, info.api_source or "", info.tolerance,
-                                         error=f"接口数据获取失败：{exc}"))
-            continue
-        results.append(compare_series(info, series, api, info.tolerance))
-    return results
+@app.command()
+def dates(date: Annotated[str, typer.Option("--date", help="基准日 YYYY-MM-DD")]) -> None:
+    """计算基准日的全部日期参照（离线：债市日历暂按 holidays.yaml 推出）。"""
+    preview = _call(services.preview_dates, _parse_date(date))
+    typer.echo(json.dumps(to_jsonable(dataclasses.asdict(preview.refs)), ensure_ascii=False, indent=2))
+    for note in preview.notes:
+        typer.echo(f"注意：{note}", err=True)
 
 
-@tv_app.command("compare")
-def tv_compare(
-    symbol: Annotated[str, typer.Option("--symbol", help="标的，如 BAMLH0A0HYM2")],
-    refresh: Annotated[bool, typer.Option("--refresh", help="忽略接口缓存")] = False,
-) -> None:  # pragma: no cover - 联网
-    """与接口数据做重叠比对，结果写入 reports/tradingview_compare_<标的>.md。"""
-    from market_risk.config import load_symbols
-    from market_risk.data.tv_compare import format_results
+@app.command()
+def samples(year: Annotated[int, typer.Option("--year", help="年份")]) -> None:
+    """按 SOP 9.2 列出每月最后一个周五（休市则取当月最后一个交易日）。"""
+    for s in services.sample_dates(year):
+        typer.echo(f"{s.date}（{s.weekday}）" + (f"（{s.note}）" if s.note else ""))
 
-    settings = load_settings()
-    paths = StoragePaths(settings.storage_root)
-    infos = [s for s in load_symbols().values() if s.symbol.upper() == symbol.upper()]
-    if not infos or not infos[0].api_source:
-        typer.echo(f"错误：{symbol} 未在 config/symbols.yaml 登记 api_source", err=True)
-        raise typer.Exit(code=1)
-    results = _run_compare(infos, paths, settings, refresh)
-    now = dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
-    text = format_results(results, f"TradingView 与接口数据重叠比对：{infos[0].symbol}", now)
-    out = paths.tv_compare_md(infos[0].symbol)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(text, encoding="utf-8")
-    typer.echo(text)
-    typer.echo(f"已写入 {out}")
-
-
-@tv_app.command("crosscheck")
-def tv_crosscheck(
-    refresh: Annotated[bool, typer.Option("--refresh", help="忽略接口缓存")] = False,
-) -> None:  # pragma: no cover - 联网
-    """全部 crosscheck 标的与接口数据比对，写入 reports/tradingview_crosscheck.md。"""
-    from market_risk.config import load_symbols
-    from market_risk.data.tv_compare import format_results
-
-    settings = load_settings()
-    paths = StoragePaths(settings.storage_root)
-    infos = [s for s in load_symbols().values() if s.usage == "crosscheck" and s.api_source]
-    results = _run_compare(infos, paths, settings, refresh)
-    now = dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
-    text = format_results(results, "TradingView 交叉校验", now)
-    paths.tv_crosscheck_md.parent.mkdir(parents=True, exist_ok=True)
-    paths.tv_crosscheck_md.write_text(text, encoding="utf-8")
-    typer.echo(text)
-    typer.echo(f"已写入 {paths.tv_crosscheck_md}")
 
 def format_snapshot_summary(snap: MarketSnapshot) -> str:
     """快照的文字摘要（供 fetch 命令核对数据）。"""
@@ -228,23 +123,18 @@ def format_snapshot_summary(snap: MarketSnapshot) -> str:
         "标的   收盘     MA5      MA10     MA20     MA30     MA50     MA200",
     ]
     for s, e in snap.etfs.items():
-        lines.append(
-            f"{s:<5} {e.close:8.2f} {e.ma5:8.2f} {e.ma10:8.2f} {e.ma20:8.2f} "
-            f"{e.ma30:8.2f} {e.ma50:8.2f} {e.ma200:8.2f}"
-        )
+        lines.append(f"{s:<5} {e.close:8.2f} {e.ma5:8.2f} {e.ma10:8.2f} {e.ma20:8.2f} "
+                     f"{e.ma30:8.2f} {e.ma50:8.2f} {e.ma200:8.2f}")
     lines += [
         f"SPY 窗口最高收盘 {snap.spy_window_max_close:.2f}   HYG/LQD {f(snap.hyg_lqd, 4)}",
         f"VIX {f(snap.vix)}（T−5 {f(snap.vix_t5)}）",
-        f"10年期 y={f(snap.y)}  H={f(snap.h)}（{', '.join(map(str, snap.h_dates))}）  "
-        f"T−20 y={f(snap.y_t20)}",
+        f"10年期 y={f(snap.y)}  H={f(snap.h)}（{', '.join(map(str, snap.h_dates))}）  T−20 y={f(snap.y_t20)}",
         "",
-        "三环节（d1 含 T−20）：",
+        "三环节（d1 为 T−20 至 T−2，SOP 7.2）：",
     ]
     for res in snap.three_segment[True]:
         step1 = [f"{t.d1}({t.d1_close}<Lc {t.lc}@{t.lc_date})" for t in res.traces if t.step1]
-        lines.append(
-            f"  {res.symbol}：完成={res.completed}；第一步成立：{'、'.join(step1) or '无'}"
-        )
+        lines.append(f"  {res.symbol}：完成={res.completed}；第一步成立：{'、'.join(step1) or '无'}")
     if snap.data_notes:
         lines += ["", "数据说明："] + [f"  - {n}" for n in snap.data_notes]
     return "\n".join(lines)
@@ -260,48 +150,26 @@ def fetch(
     ] = None,
 ) -> None:  # pragma: no cover - 网络请求
     """下载基准日所需的全部数据，截断到基准日并显示核对摘要。"""
-    from market_risk.data.fetch import fetch_raw_inputs
-    from market_risk.data.raw_io import save_raw_inputs
-
-    base = _parse_date(date)
-    if mode not in {"backtest", "daily"}:
-        raise typer.BadParameter("--mode 只能是 backtest 或 daily")
-    settings = load_settings()
-    paths = StoragePaths(settings.storage_root)
-    raw = fetch_raw_inputs(base, settings, paths, get_fred_api_key(), mode, refresh)
+    result = _call(services.fetch_data, _ctx(), _parse_date(date), mode, refresh, save_raw)
     if save_raw is not None:
-        save_raw_inputs(raw, save_raw)
         typer.echo(f"原始数据已保存到 {save_raw}", err=True)
-    snap = build_snapshot(
-        raw, settings.scored_symbols, tuple(settings.reference_symbols[:2]), load_holidays()
-    )
-    typer.echo(format_snapshot_summary(snap))
+    typer.echo(format_snapshot_summary(result.snapshot))
     typer.echo("\n数据来源：")
-    for s in raw.sources:
-        typer.echo(
-            f"  - {s.source}:{s.key} {s.data_start}至{s.data_end} {s.rows}行 "
-            f"{'缓存' if s.from_cache else '下载'}于 {s.downloaded_at_utc}"
-        )
+    for s in result.raw.sources:
+        typer.echo(f"  - {s.source}:{s.key} {s.data_start}至{s.data_end} {s.rows}行 "
+                   f"{'缓存' if s.from_cache else '下载'}于 {s.downloaded_at_utc}")
 
 
-# ---------------------------------------------------------------------------
-# 阶段4：score / validate / samples
-# ---------------------------------------------------------------------------
-
-
-def _record_breadth(paths: StoragePaths, day: dt.date, s5fi: float | None, s5tw: float | None) -> None:
-    """命令行传入的广度读数同时写入 data/manual/breadth.csv（SPEC 6.5）。"""
-    from market_risk.data.breadth import BreadthError, make_reading, upsert_breadth
-
-    if s5fi is None and s5tw is None:
-        return
-    if s5fi is None or s5tw is None:
-        raise typer.BadParameter(f"{day} 的 S5FI 与 S5TW 需要同时提供")
-    try:
-        upsert_breadth(paths.breadth_csv, make_reading(day, s5fi, s5tw, "score 命令录入"))
-    except BreadthError as exc:
-        typer.echo(f"错误：{exc}（如需修改，请用 breadth add --overwrite）", err=True)
-        raise typer.Exit(code=1) from exc
+def format_run_outcome(outcome: Any) -> str:
+    lines = [f"运行目录：{outcome.run_dir}", f"运行状态：{outcome.status}；{outcome.official_note}"]
+    for r in outcome.results:
+        dims = "、".join(f"{d.name}{d.score if d.score is not None else '待补'}" for d in r.dimensions)
+        total = r.total if r.total is not None else f"{r.total_range[0]}–{r.total_range[1]}"
+        lines.append(f"{r.version}：{dims}；总分 {total}；{r.stage or '范围跨越阶段'}；"
+                     f"明确恶化={dict(r.clear_deterioration)['大盘明确恶化']}")
+        lines += [f"  {x}" for x in (*r.review_flags, *r.notes)]
+    lines += [f"提示：{m}" for m in outcome.messages]
+    return "\n".join(lines)
 
 
 @app.command()
@@ -313,99 +181,90 @@ def score(
     s5tw_t5: Annotated[float | None, typer.Option("--s5tw-t5", help="5个交易日前 S5TW")] = None,
     mode: Annotated[str, typer.Option("--mode", help="backtest 或 daily")] = "backtest",
     refresh: Annotated[bool, typer.Option("--refresh", help="忽略缓存，强制重新下载")] = False,
-) -> None:  # pragma: no cover - 联网；离线部分见 pipeline 测试
+) -> None:  # pragma: no cover - 联网；离线部分见 services 与 pipeline 测试
     """下载数据、计算两个版本的评分，生成运行目录下的全部输出。"""
-    from market_risk.data.cache import today_new_york
-    from market_risk.data.fetch import fetch_raw_inputs
-    from market_risk.pipeline import run_scoring
-    from market_risk.storage.runs import git_info
-
-    if mode not in {"backtest", "daily"}:
-        raise typer.BadParameter("--mode 只能是 backtest 或 daily")
-    if date is None and mode != "daily":
-        raise typer.BadParameter("回测模式必须提供 --date")
-    base = _parse_date(date) if date else today_new_york()
-    if not mcal.is_stock_trading_day(base):
-        typer.echo(f"错误：{base} 不是股票交易日", err=True)
-        raise typer.Exit(code=1)
-    settings = load_settings()
-    paths = StoragePaths(settings.storage_root)
-    _record_breadth(paths, base, s5fi, s5tw)
-    _record_breadth(paths, mcal.shift_trading_days(base, -5), s5fi_t5, s5tw_t5)
-    raw = fetch_raw_inputs(base, settings, paths, get_fred_api_key(), mode, refresh)
-    outcome = run_scoring(raw, settings, paths, git_info(settings.storage_root), load_holidays())
-    _print_outcome(outcome)
-
-
-def _print_outcome(outcome: Any) -> None:
-    typer.echo(f"运行目录：{outcome.run_dir}")
-    typer.echo(f"运行状态：{outcome.status}；{outcome.official_note}")
-    for r in outcome.results:
-        dims = "、".join(f"{d.name}{d.score if d.score is not None else '待补'}" for d in r.dimensions)
-        total = r.total if r.total is not None else f"{r.total_range[0]}–{r.total_range[1]}"
-        typer.echo(f"{r.version}：{dims}；总分 {total}；{r.stage or '范围跨越阶段'}；"
-                   f"明确恶化={dict(r.clear_deterioration)['大盘明确恶化']}")
-        for f in (*r.review_flags, *r.notes):
-            typer.echo(f"  {f}")
-    for m in outcome.messages:
-        typer.echo(f"提示：{m}")
+    breadth = services.BreadthInput(s5fi, s5tw, s5fi_t5, s5tw_t5)
+    outcome = _call(services.score_date, _ctx(), _opt_date(date), mode, breadth, refresh)
+    typer.echo(format_run_outcome(outcome))
 
 
 @app.command()
 def validate() -> None:
     """用 tests/fixtures 中的历史样本比对程序值与截图值（离线）。"""
-    from market_risk.data.tradingview import format_table
-    from market_risk.validation import validate_all
-
-    checks = validate_all(load_settings())
-    rows = [[c.sample, c.item, c.screenshot, c.program, c.diff, "一致" if c.ok else "不一致"] for c in checks]
-    typer.echo(format_table(["样本", "项目", "截图", "程序", "差值", "结果"], rows))
-    bad = [c for c in checks if not c.ok]
-    typer.echo(f"\n共 {len(checks)} 项，一致 {len(checks) - len(bad)}，不一致 {len(bad)}。")
-    if bad:
+    report = services.validate_samples(load_settings())
+    rows = [[c.sample, c.item, c.screenshot, c.program, c.diff, "一致" if c.ok else "不一致"] for c in report.checks]
+    typer.echo(_table(["样本", "项目", "截图", "程序", "差值", "结果"], rows))
+    n = len(report.checks)
+    typer.echo(f"\n共 {n} 项，一致 {n - report.mismatches}，不一致 {report.mismatches}。")
+    if not report.ok:
         raise typer.Exit(code=1)
 
 
-@app.command()
-def samples(year: Annotated[int, typer.Option("--year", help="年份")]) -> None:
-    """按 SOP 9.2 列出每月最后一个周五（休市则取当月最后一个交易日）。"""
-    for d in mcal.monthly_sample_dates(year):
-        note = "" if d.weekday() == 4 else "（最后一个周五休市，取当月最后一个交易日）"
-        typer.echo(f"{d}（周{'一二三四五六日'[d.weekday()]}）{note}")
+# ---------------------------------------------------------------------------
+# TradingView
+# ---------------------------------------------------------------------------
+
+
+@tv_app.command("import")
+def tv_import(
+    directory: Annotated[Path, typer.Option("--dir", help="原始文件目录 raw/<导出日期>/")],
+    export_date: Annotated[str | None, typer.Option("--export-date", help="导出日期（默认取目录名）")] = None,
+    export_time: Annotated[
+        str | None,
+        typer.Option("--export-time", help="导出时间（带时区；默认取文件修改时间），用于判断不完整K线"),
+    ] = None,
+) -> None:
+    """导入并校验一个目录下的全部 TradingView 导出文件，打印汇总表。"""
+    from market_risk.data import tradingview as tv
+
+    result = _call(services.tv_import, _ctx(), directory, _opt_date(export_date),
+                   _parse_datetime(export_time) if export_time else None)
+    typer.echo(tv.format_import_summary(result))
+    if any(r.status == tv.FAILED for r in result.reports) or result.merge_errors:
+        raise typer.Exit(code=2)
+
+
+@tv_app.command("validate")
+def tv_validate(symbol: Annotated[str | None, typer.Option("--symbol", help="只校验该标的")] = None) -> None:
+    """按 manifest 重新读取并校验已导入的原始文件，重建清洗结果。"""
+    from market_risk.data import tradingview as tv
+
+    result = services.tv_validate(_ctx(), symbol)
+    typer.echo("尚未导入任何 TradingView 文件" if result is None else tv.format_import_summary(result))
+
+
+@tv_app.command("list")
+def tv_list() -> None:
+    """列出已导入的标的、起止日期、校验状态。"""
+    from market_risk.data import tradingview as tv
+
+    typer.echo(tv.format_list(services.tv_list(_ctx())))
+
+
+@tv_app.command("compare")
+def tv_compare(
+    symbol: Annotated[str, typer.Option("--symbol", help="标的，如 BAMLH0A0HYM2")],
+    refresh: Annotated[bool, typer.Option("--refresh", help="忽略接口缓存")] = False,
+) -> None:  # pragma: no cover - 联网
+    """与接口数据做重叠比对，结果写入 reports/tradingview_compare_<标的>.md。"""
+    report = _call(services.tv_compare, _ctx(), symbol, refresh)
+    typer.echo(report.text)
+    typer.echo(f"已写入 {report.path}")
+
+
+@tv_app.command("crosscheck")
+def tv_crosscheck(
+    refresh: Annotated[bool, typer.Option("--refresh", help="忽略接口缓存")] = False,
+) -> None:  # pragma: no cover - 联网
+    """全部 crosscheck 标的与接口数据比对，写入 reports/tradingview_crosscheck.md。"""
+    report = _call(services.tv_crosscheck, _ctx(), refresh)
+    typer.echo(report.text)
+    typer.echo(f"已写入 {report.path}")
 
 
 # ---------------------------------------------------------------------------
-# 阶段4.5：正式记录、资料、广度录入、结果标签、import-legacy、数据库、统计（STORAGE 第7节）
+# 正式记录、资料、广度、结果标签
 # ---------------------------------------------------------------------------
-
-official_app = typer.Typer(help="正式记录（official.json）")
-material_app = typer.Typer(help="资料管理")
-breadth_app = typer.Typer(help="广度读数录入")
-outcome_app = typer.Typer(help="风险事件标签（结果窗口结束后）")
-app.add_typer(official_app, name="official")
-app.add_typer(material_app, name="material")
-app.add_typer(breadth_app, name="breadth")
-app.add_typer(outcome_app, name="outcome")
-
-MATERIAL_TYPES_HELP = ("tiger_ai_background", "chatgpt_response", "claude_review", "notes", "screenshot", "other")
-SubjectOpt = Annotated[str, typer.Option("--subject", help="MARKET 或股票代码")]
-FrameworkOpt = Annotated[str, typer.Option("--framework", help="分析框架")]
-
-
-def _paths() -> StoragePaths:
-    return StoragePaths(load_settings().storage_root)
-
-
-def _db_url() -> str:
-    from market_risk.storage import db
-
-    return db.resolve_database_url(load_settings())
-
-
-def _rebuild_db(paths: StoragePaths) -> None:
-    from market_risk.storage import db
-
-    db.rebuild(paths, _db_url())
 
 
 @official_app.command("set")
@@ -416,15 +275,7 @@ def official_set(
     framework: FrameworkOpt = "risk_scoring",
 ) -> None:
     """手动指定正式记录（reviewed 重置为 false，复核后用 official confirm）。"""
-    from market_risk.storage.runs import set_official
-
-    paths = _paths()
-    try:
-        pointer = set_official(paths, subject, framework, _parse_date(date), run, "manual")
-    except FileNotFoundError as exc:
-        typer.echo(f"错误：{exc}", err=True)
-        raise typer.Exit(code=1) from exc
-    _rebuild_db(paths)
+    pointer = _call(services.official_set, _ctx(), _parse_date(date), run, subject, framework)
     typer.echo(f"正式记录已设为 {pointer['run_id']}（reviewed=false）")
 
 
@@ -435,15 +286,7 @@ def official_confirm(
     framework: FrameworkOpt = "risk_scoring",
 ) -> None:
     """把当前正式记录标记为已复核（reviewed=true）。"""
-    from market_risk.storage.runs import confirm_official
-
-    paths = _paths()
-    try:
-        pointer = confirm_official(paths, subject, framework, _parse_date(date))
-    except FileNotFoundError as exc:
-        typer.echo(f"错误：{exc}", err=True)
-        raise typer.Exit(code=1) from exc
-    _rebuild_db(paths)
+    pointer = _call(services.official_confirm, _ctx(), _parse_date(date), subject, framework)
     typer.echo(f"{date} 的正式记录 {pointer['run_id']} 已确认（reviewed=true）")
 
 
@@ -457,15 +300,7 @@ def material_add(
     note: Annotated[str, typer.Option("--note")] = "",
 ) -> None:
     """把资料复制到 data/materials/<对象>/<年>/<日期>/ 并登记索引。"""
-    from market_risk.materials import MaterialError, add_material
-
-    paths = _paths()
-    try:
-        target = add_material(paths, subject, _parse_date(date), kind, file, source, note)
-    except MaterialError as exc:
-        typer.echo(f"错误：{exc}", err=True)
-        raise typer.Exit(code=1) from exc
-    _rebuild_db(paths)
+    target = _call(services.material_add, _ctx(), _parse_date(date), kind, file, subject, source, note)
     typer.echo(f"已登记：{target}")
 
 
@@ -476,16 +311,13 @@ def material_list(
     end: Annotated[str | None, typer.Option("--to")] = None,
 ) -> None:
     """列出资料。"""
-    from market_risk.data.tradingview import format_table
-    from market_risk.materials import list_materials
-
-    rows = list_materials(_paths(), subject, _parse_date(start) if start else None, _parse_date(end) if end else None)
+    rows = services.material_list(_ctx(), subject, _opt_date(start), _opt_date(end))
     if not rows:
         typer.echo("没有资料")
         return
-    typer.echo(format_table(["对象", "日期", "类型", "文件", "来源", "说明"],
-                            [[r["subject"], r["base_date"], r["type"], r["file_path"], r["source"], r["note"]]
-                             for r in rows]))
+    typer.echo(_table(["对象", "日期", "类型", "文件", "来源", "说明"],
+                      [[r["subject"], r["base_date"], r["type"], r["file_path"], r["source"], r["note"]]
+                       for r in rows]))
 
 
 @breadth_app.command("add")
@@ -498,24 +330,28 @@ def breadth_add(
     yes: Annotated[bool, typer.Option("--yes", help="覆盖时不再询问")] = False,
 ) -> None:
     """写入 data/manual/breadth.csv；同一日期重复录入时提示确认。"""
-    from market_risk.data.breadth import BreadthError, make_reading, read_breadth, upsert_breadth
+    ctx, day = _ctx(), _parse_date(date)
+    old = services.breadth_existing(ctx, day)
+    if (overwrite and not yes and old is not None and (old.s5fi, old.s5tw) != (round(s5fi, 2), round(s5tw, 2))
+            and not typer.confirm(f"{day} 已有读数 S5FI={old.s5fi}、S5TW={old.s5tw}，确认覆盖？")):
+        raise typer.Exit(code=1)
+    result = _call(services.breadth_add, ctx, day, s5fi, s5tw, note, overwrite)
+    typer.echo("已写入" if result.changed else "读数相同，无变更")
 
-    paths = _paths()
-    day = _parse_date(date)
-    reading = make_reading(day, s5fi, s5tw, note)
-    old = read_breadth(paths.breadth_csv).get(day)
-    if old is not None and (old.s5fi, old.s5tw) != (reading.s5fi, reading.s5tw):
-        if not overwrite:
-            typer.echo(f"错误：{day} 已有读数 S5FI={old.s5fi}、S5TW={old.s5tw}；如需修改请加 --overwrite", err=True)
-            raise typer.Exit(code=1)
-        if not yes and not typer.confirm(f"{day} 已有读数 S5FI={old.s5fi}、S5TW={old.s5tw}，确认覆盖？"):
-            raise typer.Exit(code=1)
-    try:
-        changed = upsert_breadth(paths.breadth_csv, reading, overwrite=True)
-    except BreadthError as exc:
-        typer.echo(f"错误：{exc}", err=True)
-        raise typer.Exit(code=1) from exc
-    typer.echo("已写入" if changed else "读数相同，无变更")
+
+def format_outcome(result: services.OutcomeResult) -> str:
+    o = result.outcome
+
+    def pct(v: float | None) -> str:
+        return "-" if v is None else f"{v}%"
+
+    lines = [
+        f"{o.base_date}：标普500最低收盘跌幅 {o.spx_min_close_drawdown}%，QQQ {o.qqq_min_close_drawdown}%，"
+        f"风险事件={'是' if o.is_event else '否'}（结果窗口 {o.window_start} 至 {o.window_end}）",
+        f"  辅助（仅参考）：最大收盘跌幅 标普500 {pct(o.spx_max_drawdown)}、QQQ {pct(o.qqq_max_drawdown)}；"
+        f"接近事件={'是' if o.near_event else '否'}",
+    ]
+    return "\n".join(lines + [f"【差异】{d}" for d in result.differences])
 
 
 @outcome_app.command("compute")
@@ -524,43 +360,7 @@ def outcome_compute(
     refresh: Annotated[bool, typer.Option("--refresh")] = False,
 ) -> None:  # pragma: no cover - 联网
     """结果窗口结束后，用标普500指数与 QQQ 的收盘价计算风险事件标签（SOP 9.3）。"""
-    from market_risk.data.cache import cached_series, today_new_york
-    from market_risk.data.prices import close_series_from_frame, yfinance_download
-    from market_risk.outcomes import (
-        OutcomeError,
-        compute_outcome,
-        outcome_window,
-        record_outcome,
-        window_finished,
-    )
-
-    settings = load_settings()
-    paths = StoragePaths(settings.storage_root)
-    base = _parse_date(date)
-    today = today_new_york()
-    if not window_finished(base, today):
-        typer.echo(f"错误：{base} 的结果窗口到 {outcome_window(base)[1]} 才结束，现在不得计算标签", err=True)
-        raise typer.Exit(code=1)
-    end = outcome_window(base)[1]
-    series = {}
-    for key, yahoo in (("GSPC", "^GSPC"), ("QQQ", "QQQ")):
-        def _dl(y: str = yahoo) -> dict:
-            return close_series_from_frame(yfinance_download(y, base, end + dt.timedelta(days=1)), y)
-
-        series[key], _ = cached_series(paths, "yahoo", f"{key}_outcome", base, end, f"yfinance {yahoo}", _dl,
-                                       refresh, settings.max_retries, settings.backoff_seconds)
-    try:
-        outcome = compute_outcome(base, series["GSPC"], series["QQQ"], today)
-    except OutcomeError as exc:
-        typer.echo(f"错误：{exc}", err=True)
-        raise typer.Exit(code=1) from exc
-    diffs = record_outcome(paths.outcomes_csv, outcome)
-    _rebuild_db(paths)
-    typer.echo(f"{base}：标普500最低收盘跌幅 {outcome.spx_min_close_drawdown}%，QQQ {outcome.qqq_min_close_drawdown}%，"
-               f"风险事件={'是' if outcome.is_event else '否'}"
-               f"（结果窗口 {outcome.window_start} 至 {outcome.window_end}）")
-    for d in diffs:
-        typer.echo(f"【差异】{d}")
+    typer.echo(format_outcome(_call(services.outcome_compute, _ctx(), _parse_date(date), refresh)))
 
 
 @outcome_app.command("add")
@@ -569,31 +369,18 @@ def outcome_add(
     spx: Annotated[float, typer.Option("--spx", help="标普500最低收盘价跌幅（百分数，如 -5.2）")],
     qqq: Annotated[float, typer.Option("--qqq", help="QQQ 最低收盘价跌幅（百分数）")],
     event_date: Annotated[str | None, typer.Option("--event-date", help="首次达到门槛的日期（可选）")] = None,
+    spx_max: Annotated[float | None, typer.Option("--spx-max", help="标普500最大收盘跌幅（可选，辅助）")] = None,
+    qqq_max: Annotated[float | None, typer.Option("--qqq-max", help="QQQ 最大收盘跌幅（可选，辅助）")] = None,
 ) -> None:
     """人工录入风险事件标签（与程序计算值不一致时报告差异）。"""
-    from market_risk.data.cache import today_new_york
-    from market_risk.outcomes import (
-        QQQ_THRESHOLD,
-        SPX_THRESHOLD,
-        Outcome,
-        outcome_window,
-        record_outcome,
-        window_finished,
-    )
+    result = _call(services.outcome_add, _ctx(), _parse_date(date), spx, qqq, _opt_date(event_date),
+                   spx_max, qqq_max)
+    typer.echo("已录入：" + format_outcome(result))
 
-    paths = _paths()
-    base = _parse_date(date)
-    if not window_finished(base, today_new_york()):
-        typer.echo(f"错误：{base} 的结果窗口尚未结束", err=True)
-        raise typer.Exit(code=1)
-    start, end = outcome_window(base)
-    o = Outcome("MARKET", base, start, end, spx, qqq, spx <= SPX_THRESHOLD or qqq <= QQQ_THRESHOLD,
-                _parse_date(event_date) if event_date else None, "manual",
-                dt.datetime.now(dt.UTC).isoformat(timespec="seconds"))
-    for d in record_outcome(paths.outcomes_csv, o):
-        typer.echo(f"【差异】{d}")
-    _rebuild_db(paths)
-    typer.echo(f"已录入：{base} 风险事件={'是' if o.is_event else '否'}")
+
+# ---------------------------------------------------------------------------
+# 旧记录、数据库、统计
+# ---------------------------------------------------------------------------
 
 
 @app.command("import-legacy")
@@ -601,16 +388,7 @@ def import_legacy_cmd(
     excel: Annotated[Path | None, typer.Option("--excel", help="默认 data/legacy/backtest_record_legacy.xlsx")] = None,
 ) -> None:
     """导入截图时代的样本（设为正式记录、reviewed=true），与程序记录对照。"""
-    from market_risk.legacy import LegacyError, import_legacy
-    from market_risk.storage.runs import git_info
-
-    paths = _paths()
-    try:
-        result = import_legacy(excel or paths.legacy_excel, paths, git_info(paths.root))
-    except LegacyError as exc:
-        typer.echo(f"错误：{exc}", err=True)
-        raise typer.Exit(code=1) from exc
-    _rebuild_db(paths)
+    result = _call(services.import_legacy, _ctx(), excel)
     for d, run_id in result.imported:
         typer.echo(f"已导入 {d}：{run_id}（正式记录，reviewed=true）")
     for s in result.skipped:
@@ -631,13 +409,10 @@ def import_legacy_cmd(
 
 @app.command("rebuild-db")
 def rebuild_db_cmd() -> None:
-    """由 results/、data/manual/、data/materials/ 重建 SQLite 数据库。"""
-    from market_risk.storage import db
-
-    paths = _paths()
-    url = db.rebuild(paths, _db_url())
-    counts = {t: len(v) for t, v in db.dump(url).items()}
-    typer.echo(f"已重建 {url}：" + "，".join(f"{t} {n}" for t, n in counts.items()))
+    """由 results/、data/manual/、data/materials/ 重建数据库。"""
+    ctx = _ctx()
+    counts = services.rebuild_database(ctx)
+    typer.echo(f"已重建 {ctx.db_url}：" + "，".join(f"{t} {n}" for t, n in counts.items()))
 
 
 @app.command()
@@ -647,10 +422,6 @@ def stats(
     end: Annotated[str | None, typer.Option("--to")] = None,
 ) -> None:
     """按 SOP 9.4 统计两个版本，写 reports/backtest_stats.md 与 reports/backtest_history.xlsx。"""
-    from market_risk.stats import run_stats
-
-    paths = _paths()
-    text, _ = run_stats(paths, _db_url(), framework, _parse_date(start) if start else None,
-                        _parse_date(end) if end else None)
-    typer.echo(text)
-    typer.echo(f"已写入 {paths.backtest_stats_md} 与 {paths.backtest_history_xlsx}")
+    report = services.run_stats(_ctx(), framework, _opt_date(start), _opt_date(end))
+    typer.echo(report.text)
+    typer.echo(f"已写入 {report.markdown_path} 与 {report.workbook_path}")

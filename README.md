@@ -76,6 +76,8 @@ uv run market-risk fetch --date 2025-11-28
 
 ### 4.3 评分（回测）
 
+三环节 d1 候选为 T−20 至 T−2（SOP 7.2）；另一口径（T−19 至 T−2）只作参考，结果不同时标注。
+
 ```bash
 uv run market-risk score --date 2025-11-28 --s5fi 58.44 --s5tw 76.73
 ```
@@ -149,7 +151,8 @@ uv run market-risk outcome add --date 2025-10-31 --spx -4.41 --qqq -6.90
 ```
 
 - 某基准日第一次运行、状态为 complete 或 pending、代码与配置没有未提交修改时，自动设为正式记录（reviewed=false）；复核后用 `official confirm`。
-- 结果标签只能在结果窗口（基准日后第20个交易日）结束后计算；手工录入与程序计算不一致时报告差异，统计以手工为准。
+- 结果标签由程序计算（SOP 9.5），只能在结果窗口（基准日后第20个交易日）结束后计算；用户抽查核对，手工录入与程序计算不一致时报告差异，统计以手工为准。
+- 标签另有辅助字段（仅参考）：窗口内最大收盘跌幅、"接近事件"（标普500 ≥4% 或 QQQ ≥6%）。
 
 ### 4.8 导入旧记录、数据库、统计
 
@@ -184,7 +187,9 @@ uv run market-risk stats --from 2025-08-01 --to 2026-09-30
 | `summary.md` | 中文摘要：分项分数、总分、阶段、证据链、计算过程、贴近门槛、数据问题 |
 | `inputs/` | 当次实际使用的数据（逐日数据、FRED 观测、财政部数值、广度读数、全部原始序列），可复现 |
 
-同一基准日的 `official.json` 指向正式记录。数据库 `db/market_risk.sqlite` 可随时由文件重建。
+同一基准日的 `official.json` 指向正式记录。
+
+数据库默认为 `db/market_risk.sqlite`（SQLite，WAL 模式），可随时由文件重建（`rebuild-db`）。连接地址可用 `.env` 的 `DATABASE_URL` 或 `settings.yaml` 的 `database.url` 更换；访问统一经 SQLAlchemy，表结构由 Alembic 迁移管理（`migrations/`），详见 STORAGE.md 4.1。
 
 ## 6. 与截图方式的差异
 
@@ -210,7 +215,13 @@ uv run market-risk stats --from 2025-08-01 --to 2026-09-30
 - **为什么 ALFRED 不能核验发布时点**：该系列的版本日期等于观测日期，不代表真实发布时间；程序按"次日发布"处理，只用 ALFRED 做历史修订比对（SPEC 5.6 第3条）。
 - **本机 git 不在 PATH 中**：`storage/runs.py` 会在常见路径（含 `C:\Execute\Git\bin`）查找；找不到时 commit 记为 `0000000` 且不自动设定正式记录。
 
-## 8. 开发
+## 8. 代码结构
+
+- `src/market_risk/services.py`：统一的业务入口，每个函数返回数据类（可用 `storage.runs.to_jsonable` 转为 JSON）。命令行、以后的 FastAPI 接口、Vue 前端和 LangChain Agent 都调用这些函数。
+- `cli.py` 只负责解析参数和格式化输出。
+- 数据库读写集中在 `src/market_risk/storage/`（`db.py`、`schema.py`）。
+
+## 9. 开发
 
 ```bash
 uv run pytest

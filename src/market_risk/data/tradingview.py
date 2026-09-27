@@ -19,6 +19,7 @@ import unicodedata
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from market_risk import calendar as mcal
@@ -705,29 +706,34 @@ def format_import_summary(result: ImportResult) -> str:
     return "\n".join(parts)
 
 
-def format_list(paths: StoragePaths) -> str:
-    """tv list：按标的汇总已导入的文件。"""
+def imported_symbols(paths: StoragePaths) -> list[dict[str, Any]]:
+    """按标的汇总已导入的文件（tv list 的数据）。"""
     manifest = read_manifest(paths.tv_manifest)
-    if not manifest:
-        return "尚未导入任何 TradingView 文件"
     by_symbol: dict[str, list[Mapping[str, str]]] = {}
     for row in manifest.values():
         by_symbol.setdefault(row["symbol"] or row["tv_symbol"], []).append(row)
-    rows = []
+    out = []
     for symbol in sorted(by_symbol):
         items = by_symbol[symbol]
         firsts = [r["first_date"] for r in items if r["first_date"]]
         lasts = [r["last_date"] for r in items if r["last_date"]]
         statuses = {r["validation_status"] for r in items}
         status = FAILED if FAILED in statuses else WARNING if WARNING in statuses else PASSED
-        processed = paths.tv_processed_file(symbol) if re.match(r"^[A-Za-z0-9]", symbol) else None
-        n_processed = len(read_processed(paths, symbol)) if processed and processed.exists() else 0
-        rows.append([
-            symbol,
-            items[0]["tv_symbol"],
-            str(len(items)),
-            f"{min(firsts) if firsts else '-'} 至 {max(lasts) if lasts else '-'}",
-            str(n_processed),
-            STATUS_TEXT[status],
-        ])
-    return format_table(["标的", "TV代码", "文件数", "起止日期", "清洗后行数", "校验"], rows)
+        processed = 0
+        if re.match(r"^[A-Za-z0-9][A-Za-z0-9_\-]*$", symbol):
+            processed = len(read_processed(paths, symbol))
+        out.append({"symbol": symbol, "tv_symbol": items[0]["tv_symbol"], "files": len(items),
+                    "first_date": min(firsts) if firsts else None, "last_date": max(lasts) if lasts else None,
+                    "processed_rows": processed, "status": status})
+    return out
+
+
+def format_list(rows: list[dict[str, Any]]) -> str:
+    """tv list 的表格。"""
+    if not rows:
+        return "尚未导入任何 TradingView 文件"
+    return format_table(
+        ["标的", "TV代码", "文件数", "起止日期", "清洗后行数", "校验"],
+        [[r["symbol"], r["tv_symbol"], str(r["files"]), f"{r['first_date'] or '-'} 至 {r['last_date'] or '-'}",
+          str(r["processed_rows"]), STATUS_TEXT[r["status"]]] for r in rows],
+    )
