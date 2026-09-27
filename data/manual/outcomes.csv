@@ -1,5 +1,5 @@
-subject,base_date,window_start,window_end,spx_min_close_drawdown,qqq_min_close_drawdown,is_event,event_date,source,entered_at
-MARKET,2025-08-29,2025-09-02,2025-09-29,-0.6922,-0.838,否,,computed,2026-09-27T01:04:46+00:00
-MARKET,2025-09-26,2025-09-29,2025-10-24,-1.3726,-1.0856,否,,computed,2026-09-27T01:04:51+00:00
-MARKET,2025-10-31,2025-11-03,2025-12-01,-4.4069,-6.8991,否,,computed,2026-09-27T01:04:57+00:00
-MARKET,2025-11-28,2025-12-01,2025-12-29,-1.8639,-3.0424,否,,computed,2026-09-27T01:05:02+00:00
+subject,base_date,window_start,window_end,spx_min_close_drawdown,qqq_min_close_drawdown,is_event,event_date,spx_max_drawdown,qqq_max_drawdown,near_event,source,entered_at
+MARKET,2025-08-29,2025-09-02,2025-09-29,-0.6922,-0.838,否,,-1.33,-1.4397,否,computed,2026-09-27T01:24:35+00:00
+MARKET,2025-09-26,2025-09-29,2025-10-24,-1.3726,-1.0856,否,,-2.9792,-3.5883,否,computed,2026-09-27T01:24:37+00:00
+MARKET,2025-10-31,2025-11-03,2025-12-01,-4.4069,-6.8991,否,,-4.5711,-7.3424,是,computed,2026-09-27T01:24:39+00:00
+MARKET,2025-11-28,2025-12-01,2025-12-29,-1.8639,-3.0424,否,,-2.6021,-4.3339,否,computed,2026-09-27T01:24:41+00:00

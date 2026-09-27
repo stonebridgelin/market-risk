@@ -113,6 +113,10 @@ outcomes = Table(
     Column("is_event", Boolean, nullable=False),
     Column("event_date", Date),
     Column("entered_at", String(40)),
+    # 迁移 0002：辅助字段（仅作参考，不改变 is_event）
+    Column("spx_max_drawdown", DECIMAL),
+    Column("qqq_max_drawdown", DECIMAL),
+    Column("near_event", Boolean),
 )
 
 materials = Table(

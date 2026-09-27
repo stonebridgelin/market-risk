@@ -338,3 +338,48 @@ def test_stats_unreviewed_and_mixed(paths):
     program_runs(paths)     # 自动设为正式记录，reviewed=false
     text, _ = run_stats(paths, db.default_url(paths))
     assert "已复核 0，未复核 4" in text and "程序 4" in text
+
+
+# ---------------------------------------------------------------------------
+# 结果标签辅助字段（SOP 9.3，2026-09-27）
+# ---------------------------------------------------------------------------
+
+
+def test_max_drawdown_and_near_event(paths):
+    from market_risk.outcomes import is_near_event, max_drawdown
+
+    assert max_drawdown([100, 110, 99, 105]) == pytest.approx(-10.0)     # 110 → 99
+    assert max_drawdown([100, 101, 102]) == 0.0
+    base = D(2025, 10, 31)
+    # 先涨后跌：基准日口径 −4.5%（接近事件），最大收盘跌幅 −9.5%（105 → 95.5）
+    spx = _closes(base, [100.0, 105.0] + [100.0] * 5 + [95.5] + [99.0] * 13)
+    qqq = _closes(base, [100.0] + [98.0] * 20)
+    o = compute_outcome(base, spx, qqq, D(2026, 1, 1))
+    assert not o.is_event and o.near_event
+    assert o.spx_min_close_drawdown == pytest.approx(-4.5) and o.spx_max_drawdown == pytest.approx(-9.0476, abs=1e-3)
+    assert o.qqq_max_drawdown == pytest.approx(-2.0)
+    assert not is_near_event(-5.5, -1.0, True)            # 已是事件，不再标"接近"
+    assert is_near_event(-1.0, -6.0, False) and not is_near_event(-3.99, -5.99, False)
+
+    record_outcome(paths.outcomes_csv, o)
+    (back,) = read_outcomes(paths.outcomes_csv)
+    assert back == o and back.near_event
+    url = db.rebuild(paths, db.default_url(paths))
+    row = db.dump(url)["outcomes"][0]
+    cols = [c.name for c in db.schema.outcomes.c]
+    rec = dict(zip(cols, row, strict=True))
+    assert rec["near_event"] is True and rec["spx_max_drawdown"] == Decimal("-9.0476")
+
+
+def test_stats_show_near_events(paths):
+    program_runs(paths)
+    record_outcome(paths.outcomes_csv, Outcome("MARKET", D(2025, 10, 31), D(2025, 11, 3), D(2025, 12, 1),
+                                               -4.41, -6.90, False, None, "computed", "t", -5.1, -8.2))
+    text, _ = run_stats(paths, db.default_url(paths))
+    assert "接近事件（仅参考，不改变风险事件定义）：1 个（2025-10-31）" in text
+    assert "| -4.41% / -5.10% | -6.90% / -8.20% | 是 |" in text
+    sheet = openpyxl.load_workbook(paths.backtest_history_xlsx)["样本汇总"]
+    headers = [sheet.cell(4, c).value for c in range(1, sheet.max_column + 1)]
+    assert headers[-1] == "接近事件(仅参考)"
+    row = next(r for r in range(5, sheet.max_row + 1) if str(sheet.cell(r, 2).value).startswith("2025-10-31"))
+    assert sheet.cell(row, len(headers)).value == "是"

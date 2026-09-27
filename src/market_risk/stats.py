@@ -143,6 +143,15 @@ def modification_for(dimension: str, v2: dict, v3: dict) -> str:
         dimension, "（VIX、利率两版本规则相同，不应出现差异，请检查）")
 
 
+def _pct(v: float | None) -> str:
+    return "-" if v is None else f"{v:.2f}%"
+
+
+def _near_text(samples: list[Sample]) -> str:
+    near = [s.base_date for s in samples if s.outcome is not None and s.outcome.near_event]
+    return f"{len(near)} 个" + (f"（{'、'.join(map(str, near))}）" if near else "")
+
+
 def _fmt(p: float | None) -> str:
     return "-" if p is None else f"{p * 100:.1f}%"
 
@@ -157,7 +166,8 @@ def render_markdown(samples: list[Sample], stats: dict[str, VersionStats], gener
         f"- 正式记录样本数：{len(samples)}（已复核 {reviewed}，未复核 {len(samples) - reviewed}）",
         f"- 有结果标签的样本：{labeled}；无标签（结果窗口未结束或未计算）：{len(samples) - labeled}",
         f"- 数据来源：截图 {sum(s.data_source_type == 'screenshot' for s in samples)}，"
-        f"程序 {sum(s.data_source_type == 'api' for s in samples)}", "",
+        f"程序 {sum(s.data_source_type == 'api' for s in samples)}",
+        f"- 接近事件（仅参考，不改变风险事件定义）：{_near_text(samples)}", "",
         "## 指标", "",
         "| 指标 | " + " | ".join(VERSIONS) + " |", "|---|---|---|",
     ]
@@ -214,25 +224,34 @@ def render_markdown(samples: list[Sample], stats: dict[str, VersionStats], gener
     else:
         lines.append("所有样本两个版本的各维度分数相同。")
     lines += ["", "## 样本明细", "",
-              "| 基准日 | 来源 | 已复核 | v2-M 总分 | v2-M 预警 | v3-R1 总分 | v3-R1 预警 | 风险事件 |",
-              "|---|---|---|---|---|---|---|---|"]
+              "最低收盘跌幅：以基准日收盘价为起点（风险事件口径）；最大收盘跌幅：窗口内最高收盘价到其后最低收盘价（辅助）。",
+              "",
+              "| 基准日 | 来源 | 已复核 | v2-M 总分 | v2-M 预警 | v3-R1 总分 | v3-R1 预警 | 风险事件 | "
+              "标普500 最低/最大收盘跌幅 | QQQ 最低/最大收盘跌幅 | 接近事件 |",
+              "|---|---|---|---|---|---|---|---|---|---|---|"]
     for s in samples:
         t2, t3 = s.totals.get("v2-M", {}), s.totals.get("v3-R1", {})
 
         def tot(t: dict) -> str:
             return str(t.get("total")) if t.get("total") is not None else f"{t.get('total_min')}–{t.get('total_max')}"
 
-        ev = "-" if s.outcome is None else ("是" if s.outcome.is_event else "否")
+        o = s.outcome
+        ev = "-" if o is None else ("是" if o.is_event else "否")
+        spx = "-" if o is None else f"{o.spx_min_close_drawdown:.2f}% / {_pct(o.spx_max_drawdown)}"
+        qqq = "-" if o is None else f"{o.qqq_min_close_drawdown:.2f}% / {_pct(o.qqq_max_drawdown)}"
+        near = "-" if o is None else ("是" if o.near_event else "否")
         lines.append(f"| {s.base_date} | {'截图' if s.data_source_type == 'screenshot' else '程序'} | "
                      f"{'是' if s.reviewed else '否'} | {tot(t2)} | {t2.get('alert')} | {tot(t3)} | "
-                     f"{t3.get('alert')} | {ev} |")
+                     f"{t3.get('alert')} | {ev} | {spx} | {qqq} | {near} |")
     return "\n".join(lines) + "\n"
 
 
 HISTORY_HEADERS = ["序号", "基准日", "星期", "状态", "v2-M 价格", "v2-M 广度", "v2-M VIX", "v2-M 利率", "v2-M 信用",
                    "v2-M 总分", "v2-M 阶段", "v2-M 明确恶化", "v3-R1 价格", "v3-R1 广度", "v3-R1 VIX", "v3-R1 利率",
                    "v3-R1 信用", "v3-R1 总分", "v3-R1 阶段", "v3-R1 明确恶化", "预警(总分≥3)", "结果窗口",
-                   "风险事件(是/否)", "贴近门槛的读数", "Remark：参数变化与数据问题", "数据来源"]
+                   "风险事件(是/否)", "贴近门槛的读数", "Remark：参数变化与数据问题", "数据来源",
+                   "标普500最低收盘跌幅(%)", "QQQ最低收盘跌幅(%)", "标普500最大收盘跌幅(%)", "QQQ最大收盘跌幅(%)",
+                   "接近事件(仅参考)"]
 
 
 def write_history_xlsx(path: Path, samples: list[Sample], url: str) -> None:
@@ -264,6 +283,9 @@ def write_history_xlsx(path: Path, samples: list[Sample], url: str) -> None:
         notes = json.loads(s.totals.get("v2-M", {}).get("notes") or "[]")
         values.append("；".join(notes))
         values.append("截图" if s.data_source_type == "screenshot" else "程序")
+        o = s.outcome
+        values += ([o.spx_min_close_drawdown, o.qqq_min_close_drawdown, o.spx_max_drawdown, o.qqq_max_drawdown,
+                    "是" if o.near_event else "否"] if o is not None else [None] * 5)
         for c, v in enumerate(values, start=1):
             ws.cell(r, c, v)
     path.parent.mkdir(parents=True, exist_ok=True)
