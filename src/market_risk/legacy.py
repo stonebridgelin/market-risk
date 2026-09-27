@@ -28,6 +28,7 @@ from market_risk.storage.runs import (
     list_runs,
     new_run,
     read_json,
+    read_official,
     set_official,
     write_json,
 )
@@ -334,7 +335,9 @@ def import_legacy(
             result.imported.append((s.base_date, run_id))
         else:
             result.skipped.append(f"{s.base_date}（已导入：{run_id}）")
-        set_official(paths, MARKET, RISK_SCORING, s.base_date, run_id, "import-legacy", reviewed=True, now=now)
+        pointer = read_official(paths, MARKET, RISK_SCORING, s.base_date)
+        if not (pointer and pointer.get("run_id") == run_id and pointer.get("set_by") == "import-legacy"):
+            set_official(paths, MARKET, RISK_SCORING, s.base_date, run_id, "import-legacy", reviewed=True, now=now)
         legacy_key = f"{MARKET}/{RISK_SCORING}/{s.base_date}/{run_id}"
         rv, sd, md = compare_with_program(s, legacy_key, _latest_program_run(paths, s.base_date))
         reviews += rv
@@ -343,6 +346,7 @@ def import_legacy(
 
     by_seq = {s.seq: s.base_date for s in samples}
     for row in changelog:
+        row = _apply_resolution(row)
         refs = [int(x) for x in re.findall(r"样本(\d+)", str(row["samples"] or ""))]
         dates = [by_seq[n] for n in refs if n in by_seq] or [None]
         if "及以后" in str(row["samples"] or ""):
@@ -354,6 +358,25 @@ def import_legacy(
     add_reviews(paths, reviews, now,
                 replace=lambda r: r["reviewer"] in ("legacy_changelog",) or r["category"] == "截图与程序对照")
     return result
+
+
+# 旧 Excel 变更记录中"待定"事项的后续决定（Excel 原文不改，导入复核记录时注明）
+RESOLUTIONS = {
+    "三环节d1候选是否包含T−20": (
+        "2026-09-27",
+        "已确定：d1 候选为 T−20 至 T−2（包含 T−20），与 Lc\"d1之前20个交易日\"的写法一致；"
+        "SOP 7.2 已写明。程序另按 T−19 至 T−2 计算作参考，结果不同时标注，计分以 SOP 7.2 为准",
+    ),
+}
+
+
+def _apply_resolution(row: dict[str, Any]) -> dict[str, Any]:
+    category, content = str(row["category"] or ""), str(row["content"] or "")
+    for key, (when, decision) in RESOLUTIONS.items():
+        if key in content and "待定" in category:
+            return {**row, "category": category.replace("待定", "已确定"),
+                    "impact": f"{row['impact'] or ''}；[{when}] {decision}"}
+    return row
 
 
 def _legacy_summary(s: LegacySample) -> str:

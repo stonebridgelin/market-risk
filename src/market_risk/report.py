@@ -176,8 +176,8 @@ def prompt_context(ctx: ReportContext, rules: Mapping[str, str]) -> dict[str, An
     other = [r.symbol for r in snap.three_segment[not flag] if r.completed]
     conclusion = f"程序结论：完成三环节的标的：{'、'.join(completed) or '无'}。"
     if set(completed) != set(other):
-        conclusion += (f"【注意】若 d1 候选{'不含' if flag else '含'} T−20，完成的标的为："
-                       f"{'、'.join(other) or '无'}（三环节结果依赖口径）。")
+        conclusion += (f"【注意】参考口径（d1 候选{'不含' if flag else '含'} T−20）下完成的标的为："
+                       f"{'、'.join(other) or '无'}（三环节结果依赖口径，计分以 SOP 7.2 为准）。")
     daily_closes = []
     for d in mcal.stock_trading_days(refs.three_segment_query_start, base):
         daily_closes.append({"date": d, **{s: fixed2(e_closes.get(d)) for s, e_closes in

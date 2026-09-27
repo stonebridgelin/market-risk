@@ -273,9 +273,14 @@ def test_import_legacy_end_to_end(paths):
     assert len(compare) == 4 and all(r["impact"] == "分数一致" for r in compare)
     assert all(r["other_run_key"].endswith(prog[r["base_date"]]) for r in compare)
     assert sum(r["reviewer"] == "legacy_changelog" for r in reviews) == result.changelog_rows >= 12
+    resolved = [r for r in reviews if r["category"] == "变更记录：规则口径（已确定）"]
+    assert len(resolved) == 2 and all("T−20 至 T−2" in r["impact"] for r in resolved)
+    assert not any("待定" in r["category"] for r in reviews)
 
     # 重复导入：不新建运行目录，不重复复核记录
-    again = import_legacy(excel, paths, GIT, now=now)
+    pointers = {d: runs.read_official(paths, MARKET, RISK_SCORING, d) for d, _ in result.imported}
+    again = import_legacy(excel, paths, GIT, now=now + dt.timedelta(hours=1))
+    assert {d: runs.read_official(paths, MARKET, RISK_SCORING, d) for d in pointers} == pointers
     assert again.imported == [] and any("已导入" in s for s in again.skipped)
     assert len(read_reviews(paths)) == len(reviews)
 

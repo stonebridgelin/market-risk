@@ -11,8 +11,7 @@ prices:
   lookback_calendar_days: 420  # 基准日往前至少下载的自然日数
 
 three_segment:
-  # SPEC 5.6 第1条：候选 d1 是否包含 T−20。程序同时按两种口径计算，此开关决定计分采用哪一种
-  d1_includes_t_minus_20: true
+  # d1 候选范围为 T−20 至 T−2（SOP 7.2，2026-09-27 确定，不再设开关）；另一口径只作参考
   query_start_offset: 45       # 三环节查询起点 T−45（股票交易日）
 
 oas:

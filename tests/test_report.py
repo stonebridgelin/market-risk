@@ -62,7 +62,7 @@ def test_full_run_outputs(paths):
     assert "created_at_local" in meta and meta["status"] == "complete"
     assert meta["git_commit"].startswith("a1b2c3d") and meta["git_dirty"] is False
     assert meta["data_source_type"] == "api" and meta["rule_versions"] == ["v2-M", "v3-R1"]
-    assert meta["config"]["three_segment.d1_includes_t_minus_20"] is True
+    assert meta["config"]["three_segment.d1_range"].startswith("T−20 至 T−2")
     assert {s["source"] for s in meta["sources"]} >= {"yahoo", "fred", "treasury", "cboe"}
 
     dates = json.loads((out.run_dir / "dates.json").read_text("utf-8"))
@@ -188,3 +188,10 @@ def test_cli_validate_and_samples():
     assert "不一致 0" in r.stdout and "SPY MA50" in r.stdout
     r = CliRunner().invoke(app, ["samples", "--year", "2020"])
     assert "2020-12-31（周四）（最后一个周五休市，取当月最后一个交易日）" in r.stdout
+
+
+def test_dirty_check_scope():
+    """STORAGE 2.1：只排除数据与输出目录；docs/SOP.md、templates/、代码与配置都纳入检查。"""
+    assert runs.DIRTY_CHECK_EXCLUDES == ("results", "reports", "data", "db")
+    for must_check in ("docs", "templates", "src", "config", "migrations"):
+        assert must_check not in runs.DIRTY_CHECK_EXCLUDES

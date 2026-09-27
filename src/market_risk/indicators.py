@@ -14,7 +14,7 @@ from market_risk.models import ThreeSegmentResult, ThreeSegmentTrace
 PRICE_DECIMALS = 2
 LC_LOOKBACK = 20          # Lc：d1 之前20个交易日的最低收盘价
 MIN_D1_GAP = 2            # d1 至少早于基准日2个交易日
-D1_RANGE = 20             # 候选 d1 位于基准日前20个交易日内
+D1_RANGE = 20             # 候选 d1 最早为 T−20（SOP 7.2：T−20 至 T−2）
 
 
 class InsufficientDataError(ValueError):

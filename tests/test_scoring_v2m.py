@@ -76,11 +76,11 @@ def test_price_ma_is_exact_not_rounded():
 
 def test_three_segment_scope_dependency_note():
     ts = {True: (completed_three_segment("SPY"),), False: no_three_segment()[False]}
-    result = v2m.score(make(three_segment=ts), d1_includes_t_minus_20=True)
-    assert result.price.score == 2
-    assert any("三环节结果依赖口径" in n for n in result.notes)
-    other = v2m.score(make(three_segment=ts), d1_includes_t_minus_20=False)
-    assert other.price.score == 0
+    result = v2m.score(make(three_segment=ts))
+    assert result.price.score == 2          # 计分以 SOP 7.2（含 T−20）为准
+    assert any("三环节结果依赖口径" in n and "参考口径" in n for n in result.notes)
+    assert v2m.score_price(make(three_segment=ts), False).score == 0   # 参考口径
+    assert v2m.D1_INCLUDES_T_MINUS_20 is True
 
 
 # ---------------------------------------------------------------------------

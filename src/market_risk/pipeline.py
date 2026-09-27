@@ -45,7 +45,7 @@ class RunOutcome:
 def score_snapshot(
     snapshot: MarketSnapshot, settings: Settings
 ) -> tuple[tuple[ScoreResult, ...], tuple[NearThresholdItem, ...]]:
-    results = (v2m.score(snapshot, settings.d1_includes_t_minus_20), v3r1.score(snapshot))
+    results = (v2m.score(snapshot), v3r1.score(snapshot))
     near = tuple(near_threshold_items(snapshot, settings.near_threshold))
     return results, near
 
@@ -80,7 +80,7 @@ def run_scoring(
     run_id, run_dir, created = new_run(paths, MARKET, RISK_SCORING, base, git, now)
     meta = base_meta(run_id, created, MARKET, RISK_SCORING, base, raw.mode, git)
     meta["config"] = {
-        "three_segment.d1_includes_t_minus_20": settings.d1_includes_t_minus_20,
+        "three_segment.d1_range": "T−20 至 T−2（SOP 7.2；参考口径 T−19 至 T−2）",
         "oas.revision_check": settings.oas_revision_check,
         "oas.long_history_source": settings.oas_long_history_source,
     }
@@ -94,7 +94,7 @@ def run_scoring(
         results, near = score_snapshot(snapshot, settings)
         status = run_status(results)
         ctx_kwargs = {"breadth_source": breadth_source} if breadth_source else {}
-        ctx = ReportContext(raw, snapshot, results, near, settings.d1_includes_t_minus_20, **ctx_kwargs)
+        ctx = ReportContext(raw, snapshot, results, near, v2m.D1_INCLUDES_T_MINUS_20, **ctx_kwargs)
         write_run_outputs(run_dir, ctx, status, settings.reference_symbols)
     except Exception as exc:
         meta.update(status=STATUS_FAILED, error=f"{type(exc).__name__}: {exc}")

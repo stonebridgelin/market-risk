@@ -45,7 +45,6 @@ class Settings:
     reference_symbols: tuple[str, ...]
     moving_averages: tuple[int, ...]
     lookback_calendar_days: int
-    d1_includes_t_minus_20: bool
     three_segment_query_offset: int
     oas_series: str
     oas_revision_check: bool
@@ -102,7 +101,6 @@ def load_settings(path: Path = DEFAULT_SETTINGS_PATH, root: Path = PROJECT_ROOT)
             reference_symbols=tuple(raw["symbols"]["reference"]),
             moving_averages=tuple(int(x) for x in raw["moving_averages"]),
             lookback_calendar_days=int(raw["prices"]["lookback_calendar_days"]),
-            d1_includes_t_minus_20=bool(raw["three_segment"]["d1_includes_t_minus_20"]),
             three_segment_query_offset=int(raw["three_segment"]["query_start_offset"]),
             oas_series=str(raw["oas"]["series"]),
             oas_revision_check=bool(raw["oas"]["revision_check"]),

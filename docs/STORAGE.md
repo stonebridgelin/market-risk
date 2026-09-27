@@ -98,7 +98,7 @@ market-risk/
 - **自动设定**：某个基准日第一次运行时，同时满足以下条件才自动设为正式记录，且 `reviewed=false`：
   1. 该对象、框架、基准日尚无正式记录；
   2. 运行状态为 `complete` 或 `pending`（`failed` 不设）；
-  3. git 工作区干净（无未提交的修改）。实现口径（待用户确认）：只检查代码与配置，`results/`、`reports/`、`data/`、`db/` 下的变动不算"未提交的修改"——否则结果目录本身要提交 git，每次运行后工作区都会变"脏"，只有提交后的第一次运行能自动设定。
+  3. git 工作区干净（无未提交的修改）。口径（2026-09-27 确认）：排除 `results/`、`reports/`、`data/`、`db/`（数据与输出，否则每次运行后工作区都会变"脏"）；其余全部纳入检查，**特别是 `docs/SOP.md` 和 `templates/`**——prompt 的规则全文与格式来自这两处，它们有未提交的修改时不自动设定。代码、`config/`、`migrations/` 同样纳入检查。
   否则不自动设定，并在命令行提示。
 - 之后再运行只新增运行目录，不改变正式记录；更换正式记录必须用 `official set` 手动指定（手动指定后 `reviewed=false`，需要重新确认）。
 - `official confirm` 把当前正式记录设为 `reviewed=true`。
@@ -114,7 +114,7 @@ market-risk/
 - `subject`（`MARKET` 或股票代码）、`framework`、`base_date`、`mode`（`backtest` / `daily`）
 - `rule_versions`（如 `["v2-M", "v3-R1"]`）
 - `git_commit`，以及工作区是否有未提交的修改（有则警告）
-- 配置开关的取值（如 `three_segment.d1_includes_t_minus_20`）
+- 配置开关与口径的取值（如 `oas.revision_check`、三环节 d1 范围）
 - 每个数据源的来源 URL、下载时间、数据截止日期
 - `data_source_type`：`api`（程序获取）或 `screenshot`（历史上的截图方式，用于导入样本1至4）
 - 运行状态：`complete` / `pending`（有待补维度）/ `failed`

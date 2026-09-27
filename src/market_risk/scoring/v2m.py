@@ -37,6 +37,7 @@ DY25 = 25                                        # Δy，bp
 OAS_HIGH = Decimal("4.00")                       # O1 ≥ 4.00%
 DOAS5, DOAS20 = 5, 20                            # ΔOAS，bp
 LAG_CAP_DAYS = 1                                 # O1 滞后超过1个股票交易日，最高1分
+D1_INCLUDES_T_MINUS_20 = True                    # 三环节 d1 候选为 T−20 至 T−2（SOP 7.2，2026-09-27 确定）
 
 PCT_LO, PCT_HI = Decimal("0"), Decimal("100")
 VIX_LO, VIX_HI = Decimal("0.01"), Decimal("200")
@@ -351,16 +352,18 @@ def revision_flags(snapshot: MarketSnapshot, current: DimensionScore) -> list[st
 # ---------------------------------------------------------------------------
 
 
-def score(snapshot: MarketSnapshot, d1_includes_t_minus_20: bool = True) -> ScoreResult:
-    """按规则A（v2-M）计算五个维度、总分、阶段与证据链。"""
-    price = score_price(snapshot, d1_includes_t_minus_20)
+def score(snapshot: MarketSnapshot) -> ScoreResult:
+    """按规则A（v2-M）计算五个维度、总分、阶段与证据链。
+
+    三环节按 SOP 7.2 的 d1 范围（T−20 至 T−2）计分；另一口径（T−19 至 T−2）只作参考，结果不同时标注。
+    """
+    price = score_price(snapshot, D1_INCLUDES_T_MINUS_20)
     notes: list[str] = []
-    alt = score_price(snapshot, not d1_includes_t_minus_20)
-    if alt.score != price.score:
+    reference = score_price(snapshot, not D1_INCLUDES_T_MINUS_20)
+    if reference.score != price.score:
         notes.append(
-            f"【三环节结果依赖口径】d1 {'含' if d1_includes_t_minus_20 else '不含'} T−20 时价格 "
-            f"{price.score} 分；{'不含' if d1_includes_t_minus_20 else '含'} T−20 时"
-            f"为 {alt.score} 分"
+            f"【三环节结果依赖口径】按 SOP 7.2（d1 为 T−20 至 T−2）价格 {price.score} 分；"
+            f"参考口径（d1 为 T−19 至 T−2）为 {reference.score} 分。计分以 SOP 7.2 为准"
         )
     credit = score_credit(snapshot)
     return assemble(
