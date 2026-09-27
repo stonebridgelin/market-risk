@@ -272,6 +272,7 @@ YAML 增加 `corrected_value` 与 `evidence_source`，迁移0005同步参考表�
 - 历史修订：与上一版相比已有日期的数值变化时列出修订清单（`reports/market_data_revisions.md`），**不自动覆盖**，确认后用 `--accept-revisions` 更新。判定：Yahoo 价格按4位小数、成交量按整数，其他来源按两位小数。
 - `fetch --date` = 按需更新数据集 + 该基准日的 ALFRED 版本（`data/market/vintage/`，只为正式样本：月末样本、每日前瞻运行；逐日历史回测不做版本比对）。`score` 只读数据集，未覆盖基准日时报错并提示先运行 `fetch`。
 - `validate` 另用 `data/market/` 对样本1至4重新计分，与离线样本逐项比对。
+- 已知事项（2026-09-27 记录，以后统一处理）：价格两位小数的取整方式不一致——争议价格审查（`price_review.py`）用 Decimal 的 ROUND_HALF_UP，评分读取（`market.raw_inputs_from_series`）用 Python `round()`（银行家舍入，且受二进制浮点表示影响）。已核实 2007 年以后 SPY、QQQ、RSP、HYG、LQD 的数据集价格全部为整分（4 位小数的后两位均为 0），两种方式结果相同，不影响回测。
 
 ### 6.1 通用要求
 - 每次下载写入 `data/cache/`，文件名包含数据源、代码、日期范围；同时保存元数据（来源 URL、下载时间、行数）。

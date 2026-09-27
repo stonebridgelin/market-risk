@@ -158,3 +158,19 @@ def test_correct_reference_roundtrip_and_rebuild(tmp_path, monkeypatch):
                 assert row.evidence_source == '人工证据' and row.decision == 'correct'
         finally:
             engine.dispose()
+
+
+def test_data_build_reports_invalid_correction_as_service_error(tmp_path, monkeypatch):
+    """裁定表有误时，data build 显示原因（ServiceError），不抛异常栈。"""
+    from market_risk import services
+    from market_risk.config import load_settings
+    from market_risk.storage import db
+
+    ctx = services.Context(load_settings(), StoragePaths(tmp_path), db.default_url(StoragePaths(tmp_path)))
+    bad = dataclasses.replace(correction(), date=DAY + dt.timedelta(days=1))
+    monkeypatch.setattr(services, 'load_data_decisions', lambda: (bad,))
+    with pytest.raises(services.ServiceError, match=r'data_decisions\.yaml'):
+        services.data_build(ctx, end=DAY, collect=lambda e: ([series()], {}))
+    monkeypatch.setattr(services, 'load_data_decisions', lambda: (correction(), correction()))
+    with pytest.raises(services.ServiceError, match='重复'):
+        services.data_build(ctx, end=DAY, collect=lambda e: ([series()], {}))

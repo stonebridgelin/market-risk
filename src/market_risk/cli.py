@@ -8,6 +8,7 @@ from __future__ import annotations
 import dataclasses
 import datetime as dt
 import json
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any
@@ -38,9 +39,22 @@ SubjectOpt = Annotated[str, typer.Option("--subject", help="MARKET 或股票代�
 FrameworkOpt = Annotated[str, typer.Option("--framework", help="分析框架")]
 
 
+def configure_output(streams: tuple[Any, ...] | None = None) -> None:
+    """stdout、stderr 统一为 UTF-8（errors=replace）。
+
+    Windows 下输出被重定向或经管道时，Python 按系统编码（中文系统为 GBK）写出，遇到"−""≤"等字符会报错。
+    已是 UTF-8 的流不改动；不支持 reconfigure 的流（如测试替换的流）跳过。
+    """
+    for stream in streams if streams is not None else (sys.stdout, sys.stderr):
+        encoding = (getattr(stream, "encoding", None) or "").lower().replace("-", "").replace("_", "")
+        if encoding != "utf8" and hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 @app.callback()
 def main() -> None:
     """美股大盘风险评分（v2-M 与 v3-R1 并行）。"""
+    configure_output()
 
 
 # ---------------------------------------------------------------------------

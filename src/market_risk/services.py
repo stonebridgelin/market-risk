@@ -157,9 +157,14 @@ def data_build(ctx: Context, offline: bool = False, refresh: bool = False, accep
     except DataFetchError as exc:
         raise ServiceError(f"数据集生成失败：{exc}") from exc
     names = {s.name for s in series}
-    result = market.build_dataset(ctx.paths, series, accept_revisions,
-                                  conflicts if names & {"S5FI", "S5TW"} else None, now,
-                                  decisions=load_data_decisions())
+    from market_risk.config import ConfigError
+
+    try:
+        result = market.build_dataset(ctx.paths, series, accept_revisions,
+                                      conflicts if names & {"S5FI", "S5TW"} else None, now,
+                                      decisions=load_data_decisions())
+    except (ConfigError, ValueError, market.MarketDataError) as exc:   # 裁定表有误：显示原因，不抛异常栈
+        raise ServiceError(f"数据集生成失败（config/data_decisions.yaml 或数据集有误）：{exc}") from exc
     rev_path = None
     if result.revisions:
         stamp = (now or dt.datetime.now(dt.UTC)).isoformat(timespec="seconds")
@@ -477,16 +482,18 @@ class PriceReviewReport:
     results: tuple[ReviewResult, ...]
     text: str
     path: Path
+    impacts: tuple[Any, ...] = ()          # price_impact.ImpactResult
 
 
 def review_price_disputes(
     ctx: Context, refresh: bool = False, config: ReviewConfig | None = None, inputs: ReviewInputs | None = None,
-    third_party: tuple[ThirdPartyLoader | None, str] | None = None,
+    third_party: tuple[ThirdPartyLoader | None, str] | None = None, run_impact: bool = True,
 ) -> PriceReviewReport:
     """固定残差法审查；网络数据只用于审计，不应用价格修正、不调用评分或标签。"""
     from market_risk.data.price_review import ReviewResult, load_review_config, render_review, review_case
     from market_risk.data.price_review_inputs import collect_review_inputs
     from market_risk.data.tv_compare import CompareResult
+    from market_risk.price_impact import render_impact
 
     config = config or load_review_config()
     inputs = inputs or collect_review_inputs(ctx.paths, ctx.settings, config, refresh)
@@ -519,9 +526,31 @@ def review_price_disputes(
             evidence[symbol, day] = comparison.third_party_note or source
         for check in comparison.third_party:
             evidence[symbol, check.date] += f"；close={check.third}，{check.verdict}"
-    text = render_review(tuple(results), config, list(inputs.provenance), evidence)
+    corrections = tuple((d.symbol, d.date, str(d.corrected_value), d.evidence_source or "", str(d.decided_on))
+                        for d in load_data_decisions() if d.decision == "correct")
+    impacts = price_dispute_impacts(ctx, config, inputs) if run_impact else ()
+    sections = ("\n".join(render_impact(impacts)),) if impacts else ()
+    text = render_review(tuple(results), config, list(inputs.provenance), evidence, corrections, sections)
     _write_report(ctx.paths.price_dispute_review_md, text)
-    return PriceReviewReport(tuple(results), text, ctx.paths.price_dispute_review_md)
+    return PriceReviewReport(tuple(results), text, ctx.paths.price_dispute_review_md, tuple(impacts))
+
+
+def price_dispute_impacts(ctx: Context, config: ReviewConfig, inputs: ReviewInputs) -> tuple[Any, ...]:
+    """实质影响检验：每个争议日期分别用 Yahoo 来源原值与 TradingView 收盘价计分并比较（第二部分第1项）。"""
+    from market_risk.data.market import MarketDataError, load_market_series
+    from market_risk.price_impact import dispute_impact
+
+    try:
+        series = load_market_series(ctx.paths, ctx.settings)
+    except MarketDataError as exc:
+        raise ServiceError(f"实质影响检验需要数据集：{exc}") from exc
+    out = []
+    for symbol, day in config.cases:
+        a, b = inputs.yahoo.get(symbol, {}).get(day), inputs.tv.get(symbol, {}).get(day)
+        if a is None or b is None:
+            continue
+        out.append(dispute_impact(series, ctx.paths, ctx.settings, symbol, day, float(a), float(b)))
+    return tuple(out)
 
 
 def tv_crosscheck(ctx: Context, refresh: bool = False, loader: ApiLoader | None = None,

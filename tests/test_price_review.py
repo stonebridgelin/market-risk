@@ -130,8 +130,35 @@ def test_service_renders_evidence_and_reuses_verified_third_party(tmp_path):
         return {**info.known_values, DAY: 100.0}
 
     ctx = services.Context(load_settings(), StoragePaths(tmp_path), '')
-    report = services.review_price_disputes(ctx, config=cfg, inputs=inputs, third_party=(loader, '测试第三方'))
+    report = services.review_price_disputes(ctx, config=cfg, inputs=inputs, third_party=(loader, '测试第三方'),
+                                            run_impact=False)
     assert report.results[0].verdict == 'Yahoo 有误'
-    assert 'e(d) bp' in report.text and '待负责人统一处理' in report.text
+    assert 'e(d) bp' in report.text and '无法判定的原因（由计算结果生成）' in report.text
+    assert '已批准的价格修正' in report.text
     assert 'TradingView 正确' in report.text and '已用已知读数验证' in report.text
     assert report.path.read_text(encoding='utf-8') == report.text
+
+
+@pytest.mark.parametrize('offset', [0, 1])
+def test_dispute_or_next_day_ex_dividend_cannot_decide(offset):
+    """争议日或次日是除息日：分红会混入残差，判"无法判定"。"""
+    index = flat_series()
+    ex_div = cal.shift_trading_days(DAY, offset)
+    result = review_case('SPY', DAY, index, {**index, DAY: D(99)}, index, index, frozenset({ex_div}), CFG)
+    assert result.verdict == '无法判定' and '除息日' in result.reason and str(ex_div) in result.reason
+
+
+def test_explain_is_generated_from_results():
+    """说明文字由计算结果生成：反向回归但未过门槛、同号、两方都正常、相邻争议日。"""
+    from market_risk.data.price_review import ReviewResult, explain
+
+    def result(tv, yahoo):
+        return ReviewResult('SPY', DAY, cal.shift_trading_days(DAY, 1), 'SPX', tv, yahoo, (D(0), D(0)),
+                            '无法判定', '不适用', '')
+
+    below = explain(result(stat('0', '0'), stat('0.00057', '-0.00057')), CFG)
+    assert 'Yahoo 的 z(d)=5.70' in below and '次日反向回归' in below and '未超过异常门槛 6' in below
+    same = explain(result(stat('0', '0'), stat('0.0004', '0.0004')), CFG)
+    assert '两日残差同号' in same
+    calm = explain(result(stat('0.0001', '0'), stat('0.0002', '0')), CFG, (cal.shift_trading_days(DAY, 1),))
+    assert '残差法看不出哪一方异常' in calm and '同为争议日' in calm

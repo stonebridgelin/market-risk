@@ -141,6 +141,9 @@ def review_case(
     a = b = None
     diffs: tuple[Decimal, ...] = ()
     try:
+        ex_div = sorted({day, next_day} & dividends)
+        if ex_div:   # 不复权收盘价在除息日下跌一个分红额，会混入残差
+            raise ValueError(f"争议日或次日为除息日（{', '.join(map(str, ex_div))}），分红会混入残差")
         a = residual_stats(day, tv, index, dividends, config)
         b = residual_stats(day, yahoo, index, dividends, config)
         for t in (day, next_day):
@@ -157,21 +160,62 @@ def review_case(
                         verdict, confidence, reason)
 
 
+def explain(result: ReviewResult, config: ReviewConfig, adjacent: tuple[dt.date, ...] = ()) -> str:
+    """由计算结果生成"为什么无法判定"的说明（不写死具体日期）。"""
+    if result.tv is None or result.yahoo is None:
+        return result.reason
+    parts = []
+    for name, s, other in (("TradingView", result.tv, result.yahoo), ("Yahoo", result.yahoo, result.tv)):
+        ratio = s.reversal
+        opposite = s.e0 * s.e1 < 0
+        in_range = ratio is not None and config.reversal_min <= ratio <= config.reversal_max
+        other_max = max(other.z0, other.z1)
+        if s.abnormal(config):
+            parts.append(f"{name} 满足异常条件，但另一来源两日 z 最大为 {other_max:.2f}，超过 {config.normal_z}")
+        elif s.z0 > config.abnormal_z:
+            why = ("两日残差同号" if not opposite
+                   else f"回归幅度比 {ratio:.2f} 不在 [{config.reversal_min},{config.reversal_max}]")
+            parts.append(f"{name} 的 z(d)={s.z0:.2f} 超过 {config.abnormal_z}，但{why}")
+        elif s.z0 > config.normal_z:
+            shape = (f"次日反向回归（幅度比 {ratio:.2f}）" if opposite and in_range
+                     else "两日残差同号" if not opposite else f"反向但幅度比 {ratio:.2f} 不在区间内")
+            parts.append(f"{name} 的 z(d)={s.z0:.2f}，{shape}，但未超过异常门槛 {config.abnormal_z}")
+    if not parts:
+        parts.append(f"两个来源的 z(d) 均不超过 {config.normal_z}（TradingView {result.tv.z0:.2f}，"
+                     f"Yahoo {result.yahoo.z0:.2f}），残差法看不出哪一方异常")
+    if result.index_differences and max(result.index_differences) > config.index_tolerance:
+        parts.append("指数核对差值超过容差")
+    if adjacent:
+        parts.append(f"与相邻交易日 {'、'.join(map(str, adjacent))} 同为争议日，单日错误的假设有局限")
+    return "；".join(parts)
+
+
 def render_review(results: tuple[ReviewResult, ...], config: ReviewConfig, provenance: list[str],
-                  third_party: Mapping[tuple[str, dt.date], str]) -> str:
-    lines = ["# 争议收盘价审查（任务1）", "", "## 方法与边界", "",
+                  third_party: Mapping[tuple[str, dt.date], str],
+                  corrections: tuple[tuple[str, dt.date, str, str, str], ...] = (),
+                  extra_sections: tuple[str, ...] = ()) -> str:
+    """corrections：config/data_decisions.yaml 中已批准的修正（标的、日期、修正值、证据、裁定日期）。"""
+    lines = ["# 争议收盘价审查", "", "## 方法与边界", "",
              "这是事后数据审计：双侧窗口含争议日之后的数据，只用于核查输入质量，不参与当日评分。",
              "收益率及残差用 Decimal 计算，不先取整；e、σ 以下用基点展示（1bp=0.0001），z 为 |e|/σ。",
              f"e = ETF 日收益率 − TradingView 指数日收益率；正常窗口为前后各{config.window_sessions}个交易日，",
-             "排除争议日、次日及该 ETF 除息日，首个残差另需前一日收盘。缺数据不缩短窗口、不插值。",
+             "排除争议日、次日及该 ETF 除息日，首个残差另需前一日收盘。缺数据不缩短窗口、不插值；"
+             "争议日或次日本身是除息日时无法判定。",
              f"σ=max({config.sigma_floor}, {config.mad_scale}×MAD)。异常要求 z(d)>{config.abnormal_z}，",
              f"两日残差异号，|e(d+1)|/|e(d)|∈[{config.reversal_min},{config.reversal_max}]；",
              f"同时另一来源两日 z≤{config.normal_z} 才判错。高置信须前者 z(d)>{config.high_abnormal_z}，",
              f"后者两日 z≤{config.high_normal_z}，否则为中。指数任一天差>{config.index_tolerance}点则无法判定。",
-             "SPY、RSP 对应 SPX；QQQ 对应 NDX。其余情况均无法判定，第三方证据单列，不覆盖固定算法结论。",
-             "参数与日期清单：`config/price_dispute_review.yaml`。未添加任何实际 correct 条目。", "",
+             f"参照指数：{'；'.join(f'{k} 对应 {v}' for k, v in sorted(config.benchmarks.items()))}。"
+             "其余情况均无法判定，第三方证据单列，不覆盖固定算法结论。",
+             "参数与日期清单：`config/price_dispute_review.yaml`。", "",
              "## 结论", "", "| 标的 | 日期 | 判定 | 置信程度 | 依据 |", "|---|---|---|---|---|"]
     lines += [f"| {r.symbol} | {r.date} | {r.verdict} | {r.confidence} | {r.reason} |" for r in results]
+    lines += ["", "## 已批准的价格修正（config/data_decisions.yaml，decision: correct）", ""]
+    if corrections:
+        lines += ["| 标的 | 日期 | 修正值 | 证据 | 裁定日期 |", "|---|---|---|---|---|"]
+        lines += [f"| {s} | {d} | {v} | {e} | {when} |" for s, d, v, e, when in corrections]
+    else:
+        lines.append("无。")
     lines += ["", "## 逐日证据", ""]
     for r in results:
         lines += [f"### {r.symbol} {r.date}（次日 {r.next_date}，参照 {r.benchmark}）", "",
@@ -190,15 +234,18 @@ def render_review(results: tuple[ReviewResult, ...], config: ReviewConfig, prove
                   f"指数核对 |TV−Yahoo|（d / d+1，点）：{' / '.join(map(str, r.index_differences)) or '缺失'}。",
                   f"判定：{r.verdict}；置信程度：{r.confidence}。{r.reason}。",
                   f"第三方：{third_party.get((r.symbol, r.date), '未核对')}。", ""]
-    uncertain = sum(r.verdict == "无法判定" for r in results)
-    lines += ["## 待负责人统一处理", "",
-              f"本次 {len(results)} 项中有 {uncertain} 项无法判定。覆盖率低已在开发前报告；负责人随后授权先完成开发，",
-              "把问题留在本报告统一处理。此授权不等于批准调参或实际修正价格。",
-              "", "- 建议保持既定门槛，保留无法判定结论；无法判定不表示两方均正确。",
-              "- SPY 2012-01-20、QQQ 2010-11-26 的 Yahoo 残差有反向回归，但未超过6σ，不能放宽门槛判错。",
-              "- RSP 2016-06-24 两日残差同号，不符合反向回归条件。",
-              "- SPY 2015-08-21 与下一交易日 08-24 均为争议日，单日错误假设有局限；不扩展算法，保留两项证据。",
-              "- 请负责人决定是否批准实际修正条目、是否补充独立证据，以及将来是否另行修订审计门槛。",
-              "- 未运行全历史正常日的误判率扫描；上述争议样本结论不是算法准确率估计。",
+    for section in extra_sections:
+        lines += [section, ""]
+    uncertain = [r for r in results if r.verdict == "无法判定"]
+    cases = {(r.symbol, r.date) for r in results}
+    lines += ["## 无法判定的原因（由计算结果生成）", ""]
+    if not uncertain:
+        lines.append("无。")
+    for r in uncertain:
+        prev = cal.shift_trading_days(r.date, -1)
+        adjacent = tuple(d for d in (prev, r.next_date) if (r.symbol, d) in cases)
+        lines.append(f"- {r.symbol} {r.date}：{explain(r, config, adjacent)}。")
+    lines += ["", f"本次 {len(results)} 项中有 {len(uncertain)} 项无法判定。无法判定不表示两方均正确；"
+              "固定门槛不因个别日期调整。未运行全历史正常日的误判率扫描，争议样本结论不是算法准确率估计。",
               "", "## 输入版本与来源", "", *[f"- {p}" for p in provenance], ""]
     return "\n".join(lines)

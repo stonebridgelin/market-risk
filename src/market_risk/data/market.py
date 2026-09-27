@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import csv
+import dataclasses
 import datetime as dt
 import hashlib
 import io
@@ -386,13 +387,63 @@ def _source_info(paths: StoragePaths, manifest: Mapping[str, Any], name: str,
                       data_end=max(window) if window else None, from_cache=True, cache_file=rel)
 
 
-def coverage_error(paths: StoragePaths, settings: Settings, base: dt.date) -> str | None:
+@dataclass(frozen=True)
+class MarketSeries:
+    """一次性加载的数据集（各序列的全部行）；按基准日截取窗口时用二分查找，不重复读文件。
+
+    只是读取缓冲：组装评分输入时必须经 raw_inputs_from_series 截断到基准日（含）。
+    """
+
+    rows: Mapping[str, Mapping[dt.date, Row]]
+    dates: Mapping[str, tuple[dt.date, ...]]
+    manifest: Mapping[str, Any]
+    breadth: Mapping[dt.date, BreadthReading]
+
+    def window(self, name: str, start: dt.date, end: dt.date) -> dict[dt.date, Row]:
+        import bisect
+
+        days = self.dates.get(name, ())
+        lo, hi = bisect.bisect_left(days, start), bisect.bisect_right(days, end)
+        rows = self.rows[name]
+        return {d: rows[d] for d in days[lo:hi]}
+
+    def replace_values(self, name: str, values: Mapping[dt.date, float]) -> MarketSeries:
+        """替换某序列若干日期的 value/close（用于比较两种价格来源的计分；不改动文件）。"""
+        rows = {**self.rows[name]}
+        for d, v in values.items():
+            rows[d] = {**rows[d], "value": v, "close": v}
+        return dataclasses.replace(self, rows={**self.rows, name: rows})
+
+
+def load_market_series(paths: StoragePaths, settings: Settings) -> MarketSeries:
+    """读取数据集中评分所需的全部序列（缺少必需序列时报错）。"""
+    names = [*settings.scored_symbols, *settings.reference_symbols, settings.vix_series, TREASURY_SERIES,
+             settings.oas_series, *BREADTH_SERIES]
+    rows = {name: _load(paths, name) for name in names}
+    if paths.market_daily_file(VIX_CBOE).exists():
+        rows[VIX_CBOE] = _load(paths, VIX_CBOE)
+    fi, tw = rows["S5FI"], rows["S5TW"]
+    breadth = {}
+    for d in sorted(set(fi) & set(tw)):
+        a, b = fi[d], tw[d]
+        if a["value"] is None or b["value"] is None:
+            continue
+        breadth[d] = BreadthReading(d, a["value"], b["value"], a["source"] or "manual",
+                                    "TradingView 导出" if a["source"] == "tradingview" else "")
+    return MarketSeries(rows, {n: tuple(sorted(r)) for n, r in rows.items()}, read_manifest(paths), breadth)
+
+
+def coverage_error(paths: StoragePaths, settings: Settings, base: dt.date,
+                   series: MarketSeries | None = None) -> str | None:
     """数据集是否覆盖基准日（以 ETF 收盘价为准）；未覆盖时返回说明。"""
     for sym in (*settings.scored_symbols, *settings.reference_symbols):
-        path = paths.market_daily_file(sym)
-        if not path.exists():
+        if series is not None:
+            rows: Mapping[dt.date, Row] | None = series.rows.get(sym)
+        else:
+            path = paths.market_daily_file(sym)
+            rows = read_series_file(path)[1] if path.exists() else None
+        if rows is None:
             return f"数据集缺少 {sym}"
-        rows = read_series_file(path)[1]
         if base not in rows:
             last = max(rows) if rows else None
             return f"数据集的 {sym} 未覆盖基准日 {base}（截止 {last}）"
@@ -404,14 +455,23 @@ def load_raw_inputs(
     decisions: tuple = (), revision_check: bool | None = None,
 ) -> Any:
     """从 data/market/ 组装基准日的 RawInputs（窗口与原先按基准日下载的区间相同）。"""
+    err = coverage_error(paths, settings, base)
+    if err:
+        raise MarketDataError(f"{err}，请先运行 market-risk fetch --date {base}（或 data build）")
+    return raw_inputs_from_series(load_market_series(paths, settings), paths, settings, base, mode,
+                                  decisions, revision_check)
+
+
+def raw_inputs_from_series(
+    series: MarketSeries, paths: StoragePaths, settings: Settings, base: dt.date, mode: str = "backtest",
+    decisions: tuple = (), revision_check: bool | None = None,
+) -> Any:
+    """由已加载的数据集组装基准日的 RawInputs：所有序列截断到基准日（含）。单日评分与回测共用。"""
     from market_risk.data import fred
     from market_risk.data.prices import PRICE_DECIMALS
     from market_risk.data.snapshot import RawInputs
 
-    err = coverage_error(paths, settings, base)
-    if err:
-        raise MarketDataError(f"{err}，请先运行 market-risk fetch --date {base}（或 data build）")
-    manifest = read_manifest(paths)
+    manifest = series.manifest
     start = base - dt.timedelta(days=DAILY_LOOKBACK_DAYS)
     sources: list[SourceInfo] = []
     notes: list[str] = []
@@ -419,28 +479,28 @@ def load_raw_inputs(
     closes: dict[str, Series] = {}
     close_start = base - dt.timedelta(days=settings.lookback_calendar_days)
     for sym in (*settings.scored_symbols, *settings.reference_symbols):
-        w = _window(_load(paths, sym), close_start, base)
+        w = series.window(sym, close_start, base)
         closes[sym] = {d: round(float(r["value"]), PRICE_DECIMALS) for d, r in w.items() if r["value"] is not None}
         sources.append(_source_info(paths, manifest, sym, w))
 
-    vix_w = _window(_load(paths, settings.vix_series), start, base)
+    vix_w = series.window(settings.vix_series, start, base)
     vix_fred: Series = {d: r["value"] for d, r in vix_w.items() if r["source"] == "fred"}
     sources.append(_source_info(paths, manifest, settings.vix_series, vix_w))
     vix_cboe: Series | None = None
-    if paths.market_daily_file(VIX_CBOE).exists():
-        cboe_w = _window(_load(paths, VIX_CBOE), start, base)
+    if VIX_CBOE in series.rows:
+        cboe_w = series.window(VIX_CBOE, start, base)
         vix_cboe = {d: r["value"] for d, r in cboe_w.items()}
         sources.append(_source_info(paths, manifest, VIX_CBOE, cboe_w))
     else:
         notes.append("数据集没有 Cboe VIX 备用源，只使用 FRED VIXCLS")
 
-    t_w = _window(_load(paths, TREASURY_SERIES), start, base)
+    t_w = series.window(TREASURY_SERIES, start, base)
     treasury = {d: r["value"] for d, r in t_w.items() if r["value"] is not None}
     if any(r["source"] != "treasury" for r in t_w.values()):
         notes.append("财政部收益率主源获取失败的日期改用备用源 FRED DGS10（见数据集 source 列）")
     sources.append(_source_info(paths, manifest, TREASURY_SERIES, t_w))
 
-    oas_w = _window(_load(paths, settings.oas_series), start, base)
+    oas_w = series.window(settings.oas_series, start, base)
     oas: Series = {d: r["value"] for d, r in oas_w.items()}
     sources.append(_source_info(paths, manifest, settings.oas_series, oas_w))
     fred_oas = {d: r["value"] for d, r in oas_w.items() if r["source"] == "fred"}
@@ -467,7 +527,7 @@ def load_raw_inputs(
     elif check and not fred_oas:
         notes.append("FRED API 没有该区间的 OAS（早于三年），不做历史修订比对；不影响计分")
 
-    breadth = load_breadth_readings(paths, base)
+    breadth = {d: r for d, r in series.breadth.items() if d <= base}
     for d, msg in sorted(manifest.get("breadth_conflicts", {}).items()):
         day = dt.date.fromisoformat(d)
         if base - dt.timedelta(days=BREADTH_CONFLICT_DAYS) <= day <= base:

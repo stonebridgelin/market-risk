@@ -144,3 +144,24 @@ def test_scoring_never_imports_two_sided_price_audit():
                 assert all('price_review' not in name.name for name in node.names), path
             elif isinstance(node, ast.Import):
                 assert all('price_review' not in name.name for name in node.names), path
+
+
+# 评分路径上的模块：导入它们时，不得（直接或间接）加载双侧审计、影响检验等使用未来数据的模块。
+SCORING_PATH_MODULES = (
+    "market_risk.scoring.v2m", "market_risk.scoring.v3r1", "market_risk.indicators", "market_risk.calendar",
+    "market_risk.pipeline", "market_risk.data.snapshot", "market_risk.data.market",
+)
+AUDIT_MODULES = ("market_risk.data.price_review", "market_risk.data.price_review_inputs", "market_risk.price_impact")
+
+
+def test_scoring_path_does_not_load_audit_modules_transitively():
+    """在干净的子进程中导入评分路径模块，确认 sys.modules 中没有审计模块（传递依赖检查）。"""
+    import json
+    import subprocess
+    import sys
+
+    code = ("import importlib, json, sys\n"
+            f"for m in {list(SCORING_PATH_MODULES)!r}: importlib.import_module(m)\n"
+            f"print(json.dumps([m for m in {list(AUDIT_MODULES)!r} if m in sys.modules]))\n")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    assert json.loads(out.stdout) == []
