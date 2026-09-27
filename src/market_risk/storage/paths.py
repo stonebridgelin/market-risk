@@ -110,6 +110,20 @@ class StoragePaths:
         return self.manual_dir / "outcomes.csv"
 
     @property
+    def reviews_csv(self) -> Path:
+        """复核记录（ChatGPT / Claude / 本人 / 截图与程序对照），数据库 reviews 表由此重建。"""
+        return self.manual_dir / "reviews.csv"
+
+    @property
+    def materials_index_csv(self) -> Path:
+        """资料索引，数据库 materials 表由此重建。"""
+        return self.root / "data" / "materials" / "index.csv"
+
+    @property
+    def results_root(self) -> Path:
+        return self.root / "results"
+
+    @property
     def legacy_excel(self) -> Path:
         return self.root / "data" / "legacy" / "backtest_record_legacy.xlsx"
 
@@ -211,6 +225,8 @@ RUN_FILES = {
     "three_segment": "three_segment.csv",
     "prompt": "prompt.md",
     "summary": "summary.md",
+    "metrics": "metrics.json",       # 扁平的数值指标（数据库 metrics 表）
+    "legacy": "legacy.json",         # import-legacy：Excel 中该样本的原始单元格
 }
 INPUT_FILES = {
     "daily_data": "daily_data.csv",

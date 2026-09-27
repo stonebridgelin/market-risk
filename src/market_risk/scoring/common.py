@@ -133,11 +133,11 @@ def evaluate_dimension(
         )
 
     order = [k for k in candidates if k in missing]
-    outcomes: list[Outcome] = []
+    evaluations: list[Outcome] = []
 
     def _enumerate(assigned: dict[str, Decimal], rest: list[str]) -> None:
         if not rest:
-            outcomes.append(rule(assigned))
+            evaluations.append(rule(assigned))
             return
         key, tail = rest[0], rest[1:]
         for c in candidates[key](assigned):
@@ -145,11 +145,11 @@ def evaluate_dimension(
 
     base = {k: v for k, v in values.items() if v is not None}
     _enumerate(dict(base), order)
-    scores = tuple(sorted({o.score for o in outcomes}))
+    scores = tuple(sorted({o.score for o in evaluations}))
     if len(scores) == 1:
         # 所有情形下都成立的触发条件
         common_trigger = tuple(
-            t for t in outcomes[0].triggered if all(t in o.triggered for o in outcomes)
+            t for t in evaluations[0].triggered if all(t in o.triggered for o in evaluations)
         )
         return DimensionScore(
             name,

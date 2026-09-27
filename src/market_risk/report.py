@@ -20,6 +20,7 @@ from market_risk import calendar as mcal
 from market_risk.config import PROJECT_ROOT
 from market_risk.data.raw_io import save_raw_inputs
 from market_risk.data.snapshot import RawInputs
+from market_risk.metrics import metrics_from_snapshot_json
 from market_risk.models import MarketSnapshot, NearThresholdItem, ScoreResult
 from market_risk.scoring.common import exact, fixed2, show
 from market_risk.storage.paths import INPUT_FILES, RUN_FILES
@@ -361,6 +362,7 @@ def write_run_outputs(
     write_inputs(run_dir, ctx, reference_symbols)
     write_json(run_dir / RUN_FILES["dates"], snap.refs)
     write_json(run_dir / RUN_FILES["snapshot"], snapshot_json(snap))
+    write_json(run_dir / RUN_FILES["metrics"], metrics_from_snapshot_json(snapshot_json(snap)))
     write_json(run_dir / RUN_FILES["scores"], {
         "d1_includes_t_minus_20": ctx.d1_includes_t_minus_20,
         "results": list(ctx.results),
@@ -370,4 +372,4 @@ def write_run_outputs(
     write_csv(run_dir / RUN_FILES["three_segment"], three_segment_rows(snap))
     (run_dir / RUN_FILES["prompt"]).write_text(render_prompt(ctx, rules), encoding="utf-8")
     (run_dir / RUN_FILES["summary"]).write_text(render_summary(ctx, status, official_note), encoding="utf-8")
-    return {k: run_dir / v for k, v in RUN_FILES.items() if k != "meta"}
+    return {k: run_dir / v for k, v in RUN_FILES.items() if k not in ("meta", "legacy")}
