@@ -15,6 +15,8 @@
 11. 数据库约定（docs/STORAGE.md 4.1）：统一使用 SQLAlchemy，连接地址来自 `DATABASE_URL`（.env）或 settings.yaml 的 `database.url`，
     默认 `sqlite:///db/market_risk.sqlite`；不使用任何数据库的专有语法；小数用 `Numeric`，不用 `Float`；
     表结构变更必须新增 Alembic 迁移（`migrations/versions/`）并同步 `storage/schema.py`；
+    迁移脚本中的 `alter_column` 必须提供完整列信息（`existing_type`，及必要的 `existing_nullable`、
+    `existing_server_default`），以兼容 MySQL 的 CHANGE/MODIFY COLUMN（有测试检查）；
     所有数据库读写集中在 `src/market_risk/storage/`；SQLite 开启 WAL 模式。
 12. 代码分层：`cli.py` 只负责解析参数和格式化输出，所有业务逻辑必须写在可被直接调用的函数中（主要入口在 `services.py`），
     返回数据类或可序列化为 JSON 的结构；以后的 FastAPI 接口、Vue 前端和 LangChain Agent 都将调用这些函数。

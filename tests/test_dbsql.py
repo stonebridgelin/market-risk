@@ -136,3 +136,37 @@ def test_mysql_compatibility(tmp_path):
     ctx = services.Context(settings, StoragePaths(settings.storage_root), db.default_url(StoragePaths(tmp_path)))
     report = services.db_verify_mysql(ctx)
     assert report is not None and report.ok, [t for t in report.tables if not t.equal]
+
+
+def _dict_keys(tree, name: str) -> set[str]:
+    import ast
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(isinstance(x, ast.Name) and x.id == name for x in node.targets) \
+                and isinstance(node.value, ast.Dict):
+            return {k.value for k in node.value.keys if isinstance(k, ast.Constant)}
+    return set()
+
+
+def test_alter_column_provides_existing_type():
+    """MySQL 的 CHANGE/MODIFY COLUMN 需要完整列定义：所有迁移中的 alter_column 都必须提供 existing_type。"""
+    import ast
+
+    checked = 0
+    for path in sorted((PROJECT_ROOT / "migrations" / "versions").glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "alter_column":
+                keys = {k.arg for k in node.keywords if k.arg}
+                for k in node.keywords:
+                    if k.arg is None and isinstance(k.value, ast.Name):
+                        keys |= _dict_keys(tree, k.value.id)
+                assert "existing_type" in keys, f"{path.name} 第{node.lineno}行 alter_column 缺少 existing_type"
+                checked += 1
+    assert checked >= 2      # 0003 的升级与降级
+
+
+def test_head_revision_is_latest_migration_file():
+    """最新迁移号等于 migrations/versions 中最大的版本（新增迁移后无需改动其他测试）。"""
+    files = sorted(p.name[:4] for p in (PROJECT_ROOT / "migrations" / "versions").glob("[0-9][0-9][0-9][0-9]_*.py"))
+    assert db.head_revision() == files[-1]
