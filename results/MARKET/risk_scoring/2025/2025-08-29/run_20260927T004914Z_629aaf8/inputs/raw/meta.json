@@ -1,0 +1,125 @@
+{
+  "base_date": "2025-08-29",
+  "mode": "backtest",
+  "treasury_coverage_start": "2025-05-21",
+  "symbols": [
+    "HYG",
+    "LQD",
+    "QQQ",
+    "RSP",
+    "SPY"
+  ],
+  "sources": [
+    {
+      "source": "yahoo",
+      "key": "SPY",
+      "url": "yfinance.download('SPY', start=2024-07-05, end=2025-08-30, auto_adjust=False) → Close",
+      "downloaded_at_utc": "2026-09-26T17:27:40+00:00",
+      "rows": 290,
+      "data_start": "2024-07-05",
+      "data_end": "2025-08-29",
+      "from_cache": true,
+      "cache_file": "data/cache/yahoo/SPY_2024-07-05_2025-08-29.csv"
+    },
+    {
+      "source": "yahoo",
+      "key": "QQQ",
+      "url": "yfinance.download('QQQ', start=2024-07-05, end=2025-08-30, auto_adjust=False) → Close",
+      "downloaded_at_utc": "2026-09-26T17:27:41+00:00",
+      "rows": 290,
+      "data_start": "2024-07-05",
+      "data_end": "2025-08-29",
+      "from_cache": true,
+      "cache_file": "data/cache/yahoo/QQQ_2024-07-05_2025-08-29.csv"
+    },
+    {
+      "source": "yahoo",
+      "key": "RSP",
+      "url": "yfinance.download('RSP', start=2024-07-05, end=2025-08-30, auto_adjust=False) → Close",
+      "downloaded_at_utc": "2026-09-26T17:27:42+00:00",
+      "rows": 290,
+      "data_start": "2024-07-05",
+      "data_end": "2025-08-29",
+      "from_cache": true,
+      "cache_file": "data/cache/yahoo/RSP_2024-07-05_2025-08-29.csv"
+    },
+    {
+      "source": "yahoo",
+      "key": "HYG",
+      "url": "yfinance.download('HYG', start=2024-07-05, end=2025-08-30, auto_adjust=False) → Close",
+      "downloaded_at_utc": "2026-09-26T17:27:43+00:00",
+      "rows": 290,
+      "data_start": "2024-07-05",
+      "data_end": "2025-08-29",
+      "from_cache": true,
+      "cache_file": "data/cache/yahoo/HYG_2024-07-05_2025-08-29.csv"
+    },
+    {
+      "source": "yahoo",
+      "key": "LQD",
+      "url": "yfinance.download('LQD', start=2024-07-05, end=2025-08-30, auto_adjust=False) → Close",
+      "downloaded_at_utc": "2026-09-26T17:27:44+00:00",
+      "rows": 290,
+      "data_start": "2024-07-05",
+      "data_end": "2025-08-29",
+      "from_cache": true,
+      "cache_file": "data/cache/yahoo/LQD_2024-07-05_2025-08-29.csv"
+    },
+    {
+      "source": "fred",
+      "key": "VIXCLS",
+      "url": "https://api.stlouisfed.org/fred/series/observations?series_id=VIXCLS&file_type=json&observation_start=2025-05-21&observation_end=2025-08-29",
+      "downloaded_at_utc": "2026-09-26T17:27:45+00:00",
+      "rows": 73,
+      "data_start": "2025-05-21",
+      "data_end": "2025-08-29",
+      "from_cache": true,
+      "cache_file": "data/cache/fred/VIXCLS_2025-05-21_2025-08-29.csv"
+    },
+    {
+      "source": "cboe",
+      "key": "VIX",
+      "url": "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv",
+      "downloaded_at_utc": "2026-09-26T17:27:48+00:00",
+      "rows": 73,
+      "data_start": "2025-05-21",
+      "data_end": "2025-08-29",
+      "from_cache": true,
+      "cache_file": "data/cache/cboe/VIX_2025-05-21_2025-08-29.csv"
+    },
+    {
+      "source": "treasury",
+      "key": "10Y",
+      "url": "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/2025/all?type=daily_treasury_yield_curve&field_tdr_date_value=2025&page&_format=csv",
+      "downloaded_at_utc": "2026-09-26T17:28:07+00:00",
+      "rows": 166,
+      "data_start": "2025-01-02",
+      "data_end": "2025-08-29",
+      "from_cache": true,
+      "cache_file": "data/cache/treasury/10Y_2025-01-01_2025-08-29.csv"
+    },
+    {
+      "source": "fred",
+      "key": "BAMLH0A0HYM2",
+      "url": "https://api.stlouisfed.org/fred/series/observations?series_id=BAMLH0A0HYM2&file_type=json&observation_start=2025-05-21&observation_end=2025-08-29",
+      "downloaded_at_utc": "2026-09-26T17:28:08+00:00",
+      "rows": 74,
+      "data_start": "2025-05-21",
+      "data_end": "2025-08-29",
+      "from_cache": true,
+      "cache_file": "data/cache/fred/BAMLH0A0HYM2_2025-05-21_2025-08-29.csv"
+    },
+    {
+      "source": "fred",
+      "key": "BAMLH0A0HYM2_vintage20250829",
+      "url": "https://api.stlouisfed.org/fred/series/observations?series_id=BAMLH0A0HYM2&file_type=json&observation_start=2025-05-21&observation_end=2025-08-29&realtime_start=2025-08-29&realtime_end=2025-08-29",
+      "downloaded_at_utc": "2026-09-27T00:49:14+00:00",
+      "rows": 74,
+      "data_start": "2025-05-21",
+      "data_end": "2025-08-29",
+      "from_cache": false,
+      "cache_file": "data/cache/fred/BAMLH0A0HYM2_vintage20250829_2025-05-21_2025-08-29.csv"
+    }
+  ],
+  "notes": []
+}

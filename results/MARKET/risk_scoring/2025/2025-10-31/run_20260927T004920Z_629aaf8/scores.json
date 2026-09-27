@@ -1,0 +1,1513 @@
+{
+  "d1_includes_t_minus_20": true,
+  "results": [
+    {
+      "version": "v2-M",
+      "price": {
+        "name": "价格",
+        "score": 1,
+        "possible_scores": [
+          1
+        ],
+        "triggered_conditions": [
+          "1分"
+        ],
+        "calculation": "SPY 收盘 682.06，MA20 671.72，MA50 662.17；QQQ 收盘 629.07，MA20 611.90，MA50 596.73；RSP 收盘 187.93，MA20 189.26，MA50 188.92。收盘价 < MA50：RSP（1只）；收盘价 < MA20：RSP（1只）；三环节（d1 候选 T−20 至 T−2）完成：无；SPY 收盘 682.06 ≥ MA200 609.44。其余有效组合 → 1分",
+        "pending_reason": null
+      },
+      "breadth": {
+        "name": "广度",
+        "score": 2,
+        "possible_scores": [
+          2
+        ],
+        "triggered_conditions": [
+          "2分(a)"
+        ],
+        "calculation": "F=40.15，W=38.56，L=min(F,W)=38.56，F5=52.88，W5=57.65；SPY 收盘 682.06 vs 20日最高 687.39×0.98=673.6422（≥）。满足2分(a) → 2分",
+        "pending_reason": null
+      },
+      "vix": {
+        "name": "VIX",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [
+          "0分"
+        ],
+        "calculation": "V=17.44，V5=16.37，g=V÷V5−1=6.54%。V<18 且 g<20% → 0分",
+        "pending_reason": null
+      },
+      "rates": {
+        "name": "利率",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [
+          "0分"
+        ],
+        "calculation": "y=4.11，H=4.18，T−20 的 y=4.13，Δy=100×(y−T−20)=-2bp。y<H → 0分（H 所在日期：2025-10-06）",
+        "pending_reason": null
+      },
+      "credit": {
+        "name": "信用",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [
+          "0分"
+        ],
+        "calculation": "O1（2025-10-30）=2.85%，O6（2025-10-23）=2.96%，ΔOAS=100×(O1−O6)=-11bp。ΔOAS≤5 且 O1<4.00% → 0分",
+        "pending_reason": null
+      },
+      "total": 3,
+      "total_range": [
+        3,
+        3
+      ],
+      "stage": "中期确认信号",
+      "clear_deterioration": [
+        [
+          "价格=2",
+          "否"
+        ],
+        [
+          "广度=2",
+          "是"
+        ],
+        [
+          "信用=2",
+          "否"
+        ],
+        [
+          "VIX=2",
+          "否"
+        ],
+        [
+          "信用=2 或 VIX=2",
+          "否"
+        ],
+        [
+          "大盘明确恶化",
+          "否"
+        ]
+      ],
+      "notes": [],
+      "review_flags": []
+    },
+    {
+      "version": "v3-R1",
+      "price": {
+        "name": "价格",
+        "score": 1,
+        "possible_scores": [
+          1
+        ],
+        "triggered_conditions": [
+          "1分"
+        ],
+        "calculation": "SPY 收盘 682.06，MA5 684.32，MA20 671.72，MA50 662.17；QQQ 收盘 629.07，MA5 630.38，MA20 611.90，MA50 596.73；RSP 收盘 187.93，MA5 189.27，MA20 189.26，MA50 188.92。同时满足收盘价<MA50 与 MA5<MA50：无（0只）；收盘价<MA50：RSP；收盘价<MA20：RSP（1只）；SPY 收盘 682.06 ≥ MA200 609.44。其余有效组合 → 1分",
+        "pending_reason": null
+      },
+      "breadth": {
+        "name": "广度",
+        "score": 2,
+        "possible_scores": [
+          2
+        ],
+        "triggered_conditions": [
+          "2分(a)"
+        ],
+        "calculation": "F=40.15，W=38.56，L=min(F,W)=38.56，F5=52.88，W5=57.65。满足2分(a) → 2分",
+        "pending_reason": null
+      },
+      "vix": {
+        "name": "VIX",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [
+          "0分"
+        ],
+        "calculation": "V=17.44，V5=16.37，g=V÷V5−1=6.54%。V<18 且 g<20% → 0分",
+        "pending_reason": null
+      },
+      "rates": {
+        "name": "利率",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [
+          "0分"
+        ],
+        "calculation": "y=4.11，H=4.18，T−20 的 y=4.13，Δy=100×(y−T−20)=-2bp。y<H → 0分（H 所在日期：2025-10-06）",
+        "pending_reason": null
+      },
+      "credit": {
+        "name": "信用",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [
+          "0分"
+        ],
+        "calculation": "O1（2025-10-30）=2.85%，O6（2025-10-23）=2.96%，ΔOAS=100×(O1−O6)=-11bp。ΔOAS≤5 且 O1<4.00% → 0分",
+        "pending_reason": null
+      },
+      "total": 3,
+      "total_range": [
+        3,
+        3
+      ],
+      "stage": "中期确认信号",
+      "clear_deterioration": [
+        [
+          "价格=2",
+          "否"
+        ],
+        [
+          "广度=2",
+          "是"
+        ],
+        [
+          "信用=2",
+          "否"
+        ],
+        [
+          "VIX=2",
+          "否"
+        ],
+        [
+          "信用=2 或 VIX=2",
+          "否"
+        ],
+        [
+          "大盘明确恶化",
+          "否"
+        ]
+      ],
+      "notes": [],
+      "review_flags": []
+    }
+  ],
+  "near_threshold": [
+    {
+      "item": "RSP 收盘价 vs MA20",
+      "value": 187.93,
+      "threshold": 189.2585,
+      "gap": -0.7019499784686025,
+      "unit": "%"
+    },
+    {
+      "item": "RSP 收盘价 vs MA50",
+      "value": 187.93,
+      "threshold": 188.9194,
+      "gap": -0.5237154045587695,
+      "unit": "%"
+    },
+    {
+      "item": "RSP MA5 vs MA50",
+      "value": 189.27,
+      "threshold": 188.9194,
+      "gap": 0.18558178778886658,
+      "unit": "%"
+    },
+    {
+      "item": "S5FI（F）",
+      "value": 40.15,
+      "threshold": 40.0,
+      "gap": 0.15,
+      "unit": "个百分点"
+    },
+    {
+      "item": "S5TW（W）",
+      "value": 38.56,
+      "threshold": 40.0,
+      "gap": -1.44,
+      "unit": "个百分点"
+    },
+    {
+      "item": "L=min(F,W)",
+      "value": 38.56,
+      "threshold": 40.0,
+      "gap": -1.44,
+      "unit": "个百分点"
+    },
+    {
+      "item": "VIX",
+      "value": 17.44,
+      "threshold": 18.0,
+      "gap": -0.56,
+      "unit": "点"
+    }
+  ],
+  "three_segment": {
+    "true": [
+      {
+        "symbol": "SPY",
+        "d1_includes_t_minus_20": true,
+        "traces": [
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-03",
+            "d1_close": 669.21,
+            "lc": 647.24,
+            "lc_date": "2025-09-05",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-06",
+            "d1_close": 671.61,
+            "lc": 648.83,
+            "lc_date": "2025-09-08",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-07",
+            "d1_close": 669.12,
+            "lc": 650.33,
+            "lc_date": "2025-09-09",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-08",
+            "d1_close": 673.11,
+            "lc": 652.21,
+            "lc_date": "2025-09-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-09",
+            "d1_close": 671.16,
+            "lc": 657.41,
+            "lc_date": "2025-09-12",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-10",
+            "d1_close": 653.02,
+            "lc": 657.41,
+            "lc_date": "2025-09-12",
+            "step1": true,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-13",
+            "d1_close": 663.04,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-14",
+            "d1_close": 662.23,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-15",
+            "d1_close": 665.17,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-16",
+            "d1_close": 660.64,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-17",
+            "d1_close": 664.39,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-20",
+            "d1_close": 671.3,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-21",
+            "d1_close": 671.29,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-22",
+            "d1_close": 667.8,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-23",
+            "d1_close": 671.76,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-24",
+            "d1_close": 677.25,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-27",
+            "d1_close": 685.24,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-28",
+            "d1_close": 687.06,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-29",
+            "d1_close": 687.39,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          }
+        ]
+      },
+      {
+        "symbol": "QQQ",
+        "d1_includes_t_minus_20": true,
+        "traces": [
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-03",
+            "d1_close": 603.18,
+            "lc": 576.06,
+            "lc_date": "2025-09-05",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-06",
+            "d1_close": 607.71,
+            "lc": 578.87,
+            "lc_date": "2025-09-08",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-07",
+            "d1_close": 604.51,
+            "lc": 580.51,
+            "lc_date": "2025-09-09",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-08",
+            "d1_close": 611.44,
+            "lc": 580.7,
+            "lc_date": "2025-09-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-09",
+            "d1_close": 610.7,
+            "lc": 584.08,
+            "lc_date": "2025-09-11",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-10",
+            "d1_close": 589.5,
+            "lc": 586.66,
+            "lc_date": "2025-09-12",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-13",
+            "d1_close": 602.01,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-14",
+            "d1_close": 598.0,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-15",
+            "d1_close": 602.22,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-16",
+            "d1_close": 599.99,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-17",
+            "d1_close": 603.93,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-20",
+            "d1_close": 611.54,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-21",
+            "d1_close": 611.38,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-22",
+            "d1_close": 605.49,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-23",
+            "d1_close": 610.58,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-24",
+            "d1_close": 617.1,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-27",
+            "d1_close": 628.09,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-28",
+            "d1_close": 632.92,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-29",
+            "d1_close": 635.77,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          }
+        ]
+      },
+      {
+        "symbol": "RSP",
+        "d1_includes_t_minus_20": true,
+        "traces": [
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-03",
+            "d1_close": 191.25,
+            "lc": 186.72,
+            "lc_date": "2025-09-25",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-06",
+            "d1_close": 191.19,
+            "lc": 186.72,
+            "lc_date": "2025-09-25",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-07",
+            "d1_close": 190.35,
+            "lc": 186.72,
+            "lc_date": "2025-09-25",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-08",
+            "d1_close": 190.97,
+            "lc": 186.72,
+            "lc_date": "2025-09-25",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-09",
+            "d1_close": 189.39,
+            "lc": 186.72,
+            "lc_date": "2025-09-25",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-10",
+            "d1_close": 185.12,
+            "lc": 186.72,
+            "lc_date": "2025-09-25",
+            "step1": true,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-13",
+            "d1_close": 186.92,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-14",
+            "d1_close": 188.47,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-15",
+            "d1_close": 188.85,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-16",
+            "d1_close": 187.06,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-17",
+            "d1_close": 188.01,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-20",
+            "d1_close": 189.89,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-21",
+            "d1_close": 190.76,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-22",
+            "d1_close": 189.84,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-23",
+            "d1_close": 190.74,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-24",
+            "d1_close": 191.26,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-27",
+            "d1_close": 192.11,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-28",
+            "d1_close": 190.46,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-29",
+            "d1_close": 188.33,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          }
+        ]
+      }
+    ],
+    "false": [
+      {
+        "symbol": "SPY",
+        "d1_includes_t_minus_20": false,
+        "traces": [
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-06",
+            "d1_close": 671.61,
+            "lc": 648.83,
+            "lc_date": "2025-09-08",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-07",
+            "d1_close": 669.12,
+            "lc": 650.33,
+            "lc_date": "2025-09-09",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-08",
+            "d1_close": 673.11,
+            "lc": 652.21,
+            "lc_date": "2025-09-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-09",
+            "d1_close": 671.16,
+            "lc": 657.41,
+            "lc_date": "2025-09-12",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-10",
+            "d1_close": 653.02,
+            "lc": 657.41,
+            "lc_date": "2025-09-12",
+            "step1": true,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-13",
+            "d1_close": 663.04,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-14",
+            "d1_close": 662.23,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-15",
+            "d1_close": 665.17,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-16",
+            "d1_close": 660.64,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-17",
+            "d1_close": 664.39,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-20",
+            "d1_close": 671.3,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-21",
+            "d1_close": 671.29,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-22",
+            "d1_close": 667.8,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-23",
+            "d1_close": 671.76,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-24",
+            "d1_close": 677.25,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-27",
+            "d1_close": 685.24,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-28",
+            "d1_close": 687.06,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "SPY",
+            "d1": "2025-10-29",
+            "d1_close": 687.39,
+            "lc": 653.02,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          }
+        ]
+      },
+      {
+        "symbol": "QQQ",
+        "d1_includes_t_minus_20": false,
+        "traces": [
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-06",
+            "d1_close": 607.71,
+            "lc": 578.87,
+            "lc_date": "2025-09-08",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-07",
+            "d1_close": 604.51,
+            "lc": 580.51,
+            "lc_date": "2025-09-09",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-08",
+            "d1_close": 611.44,
+            "lc": 580.7,
+            "lc_date": "2025-09-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-09",
+            "d1_close": 610.7,
+            "lc": 584.08,
+            "lc_date": "2025-09-11",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-10",
+            "d1_close": 589.5,
+            "lc": 586.66,
+            "lc_date": "2025-09-12",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-13",
+            "d1_close": 602.01,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-14",
+            "d1_close": 598.0,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-15",
+            "d1_close": 602.22,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-16",
+            "d1_close": 599.99,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-17",
+            "d1_close": 603.93,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-20",
+            "d1_close": 611.54,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-21",
+            "d1_close": 611.38,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-22",
+            "d1_close": 605.49,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-23",
+            "d1_close": 610.58,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-24",
+            "d1_close": 617.1,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-27",
+            "d1_close": 628.09,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-28",
+            "d1_close": 632.92,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "QQQ",
+            "d1": "2025-10-29",
+            "d1_close": 635.77,
+            "lc": 589.5,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          }
+        ]
+      },
+      {
+        "symbol": "RSP",
+        "d1_includes_t_minus_20": false,
+        "traces": [
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-06",
+            "d1_close": 191.19,
+            "lc": 186.72,
+            "lc_date": "2025-09-25",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-07",
+            "d1_close": 190.35,
+            "lc": 186.72,
+            "lc_date": "2025-09-25",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-08",
+            "d1_close": 190.97,
+            "lc": 186.72,
+            "lc_date": "2025-09-25",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-09",
+            "d1_close": 189.39,
+            "lc": 186.72,
+            "lc_date": "2025-09-25",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-10",
+            "d1_close": 185.12,
+            "lc": 186.72,
+            "lc_date": "2025-09-25",
+            "step1": true,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-13",
+            "d1_close": 186.92,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-14",
+            "d1_close": 188.47,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-15",
+            "d1_close": 188.85,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-16",
+            "d1_close": 187.06,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": false,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-17",
+            "d1_close": 188.01,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-20",
+            "d1_close": 189.89,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-21",
+            "d1_close": 190.76,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-22",
+            "d1_close": 189.84,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-23",
+            "d1_close": 190.74,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-24",
+            "d1_close": 191.26,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-27",
+            "d1_close": 192.11,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-28",
+            "d1_close": 190.46,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          },
+          {
+            "symbol": "RSP",
+            "d1": "2025-10-29",
+            "d1_close": 188.33,
+            "lc": 185.12,
+            "lc_date": "2025-10-10",
+            "step1": false,
+            "d2_dates": [],
+            "step3": true,
+            "completed": false
+          }
+        ]
+      }
+    ]
+  }
+}

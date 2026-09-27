@@ -1,0 +1,142 @@
+{
+  "run_id": "run_20260927T004917Z_629aaf8",
+  "created_at_utc": "2026-09-27T00:49:17+00:00",
+  "created_at_local": "2026-09-26T17:49:17-07:00",
+  "subject": "MARKET",
+  "framework": "risk_scoring",
+  "base_date": "2025-09-26",
+  "mode": "backtest",
+  "rule_versions": [
+    "v2-M",
+    "v3-R1"
+  ],
+  "git_commit": "629aaf89b2f221f16d6cfd042c76ec6a0469c61d",
+  "git_dirty": false,
+  "data_source_type": "api",
+  "config": {
+    "three_segment.d1_includes_t_minus_20": true,
+    "oas.revision_check": true,
+    "oas.long_history_source": "none"
+  },
+  "sources": [
+    {
+      "source": "yahoo",
+      "key": "SPY",
+      "url": "yfinance.download('SPY', start=2024-08-02, end=2025-09-27, auto_adjust=False) → Close",
+      "downloaded_at_utc": "2026-09-26T17:27:03+00:00",
+      "rows": 289,
+      "data_start": "2024-08-02",
+      "data_end": "2025-09-26",
+      "from_cache": true,
+      "cache_file": "data/cache/yahoo/SPY_2024-08-02_2025-09-26.csv"
+    },
+    {
+      "source": "yahoo",
+      "key": "QQQ",
+      "url": "yfinance.download('QQQ', start=2024-08-02, end=2025-09-27, auto_adjust=False) → Close",
+      "downloaded_at_utc": "2026-09-26T17:27:04+00:00",
+      "rows": 289,
+      "data_start": "2024-08-02",
+      "data_end": "2025-09-26",
+      "from_cache": true,
+      "cache_file": "data/cache/yahoo/QQQ_2024-08-02_2025-09-26.csv"
+    },
+    {
+      "source": "yahoo",
+      "key": "RSP",
+      "url": "yfinance.download('RSP', start=2024-08-02, end=2025-09-27, auto_adjust=False) → Close",
+      "downloaded_at_utc": "2026-09-26T17:27:05+00:00",
+      "rows": 289,
+      "data_start": "2024-08-02",
+      "data_end": "2025-09-26",
+      "from_cache": true,
+      "cache_file": "data/cache/yahoo/RSP_2024-08-02_2025-09-26.csv"
+    },
+    {
+      "source": "yahoo",
+      "key": "HYG",
+      "url": "yfinance.download('HYG', start=2024-08-02, end=2025-09-27, auto_adjust=False) → Close",
+      "downloaded_at_utc": "2026-09-26T17:27:06+00:00",
+      "rows": 289,
+      "data_start": "2024-08-02",
+      "data_end": "2025-09-26",
+      "from_cache": true,
+      "cache_file": "data/cache/yahoo/HYG_2024-08-02_2025-09-26.csv"
+    },
+    {
+      "source": "yahoo",
+      "key": "LQD",
+      "url": "yfinance.download('LQD', start=2024-08-02, end=2025-09-27, auto_adjust=False) → Close",
+      "downloaded_at_utc": "2026-09-26T17:27:08+00:00",
+      "rows": 289,
+      "data_start": "2024-08-02",
+      "data_end": "2025-09-26",
+      "from_cache": true,
+      "cache_file": "data/cache/yahoo/LQD_2024-08-02_2025-09-26.csv"
+    },
+    {
+      "source": "fred",
+      "key": "VIXCLS",
+      "url": "https://api.stlouisfed.org/fred/series/observations?series_id=VIXCLS&file_type=json&observation_start=2025-06-18&observation_end=2025-09-26",
+      "downloaded_at_utc": "2026-09-26T17:27:09+00:00",
+      "rows": 73,
+      "data_start": "2025-06-18",
+      "data_end": "2025-09-26",
+      "from_cache": true,
+      "cache_file": "data/cache/fred/VIXCLS_2025-06-18_2025-09-26.csv"
+    },
+    {
+      "source": "cboe",
+      "key": "VIX",
+      "url": "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv",
+      "downloaded_at_utc": "2026-09-26T17:27:12+00:00",
+      "rows": 73,
+      "data_start": "2025-06-18",
+      "data_end": "2025-09-26",
+      "from_cache": true,
+      "cache_file": "data/cache/cboe/VIX_2025-06-18_2025-09-26.csv"
+    },
+    {
+      "source": "treasury",
+      "key": "10Y",
+      "url": "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/2025/all?type=daily_treasury_yield_curve&field_tdr_date_value=2025&page&_format=csv",
+      "downloaded_at_utc": "2026-09-26T17:27:32+00:00",
+      "rows": 185,
+      "data_start": "2025-01-02",
+      "data_end": "2025-09-26",
+      "from_cache": true,
+      "cache_file": "data/cache/treasury/10Y_2025-01-01_2025-09-26.csv"
+    },
+    {
+      "source": "fred",
+      "key": "BAMLH0A0HYM2",
+      "url": "https://api.stlouisfed.org/fred/series/observations?series_id=BAMLH0A0HYM2&file_type=json&observation_start=2025-06-18&observation_end=2025-09-26",
+      "downloaded_at_utc": "2026-09-26T17:27:34+00:00",
+      "rows": 74,
+      "data_start": "2025-06-18",
+      "data_end": "2025-09-26",
+      "from_cache": true,
+      "cache_file": "data/cache/fred/BAMLH0A0HYM2_2025-06-18_2025-09-26.csv"
+    },
+    {
+      "source": "fred",
+      "key": "BAMLH0A0HYM2_vintage20250926",
+      "url": "https://api.stlouisfed.org/fred/series/observations?series_id=BAMLH0A0HYM2&file_type=json&observation_start=2025-06-18&observation_end=2025-09-26&realtime_start=2025-09-26&realtime_end=2025-09-26",
+      "downloaded_at_utc": "2026-09-27T00:49:17+00:00",
+      "rows": 74,
+      "data_start": "2025-06-18",
+      "data_end": "2025-09-26",
+      "from_cache": false,
+      "cache_file": "data/cache/fred/BAMLH0A0HYM2_vintage20250926_2025-06-18_2025-09-26.csv"
+    }
+  ],
+  "status": "complete",
+  "pending_dimensions": {
+    "v2-M": [],
+    "v3-R1": []
+  },
+  "review_flags": [],
+  "data_notes": [
+    "ALFRED 基准日版本已包含基准日当天的观测：该系列的版本日期不能代表真实发布时间，发布时点按\"次日发布\"假设处理（基准日当天观测不使用）"
+  ]
+}
