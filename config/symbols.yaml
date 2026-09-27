@@ -4,14 +4,18 @@
 #   symbol        程序内部使用的名称（清洗结果文件名）
 #   tv_symbol     TradingView 代码，如 INDEX:S5FI（导出文件名中的 INDEX_S5FI 还原而来）
 #   name          中文名称
-#   category      breadth / etf / volatility / rates / credit / other
+#   category      breadth / breadth_internal（涨跌家数、新高新低）/ etf / index / volatility / sentiment / rates / credit / other
 #   usage         scoring（参与评分）/ crosscheck（与接口数据互相校验）/ reference（只保存）
-#   unit          percent / index / price / ratio / count
+#   unit          percent / index / price / ratio / count / net（可为负数的差值，不做范围检查）
 #   timezone      UNIX 时间戳换算日期所用的时区（默认 America/New_York）
 #   calendar      nyse（按 NYSE 交易日核对）/ bond（债市营业日，出现在股市休市日属正常）/ none
 #   inception     标的起始日期（可选），用于提示"历史是否已完整加载"
 #   filename_aliases  文件名无法按"交易所_代码, 周期.csv"解析时，在此登记文件名前缀
 #   known_values  已知读数（收盘值），用于校验数值与日期是否对齐（容差 0.005）
+#
+# 文件名解析：带 _DLY 的延迟数据源前缀整体作为数据源（ICE_DLY_MOVE → ICE_DLY:MOVE）。
+# BATS = Cboe BZX 交易所：BATS 的成交量只含 Cboe BZX 一家交易所，不得用于成交量计算；
+# 收盘价以 tv crosscheck 与 Yahoo 的比对结果为准。
 
 - symbol: S5FI
   tv_symbol: INDEX:S5FI
@@ -47,51 +51,57 @@
     2025-11-28: 76.73
 
 # ---- crosscheck：与接口数据互相校验，不参与评分（TRADINGVIEW 6.3）----
-# 交易所前缀以实际导出为准；若导出为 BATS_SPY 等其他前缀，程序按代码部分唯一匹配。
+# 交易所前缀以实际导出为准（2026-09-26 导出为 BATS，即 Cboe BZX）。
 - symbol: SPY
-  tv_symbol: AMEX:SPY
+  tv_symbol: BATS:SPY
   name: 标普500 ETF
   category: etf
   usage: crosscheck
   unit: price
+  inception: 1993-01-29   # 导入结果的最早日期（2026-09-26 导出）
   api_source: yahoo:SPY
   known_values: {2025-08-29: 645.05, 2025-09-26: 661.82, 2025-10-31: 682.06, 2025-11-28: 683.39}
 - symbol: QQQ
-  tv_symbol: NASDAQ:QQQ
+  tv_symbol: BATS:QQQ
   name: 纳斯达克100 ETF
   category: etf
   usage: crosscheck
   unit: price
+  inception: 1999-03-10   # 导入结果的最早日期
   api_source: yahoo:QQQ
   known_values: {2025-08-29: 570.40, 2025-09-26: 595.97, 2025-10-31: 629.07, 2025-11-28: 619.25}
 - symbol: RSP
-  tv_symbol: AMEX:RSP
+  tv_symbol: BATS:RSP
   name: 标普500等权重 ETF
   category: etf
   usage: crosscheck
   unit: price
+  inception: 2003-04-30   # 导入结果的最早日期
   api_source: yahoo:RSP
   known_values: {2025-08-29: 188.62, 2025-09-26: 188.57, 2025-10-31: 187.93, 2025-11-28: 191.53}
 - symbol: HYG
-  tv_symbol: AMEX:HYG
+  tv_symbol: BATS:HYG
   name: 高收益债 ETF
   category: etf
   usage: crosscheck
   unit: price
+  inception: 2007-04-11   # 导入结果的最早日期
   api_source: yahoo:HYG
 - symbol: LQD
-  tv_symbol: AMEX:LQD
+  tv_symbol: BATS:LQD
   name: 投资级公司债 ETF
   category: etf
   usage: crosscheck
   unit: price
+  inception: 2002-07-26   # 导入结果的最早日期
   api_source: yahoo:LQD
 - symbol: VIX
-  tv_symbol: CBOE:VIX
+  tv_symbol: CBOE_DLY:VIX
   name: VIX 指数
   category: volatility
   usage: crosscheck
   unit: index
+  inception: 2002-04-08   # 导入结果的最早日期（TradingView 该版本的数据起点）
   api_source: fred:VIXCLS
   known_values: {2025-08-22: 14.22, 2025-08-29: 15.36, 2025-09-19: 15.45, 2025-09-26: 15.29,
                  2025-10-24: 16.37, 2025-10-31: 17.44, 2025-11-20: 26.42, 2025-11-28: 16.35}
@@ -119,10 +129,20 @@
   known_values: {2025-08-29: 4.23, 2025-09-26: 4.20, 2025-10-03: 4.13, 2025-10-31: 4.11, 2025-11-28: 4.02}
 - symbol: US10Y
   tv_symbol: TVC:US10Y
-  name: 美国10年期收益率（TradingView 报价，与财政部官方值存在口径差异）
+  name: 美国10年期收益率（TradingView 报价，与财政部官方值存在口径差异；评分仍用财政部）
   category: rates
   usage: reference
   unit: percent
+  calendar: bond
+  inception: 2010-12-30   # 导入结果的最早日期
+- symbol: US02Y
+  tv_symbol: TVC:US02Y
+  name: 美国2年期收益率（TradingView 报价；评分仍用财政部）
+  category: rates
+  usage: reference
+  unit: percent
+  calendar: bond
+  inception: 1988-02-26   # 导入结果的最早日期
 
 # ---- reference：只保存，不参与计算（2026-09-26 导出）----
 - symbol: S5TH
@@ -233,3 +253,106 @@
   usage: reference
   unit: percent
   inception: 2013-10-14   # TradingView 导出的最早日期
+
+# ---- reference：波动率、市场内部指标与指数（2026-09-26 导出，只保存，不参与计算）----
+- symbol: MOVE
+  tv_symbol: ICE_DLY:MOVE
+  name: ICE BofA MOVE 指数（美债隐含波动率，主版本）
+  category: volatility
+  usage: reference
+  unit: index
+  calendar: bond
+  inception: 2002-11-12   # 导入结果的最早日期
+  # 缺失 NYSE 交易日 92 个：39 个为债市休市日（属正常）；另 53 个为 2003-06-03 与 2012-11 至 2018-12 的零散缺口，
+  # 见 reports/tradingview_data_quality.md；2013-08-22 为 98.30（TVC 版本 58.30），疑似录入错误
+- symbol: MOVE_TVC
+  tv_symbol: TVC:MOVE
+  name: MOVE 指数（TVC 版本，备用）
+  category: volatility
+  usage: reference
+  unit: index
+  inception: 2002-11-12   # 导入结果的最早日期；有 141 个零散缺口（见 reports/tradingview_data_quality.md）
+- symbol: VIX3M
+  tv_symbol: CBOE_DLY:VIX3M
+  name: Cboe 3个月波动率指数
+  category: volatility
+  usage: reference
+  unit: index
+  inception: 2007-12-05   # 导入结果的最早日期
+- symbol: SKEW
+  tv_symbol: CBOE_DLY:SKEW
+  name: Cboe SKEW 指数
+  category: volatility
+  usage: reference
+  unit: index
+  inception: 1990-01-02   # 导入结果的最早日期
+- symbol: ADD
+  tv_symbol: USI:ADD
+  name: NYSE 上涨家数减下跌家数
+  category: breadth_internal
+  usage: reference
+  unit: net
+  inception: 1993-11-01   # 导入结果的最早日期
+- symbol: ADDQ
+  tv_symbol: USI:ADDQ
+  name: 纳斯达克上涨家数减下跌家数
+  category: breadth_internal
+  usage: reference
+  unit: net
+  inception: 1993-11-01   # 导入结果的最早日期
+- symbol: ADVN
+  tv_symbol: INDEX:ADVN
+  name: 纳斯达克上涨家数
+  category: breadth_internal
+  usage: reference
+  unit: count
+  inception: 2007-09-28   # 导入结果的最早日期
+- symbol: DECN
+  tv_symbol: INDEX:DECN
+  name: 纳斯达克下跌家数
+  category: breadth_internal
+  usage: reference
+  unit: count
+  inception: 2007-09-28   # 导入结果的最早日期
+- symbol: HIGN
+  tv_symbol: INDEX:HIGN
+  name: 纳斯达克创52周新高家数
+  category: breadth_internal
+  usage: reference
+  unit: count
+  inception: 2001-06-05   # 导入结果的最早日期；缺口清单见 reports/tradingview_data_quality.md
+- symbol: LOWN
+  tv_symbol: INDEX:LOWN
+  name: 纳斯达克创52周新低家数
+  category: breadth_internal
+  usage: reference
+  unit: count
+  inception: 2001-06-05   # 导入结果的最早日期；缺口清单见 reports/tradingview_data_quality.md
+- symbol: PCC
+  tv_symbol: USI:PCC
+  name: Cboe 总认沽认购比
+  category: sentiment
+  usage: reference
+  unit: ratio
+  inception: 2006-10-17   # 导入结果的最早日期
+- symbol: PCCE
+  tv_symbol: USI:PCCE
+  name: Cboe 股票认沽认购比
+  category: sentiment
+  usage: reference
+  unit: ratio
+  inception: 2007-01-23   # 导入结果的最早日期
+- symbol: SPX
+  tv_symbol: SP_DLY:SPX
+  name: 标普500指数（用于核对结果标签）
+  category: index
+  usage: reference
+  unit: index
+  inception: 1960-09-01   # 导入结果的最早日期
+- symbol: NDX
+  tv_symbol: NASDAQ_DLY:NDX
+  name: 纳斯达克100指数（用于核对结果标签）
+  category: index
+  usage: reference
+  unit: index
+  inception: 1985-01-31   # 导入结果的最早日期

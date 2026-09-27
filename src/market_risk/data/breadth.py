@@ -104,16 +104,14 @@ def merge_breadth(
 
     TradingView 只有 S5FI、S5TW 其中之一的日期不采用（两项需同时来自同一来源）。
     返回 (读数, {日期: 差异说明})。
-    """
-    from market_risk.data.tv_quality import stale_dates
 
+    S5FI、S5TW 与前一交易日相同属离散取值下的偶然（TRADINGVIEW 7.2），不标注疑似陈旧值（stale_fields 为空）。
+    """
     result: dict[dt.date, BreadthReading] = dict(manual)
     conflicts: dict[dt.date, str] = {}
-    stale_fi, stale_tw = set(stale_dates(tv_s5fi)), set(stale_dates(tv_s5tw))
     for d in sorted(set(tv_s5fi) & set(tv_s5tw)):
         tv = make_reading(d, tv_s5fi[d], tv_s5tw[d], "TradingView 导出")
-        stale = tuple(f for f, s in (("S5FI", stale_fi), ("S5TW", stale_tw)) if d in s)
-        tv = BreadthReading(tv.date, tv.s5fi, tv.s5tw, "tradingview", tv.note, stale)
+        tv = BreadthReading(tv.date, tv.s5fi, tv.s5tw, "tradingview", tv.note)
         old = manual.get(d)
         if old is not None and (abs(old.s5fi - tv.s5fi) > TV_TOLERANCE or abs(old.s5tw - tv.s5tw) > TV_TOLERANCE):
             conflicts[d] = (

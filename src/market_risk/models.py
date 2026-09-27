@@ -76,7 +76,7 @@ class BreadthReading:
     s5tw: float
     source: str = "manual"
     note: str = ""
-    stale_fields: tuple[str, ...] = ()   # 疑似陈旧值（与前一交易日完全相同）的字段："S5FI"、"S5TW"；保留原值
+    stale_fields: tuple[str, ...] = ()   # 预留：疑似陈旧值字段；S5FI、S5TW 重复值属偶然，不再触发（SPEC 5.6 第11条）
 
 
 @dataclass(frozen=True)

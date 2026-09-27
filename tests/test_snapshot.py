@@ -196,7 +196,7 @@ def test_v2m_o1_skips_columbus_day_carry_forward():
     assert r.oas_o1 == r.oas_o1_v2m == D(2025, 10, 10)
     assert r.o1_v2m_lag_stock_days == 2
     assert snap.oas_o1_v2m == 3.18
-    assert any("2025-10-13（债市休市日）为沿用值 3.18" in n for n in snap.data_notes)
+    assert any("2025-10-13（债市休市日）沿用值 3.18" in n and "都不计入" in n for n in snap.data_notes)
 
 
 def test_v2m_o6_skips_columbus_day():
@@ -227,18 +227,19 @@ def test_labor_day_2025_09_02():
     assert r.o1_v2m_lag_stock_days == 1  # 不滞后
     assert (r.oas_o1, snap.oas_o1) == (D(2025, 8, 29), 2.82)
     assert (r.oas_o6_v3r1, snap.oas_o6_v3r1) == (D(2025, 8, 22), 2.88)
-    assert any("2025-09-01（债市休市日）为沿用值 2.84" in n for n in snap.data_notes)
+    assert any("2025-09-01（债市休市日）沿用值 2.84" in n and "都不计入" in n for n in snap.data_notes)
 
 
-def test_holiday_observation_with_new_value_is_kept_and_flagged():
-    """债市休市日的数值与前一观测不同：不自动排除，报告交给用户判断。"""
+def test_holiday_observation_with_new_value_is_excluded():
+    """一般债市休市日（非月末）的数值即使与前一观测不同，也按规则排除，两个版本都不计入（2026-09-27 统一规则）。"""
     raw = _raw_at("2025-10-31", D(2025, 10, 14))
     oas = {**raw.oas, D(2025, 10, 13): 3.25}
     snap = build_snapshot(dataclasses.replace(raw, oas=oas))
-    assert snap.refs.oas_o1_v2m == D(2025, 10, 13)
-    assert snap.oas_o1_v2m == 3.25
+    assert snap.refs.oas_o1_v2m == D(2025, 10, 10)
+    assert snap.oas_o1_v2m == 3.18
     assert snap.refs.oas_o1 == D(2025, 10, 10)  # v3-R1 不取休市日
-    assert any("【需人工判断】" in n and "2025-10-13" in n for n in snap.data_notes)
+    assert not any("需人工判断" in n for n in snap.data_notes)
+    assert any("2025-10-13（债市休市日）数值 3.25" in n and "按规则排除" in n for n in snap.data_notes)
 
 
 def test_three_segment_dependency_note():

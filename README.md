@@ -134,7 +134,7 @@ uv run market-risk tv quality
 uv run market-risk audit calendar --write
 ```
 
-- `tv quality`：广度指标早期数据质量检查（单值K线阶段、跳变、节假日数据、疑似陈旧值），写 `reports/tradingview_data_quality.md`。
+- `tv quality`：广度指标早期数据质量检查（单值K线阶段、跳变、节假日数据、重复值与偶然期望对照），以及 MOVE 两个版本比对、HIGN/LOWN 缺口清单，写 `reports/tradingview_data_quality.md`。
 - `audit calendar`：补齐 `config/holidays.yaml`（加 `--write` 才写入），与 SIFMA 常见规则对照，并列出债市休市日 OAS 数值不同的日期，写 `reports/holiday_calendar_audit.md`。裁定结果登记到 `config/data_decisions.yaml`。
 
 ### 4.7 正式记录、资料、标签

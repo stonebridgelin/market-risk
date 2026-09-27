@@ -154,7 +154,7 @@ def load_holidays(path: Path = DEFAULT_HOLIDAYS_PATH) -> MarketHolidays:
 
 DEFAULT_SYMBOLS_PATH = PROJECT_ROOT / "config" / "symbols.yaml"
 _USAGES = {"scoring", "crosscheck", "reference"}
-_UNITS = {"percent", "index", "price", "ratio", "count"}
+_UNITS = {"percent", "index", "price", "ratio", "count", "net"}
 _CALENDARS = {"nyse", "bond", "none"}
 
 

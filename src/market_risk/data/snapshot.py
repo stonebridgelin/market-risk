@@ -124,7 +124,8 @@ def build_snapshot(
     else:
         coverage_end = base
     bond_cal = mcal.bond_calendar_from_dates(treasury, raw.treasury_coverage_start, coverage_end)
-    refs = mcal.compute_date_references(base, bond_cal, oas)
+    oas_keep = {d for d, x in oas_decisions.items() if x.decision == "keep"}
+    refs = mcal.compute_date_references(base, bond_cal, oas, oas_keep_dates=oas_keep)
     notes.add(mcal.o6_difference_note(refs))
     if holidays is not None:
         for n in mcal.check_bond_calendar(bond_cal, holidays, refs.t_minus_20, base):
@@ -170,12 +171,7 @@ def build_snapshot(
     breadth_t5 = breadth.get(refs.t_minus_5)
     if breadth_now is None:
         notes.add(f"缺少基准日 {base} 的 S5FI、S5TW 读数")
-    for reading, labels in ((breadth_now, {"S5FI": "F", "S5TW": "W"}), (breadth_t5, {"S5FI": "F5", "S5TW": "W5"})):
-        for field_name in reading.stale_fields if reading is not None else ():
-            notes.add(
-                f"疑似陈旧值：{labels[field_name]}（{field_name} {reading.date}）与前一交易日完全相同，"  # type: ignore[union-attr]
-                "保留原值（逐日回测将做敏感性检验）"
-            )
+    # S5FI、S5TW 重复值属偶然，不标注疑似陈旧值（2026-09-27 撤回，SPEC 5.6 第11条）
 
     # ---- 5. VIX（FRED → Cboe，SPEC 5.6 第7条）----
     vix, vix_notes = resolve_vix(base, vix_fred, vix_cboe)
@@ -212,7 +208,7 @@ def build_snapshot(
     oas_o1_v2 = None if refs.oas_o1_v2m is None else oas_valued.get(refs.oas_o1_v2m)
     oas_o6_v2 = None if refs.oas_o6_v2m is None else oas_valued.get(refs.oas_o6_v2m)
 
-    # 债市休市日的 OAS 观测（SPEC 5.6 第10条）：沿用值排除；与前一观测不同的保留并报告
+    # 债市休市日的 OAS 观测（SPEC 5.6 第10条）：一律排除；自然月末例外（v2-M 计入，v3-R1 不计入）
     span_start = min(d for d in (refs.oas_o6_v3r1, refs.oas_o6_v2m) if d is not None)
     for d in sorted(oas_excluded):
         if span_start <= d < base and d in raw.oas:
@@ -222,20 +218,21 @@ def build_snapshot(
         if not (span_start <= h_obs.date < base):
             continue
         decided = oas_decisions.get(h_obs.date)
-        if h_obs.carried_forward:
-            notes.add(
-                f"OAS {h_obs.date}（债市休市日）为沿用值 {h_obs.value}"
-                f"（同 {h_obs.previous_date}），v2-M 不计为观测"
-            )
-        elif decided is not None and decided.decision == "keep":
-            notes.add(f"OAS {h_obs.date}（债市休市日）数值 {h_obs.value} 与前一观测不同，按已裁定日期表保留"
+        detail = (f"沿用值 {h_obs.value}（同 {h_obs.previous_date}）" if h_obs.carried_forward
+                  else f"数值 {h_obs.value}（前一观测 {h_obs.previous_date}：{h_obs.previous_value}）")
+        if decided is not None and decided.decision == "keep":
+            notes.add(f"OAS {h_obs.date}（债市休市日）{detail}，按已裁定日期表保留，v2-M 计入"
                       f"（{decided.reason}；裁定于 {decided.decided_on}）")
+        elif h_obs.is_month_end:
+            notes.add(f"OAS {h_obs.date}（债市休市日，恰为自然月末）{detail}，视为月末观测："
+                      "v2-M 计入，v3-R1 不计入")
         else:
-            notes.add(
-                f"【需人工判断】OAS {h_obs.date} 为债市休市日，但 FRED 数值 {h_obs.value} "
-                f"与前一个观测（{h_obs.previous_date}：{h_obs.previous_value}）不同；"
-                "未自动排除，v2-M 仍计为观测"
-            )
+            notes.add(f"OAS {h_obs.date}（债市休市日）{detail}，按规则排除，v2-M 与 v3-R1 都不计入")
+    # 规则无法覆盖：债市日历（财政部数据）覆盖范围以外的工作日观测，无法判断是否为债市休市日
+    for d in mcal.valued_observation_dates(oas):
+        if span_start <= d < base and d.weekday() < 5 and not (
+                bond_cal.coverage_start <= d <= bond_cal.coverage_end):
+            notes.add(f"【需人工判断】OAS {d} 不在财政部数据覆盖范围内，无法判断是否为债市休市日")
 
     # 历史修订比对（SPEC 5.6 第3条）：ALFRED 版本日期不能代表真实发布时间
     vintage_values: list[OasVintageValue] = []

@@ -4,7 +4,9 @@
 1. "开盘=最高=最低=收盘"的单值K线阶段在哪一天结束；
 2. 分界点前后各20个交易日的日变化，列出明显跳变；
 3. 节假日（非 NYSE 交易日）有数据的日期是否都落在单值阶段内；
-4. 疑似陈旧值：交易日收盘值与前一个交易日完全相同的日期（全部历史）。
+4. 重复值：交易日收盘值与前一个交易日完全相同的日期（全部历史），与离散取值下的偶然期望对照。
+   结论（2026-09-27）：S5FI、S5TW 重复值属偶然，不标注；NC 系列明显偏多，更可能是陈旧值（仅作参考，不参与评分）。
+另有：MOVE 两个版本（ICE_DLY 与 TVC）的比对、ICE 版本缺失日与债市休市日对照、新高新低家数（HIGN、LOWN）缺口清单。
 """
 
 from __future__ import annotations
@@ -23,6 +25,13 @@ BOUNDARY_DAYS = 20      # 分界点前后各看20个交易日
 JUMP_FACTOR = 3.0       # 日变化超过窗口中位数的3倍视为明显跳变
 JUMP_MIN_POINTS = 5.0   # 且至少5个百分点
 SCORING_BREADTH = ("S5FI", "S5TW")
+STALE_RATIO = 1.5       # 重复值次数超过偶然期望的 1.5 倍（且至少多 5 次）视为明显偏多
+# 剧烈波动日：新高新低家数在这些日子缺失需特别留意
+VOLATILE_DAYS = {
+    dt.date(2011, 8, 8): "美国主权评级下调后首个交易日",
+    dt.date(2015, 8, 21): "2015年8月大跌（8-24 闪崩前一交易日）",
+    dt.date(2016, 1, 15): "2016年初全球股市下跌",
+}
 # 名义步长：一只成分股对应的百分点（成分股约 500、100、3000+、5000+、2000 只）
 NOMINAL_STEP = {"S5": 0.2, "ND": 1.0, "NC": 0.03, "MM": 0.02, "R2": 0.05}
 
@@ -83,6 +92,19 @@ class QualityResult:
         end = self.single_phase_end
         return [d for d in self.stale if end is None or d > end]
 
+    @property
+    def repeats_excessive(self) -> bool | None:
+        """重复值是否明显多于偶然期望（None：无法判断）。"""
+        exp = self.expected_zero
+        if exp is None:
+            return None
+        return self.zero_after_phase > max(STALE_RATIO * exp, exp + 5)
+
+    @property
+    def repeat_verdict(self) -> str:
+        v = self.repeats_excessive
+        return "无法判断" if v is None else ("明显偏多，更可能是陈旧值" if v else "与偶然一致")
+
 
 def analyze(symbol: str, bars: Mapping[dt.date, Bar]) -> QualityResult:
     dates = sorted(bars)
@@ -135,6 +157,96 @@ def analyze(symbol: str, bars: Mapping[dt.date, Bar]) -> QualityResult:
     return res
 
 
+# ---------------------------------------------------------------------------
+# MOVE 两个版本比对、缺口清单
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class VersionComparison:
+    primary: str
+    alternative: str
+    overlap: int = 0
+    mismatches: list[tuple[dt.date, float, float]] = field(default_factory=list)
+    max_abs_diff: float = 0.0
+    only_primary: list[dt.date] = field(default_factory=list)
+    only_alternative: list[dt.date] = field(default_factory=list)
+    primary_missing: list[dt.date] = field(default_factory=list)          # 主版本缺失的 NYSE 交易日
+    primary_missing_bond_holiday: list[dt.date] = field(default_factory=list)
+    primary_missing_other: list[dt.date] = field(default_factory=list)
+    alternative_missing: list[dt.date] = field(default_factory=list)
+
+
+def missing_trading_days(closes: Mapping[dt.date, float]) -> list[dt.date]:
+    """数据范围内缺失的 NYSE 交易日。"""
+    if not closes:
+        return []
+    return [d for d in mcal.stock_trading_days(min(closes), max(closes)) if d not in closes]
+
+
+def compare_versions(primary: str, alternative: str, a: Mapping[dt.date, float], b: Mapping[dt.date, float],
+                     bond_holidays: frozenset[dt.date] | set[dt.date], tolerance: float = 0.005) -> VersionComparison:
+    """同一指标两个版本在重叠日期逐日比对（两位小数）；主版本缺失的交易日与债市休市日对照。"""
+    res = VersionComparison(primary, alternative)
+    common = sorted(set(a) & set(b))
+    res.overlap = len(common)
+    for d in common:
+        x, y = round(a[d], 2), round(b[d], 2)
+        res.max_abs_diff = max(res.max_abs_diff, round(abs(x - y), 4))
+        if abs(x - y) > tolerance + 1e-9:
+            res.mismatches.append((d, x, y))
+    if common:
+        lo, hi = common[0], common[-1]
+        res.only_primary = sorted(d for d in a if lo <= d <= hi and d not in b)
+        res.only_alternative = sorted(d for d in b if lo <= d <= hi and d not in a)
+    res.primary_missing = missing_trading_days(a)
+    res.primary_missing_bond_holiday = [d for d in res.primary_missing if d in bond_holidays]
+    res.primary_missing_other = [d for d in res.primary_missing if d not in bond_holidays]
+    res.alternative_missing = missing_trading_days(b)
+    return res
+
+
+def render_move(c: VersionComparison) -> list[str]:
+    lines = [f"## MOVE 两个版本比对（{c.primary} 主，{c.alternative} 备用）", "",
+             f"- 重叠日期 {c.overlap} 个；不一致（两位小数，差值 > 0.005）{len(c.mismatches)} 个；"
+             f"最大差值 {c.max_abs_diff:.2f}。"]
+    if c.mismatches:
+        lines.append("- 不一致日期：" + "；".join(f"{d} {x:.2f} 对 {y:.2f}" for d, x, y in c.mismatches[:20])
+                     + (f" 等（共 {len(c.mismatches)} 个）" if len(c.mismatches) > 20 else ""))
+    lines += [
+        f"- 重叠区间内仅 {c.primary} 有数据 {len(c.only_primary)} 个：{_dates(c.only_primary, 20)}",
+        f"- 重叠区间内仅 {c.alternative} 有数据 {len(c.only_alternative)} 个：{_dates(c.only_alternative, 20)}",
+        f"- {c.primary} 缺失的 NYSE 交易日 {len(c.primary_missing)} 个，其中债市休市日"
+        "（2008 年起按 config/holidays.yaml，之前按 SIFMA 常见规则）"
+        f"{len(c.primary_missing_bond_holiday)} 个，其他 {len(c.primary_missing_other)} 个。",
+        f"  - 其他（非债市休市日）：{_dates(c.primary_missing_other)}",
+        f"  - 债市休市日：{_dates(c.primary_missing_bond_holiday)}",
+        f"- {c.alternative} 缺失的 NYSE 交易日 {len(c.alternative_missing)} 个（零散缺口）："
+        f"{_dates(c.alternative_missing, 30)}",
+        "",
+    ]
+    return lines
+
+
+def render_gaps(gaps: Mapping[str, list[dt.date]]) -> list[str]:
+    lines = ["## 新高新低家数（HIGN、LOWN）缺口清单", "",
+             "缺口 = 数据范围内缺失的 NYSE 交易日。剧烈波动日缺失需特别留意"
+             "（这些日子的新高新低家数最有参考价值）。", ""]
+    for sym, ds in gaps.items():
+        lines.append(f"### {sym}（{len(ds)} 个）")
+        lines.append("")
+        marks = {d: f"  **剧烈波动日：{VOLATILE_DAYS[d]}**" for d in ds if d in VOLATILE_DAYS}
+        lines += [f"- {d}{marks.get(d, '')}" for d in ds] or ["- 无"]
+        by_month: dict[tuple[int, int], int] = {}
+        for d in ds:
+            by_month[(d.year, d.month)] = by_month.get((d.year, d.month), 0) + 1
+        dense = [f"{y}-{m:02d}（{n} 个）" for (y, m), n in sorted(by_month.items()) if n >= 3]
+        if dense:
+            lines.append(f"- 集中缺口（同月 ≥3 个）：{'、'.join(dense)}")
+        lines.append("")
+    return lines
+
+
 def _dates(ds: list[dt.date], limit: int | None = None) -> str:
     if not ds:
         return "无"
@@ -147,20 +259,33 @@ def _num(v: float | None) -> str:
     return "-" if v is None else f"{v:.2f}"
 
 
-def render(results: list[QualityResult], generated_at: str) -> str:
+def render(results: list[QualityResult], generated_at: str, move: VersionComparison | None = None,
+           gaps: Mapping[str, list[dt.date]] | None = None) -> str:
     lines = [
         "# TradingView 广度指标数据质量检查", "",
         f"生成时间（UTC）：{generated_at}。只报告，不修改数据，不改变评分逻辑。", "",
         f"- 单值阶段：第一次出现连续 {MULTI_RUN} 个多值K线（开高低收不全相同）之前的最后一个单值K线日。",
         f"- 明显跳变：分界点前后各 {BOUNDARY_DAYS} 个交易日内，日变化绝对值 ≥ 窗口中位数的 {JUMP_FACTOR:g} 倍且 ≥ "
         f"{JUMP_MIN_POINTS:g} 个百分点。",
-        "- 疑似陈旧值：NYSE 交易日的收盘值与前一个 NYSE 交易日完全相同（保留原值，不替代）。",
+        "- 重复值：NYSE 交易日的收盘值与前一个 NYSE 交易日完全相同（保留原值，不替代）。",
         "- **解读提示**：广度指标按成分股个数取值，是离散的（标普500 每只约 0.2 个百分点，纳斯达克100 约 1 个百分点），"
         "数据正常时也会偶然出现\"与前一天相同\"。对照方法：日变化分布平滑时，\"变化恰为0\"的次数约为 "
         "0<|变化|≤步长（一只成分股）次数的一半，记为偶然期望次数；实际次数明显高于期望时，才更可能是陈旧值。", "",
     ]
     by_symbol = {r.symbol: r for r in results}
-    lines += ["## 参与评分的 S5FI、S5TW", ""]
+    lines += ["## 结论（重复值）", "",
+              "- **S5FI、S5TW 的重复值属偶然**：次数与离散取值下的偶然期望一致，"
+              "计分时不标注疑似陈旧值（SPEC 5.6 第11条）。"]
+    for sym in SCORING_BREADTH:
+        r = by_symbol.get(sym)
+        if r is not None:
+            lines.append(f"  - {sym}：{r.zero_after_phase} 次，偶然期望约 {_num(r.expected_zero)} 次，"
+                         f"{r.repeat_verdict}")
+    nc = [r for r in results if r.symbol.startswith("NC")]
+    if nc:
+        lines.append("- **NC 系列重复值明显偏多，更可能是陈旧值**（仅作参考，不参与评分）：" + "；".join(
+            f"{r.symbol} {r.zero_after_phase} 次对期望约 {_num(r.expected_zero)} 次（{r.repeat_verdict}）" for r in nc))
+    lines += ["", "## 参与评分的 S5FI、S5TW", ""]
     for sym in SCORING_BREADTH:
         r = by_symbol.get(sym)
         if r is None:
@@ -171,7 +296,7 @@ def render(results: list[QualityResult], generated_at: str) -> str:
             f"- 单值阶段结束：{r.single_phase_end or '无单值阶段'}（阶段内单值K线 {r.single_in_phase} 根；"
             f"阶段之后仍为单值的 {len(r.single_after_phase)} 根：{_dates(r.single_after_phase, 20)}）",
             f"- 节假日有数据：{_dates(r.holiday_dates)}；落在单值阶段之外：{_dates(r.holidays_outside_phase)}",
-            f"- 疑似陈旧值（全部历史，{len(r.stale)} 个）：{_dates(r.stale)}",
+            f"- 重复值（全部历史，{len(r.stale)} 个）：{_dates(r.stale)}",
             f"- 其中单值阶段之后（{len(r.stale_after_phase)} 个）：{_dates(r.stale_after_phase)}",
             f"- 离散性对照（单值阶段之后）：步长 {_num(r.step)}；日变化恰为0 {r.zero_after_phase} 次，"
             f"偶然期望约 {_num(r.expected_zero)} 次（0<|变化|≤步长 {r.small_after_phase} 次的一半）",
@@ -179,15 +304,15 @@ def render(results: list[QualityResult], generated_at: str) -> str:
         ]
     lines += ["## 汇总", "",
               "| 指标 | 起止 | 行数 | 单值阶段结束 | 阶段后单值K线 | 分界前/后平均日变化 | 分界次日变化 | 明显跳变 | "
-              "节假日数据（阶段外） | 疑似陈旧值（阶段后） | 步长 / 变化为0 / 偶然期望 |",
-              "|---|---|---|---|---|---|---|---|---|---|---|"]
+              "节假日数据（阶段外） | 重复值（阶段后） | 步长 / 变化为0 / 偶然期望 | 重复值判断 |",
+              "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in results:
         lines.append(
             f"| {r.symbol} | {r.first_date} 至 {r.last_date} | {r.rows} | {r.single_phase_end or '无'} | "
             f"{len(r.single_after_phase)} | {_num(r.boundary_before_mean)} / {_num(r.boundary_after_mean)} | "
             f"{_num(r.boundary_change)} | {len(r.jumps)} | {len(r.holiday_dates)}（{len(r.holidays_outside_phase)}） | "
             f"{len(r.stale)}（{len(r.stale_after_phase)}） | {_num(r.step)} / {r.zero_after_phase} / "
-            f"{_num(r.expected_zero)} |")
+            f"{_num(r.expected_zero)} | {r.repeat_verdict} |")
     lines += ["", "## 分界点前后的明显跳变", ""]
     any_jump = False
     for r in results:
@@ -203,8 +328,13 @@ def render(results: list[QualityResult], generated_at: str) -> str:
             status = "全部在单值阶段内" if not r.holidays_outside_phase else \
                 f"阶段外 {len(r.holidays_outside_phase)} 个：{_dates(r.holidays_outside_phase)}"
             lines.append(f"- {r.symbol}：{len(r.holiday_dates)} 个，{status}")
-    lines += ["", "## 疑似陈旧值（全部历史）", ""]
+    lines += ["", "## 重复值（全部历史）", ""]
     for r in results:
         lines.append(f"- {r.symbol}（{len(r.stale)} 个；单值阶段之后 {len(r.stale_after_phase)} 个）："
                      f"{_dates(r.stale)}")
-    return "\n".join(lines) + "\n"
+    lines.append("")
+    if move is not None:
+        lines += render_move(move)
+    if gaps:
+        lines += render_gaps(gaps)
+    return "\n".join(lines).rstrip("\n") + "\n"

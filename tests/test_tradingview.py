@@ -70,6 +70,54 @@ def test_parse_filename():
     assert tv.parse_filename("S5FI, 1D.csv", aliased) == ("INDEX:S5FI", "1D")
 
 
+@pytest.mark.parametrize(("name", "expected"), [
+    ("ICE_DLY_MOVE, 1D.csv", "ICE_DLY:MOVE"),
+    ("CBOE_DLY_VIX, 1D.csv", "CBOE_DLY:VIX"),
+    ("CBOE_DLY_VIX3M, 1D.csv", "CBOE_DLY:VIX3M"),
+    ("CBOE_DLY_SKEW, 1D.csv", "CBOE_DLY:SKEW"),
+    ("SP_DLY_SPX, 1D.csv", "SP_DLY:SPX"),
+    ("NASDAQ_DLY_NDX, 1D.csv", "NASDAQ_DLY:NDX"),
+    ("XYZ_DLY_ABC_1, 1D.csv", "XYZ_DLY:ABC_1"),   # 通用规则：未登记的延迟数据源同样整体识别
+    ("BATS_SPY, 1D.csv", "BATS:SPY"),
+    ("TVC_MOVE, 1D.csv", "TVC:MOVE"),
+])
+def test_parse_filename_delayed_prefix(name, expected):
+    """带 _DLY 的延迟数据源前缀整体作为数据源，不拆进标的名。"""
+    assert tv.parse_filename(name, SYMBOLS) == (expected, "1D")
+
+
+def test_registered_new_symbols_resolve():
+    """2026-09-26 导出的新标的都能按登记解析；两个 MOVE 版本是不同标的。"""
+    expect = {
+        "BATS:SPY": "SPY", "BATS:QQQ": "QQQ", "BATS:RSP": "RSP", "BATS:HYG": "HYG", "BATS:LQD": "LQD",
+        "CBOE_DLY:VIX": "VIX", "ICE_DLY:MOVE": "MOVE", "TVC:MOVE": "MOVE_TVC", "SP_DLY:SPX": "SPX",
+        "NASDAQ_DLY:NDX": "NDX", "USI:ADD": "ADD", "INDEX:HIGN": "HIGN", "TVC:US02Y": "US02Y",
+    }
+    for tv_symbol, symbol in expect.items():
+        assert SYMBOLS[tv_symbol].symbol == symbol
+    assert SYMBOLS["USI:ADD"].unit == "net"
+
+
+def test_rebuild_corrects_old_symbol_and_removes_orphans(paths):
+    """旧规则下 ICE_DLY_MOVE 被识别为 ICE:DLY_MOVE：重建时更新 manifest 标的名并删除孤立清洗结果。"""
+    text = "time,open,high,low,close\n2025-11-26,80,81,79,80.5\n2025-11-28,81,82,80,81.5\n"
+    target = put(paths, None, name="ICE_DLY_MOVE, 1D.csv", text=text)
+    rel = target.resolve().relative_to(paths.root.resolve()).as_posix()
+    old = {"file_path": rel, "export_date": EXPORT.isoformat(), "tv_symbol": "ICE:DLY_MOVE",
+           "symbol": "DLY_MOVE", "imported_at": "2026-09-26T00:00:00+00:00", "sha256": ""}
+    tv.write_manifest(paths.tv_manifest, {rel: old})
+    orphan = paths.tv_processed_file("DLY_MOVE")
+    orphan.parent.mkdir(parents=True, exist_ok=True)
+    orphan.write_text("date,close\n", encoding="utf-8")
+    result = tv.rebuild(paths, SYMBOLS, tv.read_manifest(paths.tv_manifest))
+    assert result.processed == {"MOVE": 2}
+    assert not orphan.exists() and paths.tv_processed_file("MOVE").exists()
+    row = tv.read_manifest(paths.tv_manifest)[rel]
+    assert (row["tv_symbol"], row["symbol"]) == ("ICE_DLY:MOVE", "MOVE")
+    assert row["imported_at"] == "2026-09-26T00:00:00+00:00"   # 保留原导入时间
+    assert row["sha256"]
+
+
 def test_iso_time_uses_local_date_not_utc():
     """美东 20:00 在 UTC 已是次日；ISO 必须取偏移下的本地日期。"""
     d, fmt, _ = tv.parse_time("2025-11-28T20:00:00-05:00", NY)

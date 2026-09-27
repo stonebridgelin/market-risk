@@ -46,6 +46,8 @@ _FILENAME_RE = re.compile(
     r"^(?P<prefix>[^,]+),\s*(?P<tf>[0-9]*[A-Za-z]+)(?:_[0-9A-Za-z]+)?(?:\s*\(\d+\))?\.csv$"
 )
 _DAILY = {"1D", "D"}
+# 延迟数据源前缀：如 ICE_DLY、CBOE_DLY、SP_DLY、NASDAQ_DLY（通用规则，不逐个硬编码）
+_DELAYED_PREFIX_RE = re.compile(r"^([A-Za-z0-9]+_DLY)_(.+)$", re.IGNORECASE)
 _BASE_COLUMNS = {"open", "high", "low", "close"}
 
 
@@ -110,7 +112,10 @@ class FileReport:
 
 
 def parse_filename(name: str, symbols: Mapping[str, SymbolInfo]) -> tuple[str, str]:
-    """从文件名解析 (tv_symbol, 周期)。INDEX_S5FI → INDEX:S5FI。"""
+    """从文件名解析 (tv_symbol, 周期)。INDEX_S5FI → INDEX:S5FI。
+
+    延迟数据源前缀（交易所_DLY）整体作为数据源：ICE_DLY_MOVE → ICE_DLY:MOVE、CBOE_DLY_VIX3M → CBOE_DLY:VIX3M。
+    """
     m = _FILENAME_RE.match(name)
     if not m:
         raise TradingViewError(
@@ -124,7 +129,8 @@ def parse_filename(name: str, symbols: Mapping[str, SymbolInfo]) -> tuple[str, s
         raise TradingViewError(
             f"文件名 {name!r} 中没有\"交易所_代码\"：请在 config/symbols.yaml 的 filename_aliases 中登记"
         )
-    exchange, code = prefix.split("_", 1)
+    delayed = _DELAYED_PREFIX_RE.match(prefix)
+    exchange, code = (delayed.group(1), delayed.group(2)) if delayed else prefix.split("_", 1)
     return f"{exchange}:{code}".upper(), tf
 
 
@@ -399,7 +405,7 @@ def _check_calendar(report: FileReport, info: SymbolInfo) -> None:
 
 def _check_ranges(report: FileReport, info: SymbolInfo) -> None:
     """第5.2节第5条：百分比类在 0–100；价格类为正数。"""
-    if info.unit is None:
+    if info.unit is None or info.unit == "net":  # net：上涨减下跌等差值，可为负数
         return
     bad: list[dt.date] = []
     for d, b in report.bars.items():
@@ -621,9 +627,7 @@ def import_directory(
         manifest[rep.file_path] = row
         new_reports.append(rep)
 
-    result = rebuild(paths, symbols, manifest, new_reports, export_time)
-    write_manifest(paths.tv_manifest, manifest)
-    return result
+    return rebuild(paths, symbols, manifest, new_reports, export_time)
 
 
 def rebuild(
@@ -633,9 +637,14 @@ def rebuild(
     fresh: list[FileReport] | None = None,
     export_time: dt.datetime | None = None,
 ) -> ImportResult:
-    """按 manifest 中的全部原始文件重建清洗结果（本次新读取的报告优先使用）。"""
+    """按 manifest 中的全部原始文件重建清洗结果（本次新读取的报告优先使用）。
+
+    重新读取的文件按当前解析规则与登记更新 manifest 的标的名（保留原导入时间与原哈希）；
+    不再对应任何原始文件的清洗结果（如旧规则下的错误标的名）一并删除。
+    """
     by_path = {r.file_path: r for r in fresh or []}
     all_reports: list[FileReport] = []
+    rows_out: dict[str, dict[str, str]] = {k: dict(v) for k, v in manifest.items()}
     for rel, row in manifest.items():
         rep = by_path.get(rel)
         if rep is None:
@@ -646,14 +655,29 @@ def rebuild(
                             export_time)
             if row.get("sha256") and row["sha256"] != rep.sha256:
                 rep.add(FAILED, "原始文件与上次导入时不同（sha256 不符），原始文件不得修改")
+            rows_out[rel] = {**manifest_row(rep, row.get("imported_at", "")),
+                             "sha256": row.get("sha256") or rep.sha256}
         all_reports.append(rep)
     merged, errors = merge_reports(all_reports)
     processed = {}
     for symbol, rows in merged.items():
         write_processed(paths, symbol, rows)
         processed[symbol] = len(rows)
+    _remove_orphans(paths, {r.symbol for r in all_reports if r.symbol})
+    write_manifest(paths.tv_manifest, rows_out)
     return ImportResult(fresh if fresh is not None else all_reports, errors, processed,
                         paths.tv_manifest)
+
+
+def _remove_orphans(paths: StoragePaths, symbols: set[str]) -> list[Path]:
+    """删除不对应任何原始文件的清洗结果（清洗结果可随时由原始文件重建）。"""
+    removed = []
+    if paths.tv_processed_dir.is_dir():
+        for p in paths.tv_processed_dir.glob("*.csv"):
+            if p.stem not in symbols:
+                p.unlink()
+                removed.append(p)
+    return removed
 
 
 # ---------------------------------------------------------------------------

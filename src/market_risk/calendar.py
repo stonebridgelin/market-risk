@@ -237,6 +237,11 @@ class HolidayObservation:
     previous_value: float | None
 
     @property
+    def is_month_end(self) -> bool:
+        """是否为自然月末（该月最后一个日历日）：此时视为月末观测（SPEC 5.6 第10条例外）。"""
+        return (self.date + dt.timedelta(days=1)).month != self.date.month
+
+    @property
     def carried_forward(self) -> bool:
         """是否为沿用值：与前一个有数值观测相同（按两位小数）。"""
         return self.previous_value is not None and round(self.value, 2) == round(
@@ -268,15 +273,20 @@ def bond_holiday_observations(
 
 
 def v2m_observation_dates(
-    observations: Mapping[dt.date, float | None], bond_cal: BondCalendar
+    observations: Mapping[dt.date, float | None],
+    bond_cal: BondCalendar,
+    keep_dates: Iterable[dt.date] = (),
 ) -> list[dt.date]:
-    """v2-M 计数用的观测：有数值的行，排除债市休市日的沿用值；月末周末观测保留。
+    """v2-M 计数用的观测：有数值的行，排除债市休市日（以财政部数据缺失为准）的观测；月末周末观测保留。
 
-    债市休市日的数值若与前一个观测不同，不自动排除（仍计入），由调用方报告（SPEC 5.6 第10条）。
+    SPEC 5.6 第10条（2026-09-27 统一规则）：债市休市日的观测一律排除，不论数值是否与前一观测相同；
+    例外：债市休市日恰好是自然月末时视为月末观测，v2-M 计入（v3-R1 按债市营业日计数，本来就不计入）。
+    keep_dates：已裁定日期表中裁定保留（keep）的日期，按裁定计入。
     """
-    carried = {h.date for h in bond_holiday_observations(observations, bond_cal)
-               if h.carried_forward}
-    return [d for d in valued_observation_dates(observations) if d not in carried]
+    keep = set(keep_dates)
+    excluded = {h.date for h in bond_holiday_observations(observations, bond_cal)
+                if not h.is_month_end and h.date not in keep}
+    return [d for d in valued_observation_dates(observations) if d not in excluded]
 
 
 def oas_o1_v2m(base_date: dt.date, observation_dates: Iterable[dt.date]) -> dt.date | None:
@@ -341,11 +351,13 @@ def compute_date_references(
     bond_cal: BondCalendar,
     oas_observations: Mapping[dt.date, float | None] | None = None,
     three_segment_offset: int = 45,
+    oas_keep_dates: Iterable[dt.date] = (),
 ) -> DateReferences:
     """计算基准日的全部日期参照。
 
     oas_observations：FRED 实际返回的 OAS 观测（日期 → 数值，"." 已转为 None/NaN）；
-    v2-M 只数有数值的行，并排除债市休市日的沿用值（v2m_observation_dates）。
+    v2-M 只数有数值的行，并排除债市休市日的观测（自然月末除外，v2m_observation_dates）；
+    oas_keep_dates 为已裁定保留的日期。
     为 None 时 v2-M 的 O1/O6 无法确定，记为 None。
     休市日列表的范围为 min(T−20, O6) 至基准日。
     """
@@ -363,7 +375,7 @@ def compute_date_references(
     o1_v2: dt.date | None = None
     o6_v2: dt.date | None = None
     if oas_observations is not None:
-        valued = v2m_observation_dates(oas_observations, bond_cal)
+        valued = v2m_observation_dates(oas_observations, bond_cal, oas_keep_dates)
         o1_v2 = oas_o1_v2m(base_date, valued)
         if o1_v2 is not None:
             o6_v2 = oas_o6_v2m(o1_v2, valued)

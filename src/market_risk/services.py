@@ -326,8 +326,9 @@ class QualityReport:
 
 def tv_quality(ctx: Context, now: dt.datetime | None = None) -> QualityReport:
     """广度指标（symbols.yaml 中 category=breadth）的早期数据质量检查，写 reports/tradingview_data_quality.md。"""
+    from market_risk.config import load_holidays
     from market_risk.data import tradingview as tv
-    from market_risk.data.tv_quality import analyze, render
+    from market_risk.data.tv_quality import analyze, compare_versions, missing_trading_days, render
 
     results = []
     for info in sorted(load_symbols().values(), key=lambda s: s.symbol):
@@ -336,8 +337,19 @@ def tv_quality(ctx: Context, now: dt.datetime | None = None) -> QualityReport:
         bars = tv.read_processed_bars(ctx.paths, info.symbol)
         if bars:
             results.append(analyze(info.symbol, bars))
+    move = None
+    ice, alt = tv.read_processed(ctx.paths, "MOVE"), tv.read_processed(ctx.paths, "MOVE_TVC")
+    if ice and alt:
+        from market_risk.data.calendar_audit import sifma_rule_holidays
+
+        # holidays.yaml 从 2008 年起；更早的年份按 SIFMA 常见规则
+        known = load_holidays().bond_holidays
+        first_year = min(known).year if known else max(ice).year + 1
+        early = {d for y in range(min(ice).year, first_year) for d in sifma_rule_holidays(y)}
+        move = compare_versions("ICE_DLY:MOVE", "TVC:MOVE", ice, alt, known | early)
+    gaps = {s: missing_trading_days(c) for s in ("HIGN", "LOWN") if (c := tv.read_processed(ctx.paths, s))}
     stamp = (now or dt.datetime.now(dt.UTC)).isoformat(timespec="seconds")
-    text = render(results, stamp)
+    text = render(results, stamp, move, gaps)
     _write_report(ctx.paths.tv_quality_md, text)
     return QualityReport(results, text, ctx.paths.tv_quality_md)
 

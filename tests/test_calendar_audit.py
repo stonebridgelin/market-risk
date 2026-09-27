@@ -77,4 +77,41 @@ def test_oas_holiday_differences_and_decisions():
     assert [(x.date, x.value, x.previous_value) for x in diffs] == [(D(2025, 11, 11), 3.5, 3.0)]
     assert diffs[0].decision == decision
     text = ca.render_audit(ca.audit_calendar(treasury, D(2025, 8, 1), D(2025, 12, 31)), diffs, "t", D(1997, 1, 1))
-    assert "keep（2026-09-27）" in text and "未裁定 0 处" in text
+    assert "keep（2026-09-27；与规则不同，按裁定）" in text
+    assert "排除：两个版本都不计入" in text and "月末例外 0 处，排除 1 处" in text
+
+
+def test_oas_holiday_month_end_classification():
+    """债市休市日恰为自然月末（2021-05-31）：月末例外；一般休市日（2021-07-05）：排除。"""
+    start, end = D(2021, 5, 1), D(2021, 7, 31)
+    treasury = {start + dt.timedelta(days=i) for i in range((end - start).days + 1)}
+    treasury = {d for d in treasury if d.weekday() < 5} - {D(2021, 5, 31), D(2021, 7, 5)}
+    series = dict.fromkeys(treasury, 3.0) | {D(2021, 5, 31): 3.34, D(2021, 7, 5): 3.1}
+    exclude = DataDecision(D(2021, 7, 5), "BAMLH0A0HYM2", "exclude", "测试", D(2026, 9, 27))
+    diffs = ca.oas_holiday_differences("BAMLH0A0HYM2", series, treasury, start, end, [exclude])
+    assert [(x.date, x.month_end) for x in diffs] == [(D(2021, 5, 31), True), (D(2021, 7, 5), False)]
+    assert diffs[0].treatment.startswith("月末例外") and diffs[1].treatment.startswith("排除")
+    text = ca.render_audit(ca.audit_calendar(treasury, start, end), diffs, "t", D(1997, 1, 1))
+    assert "月末例外 1 处，排除 1 处" in text and "exclude（2026-09-27；与规则一致）" in text
+
+
+def test_calendar_resolutions_follow_treasury():
+    """8 个不一致日期已裁定以财政部数据为准：桑迪、老布什国丧日按债市休市；6 个耶稣受难日按开市（提前收盘）。"""
+    assert len(ca.CALENDAR_RESOLUTIONS) == 8
+    start, end = D(2012, 1, 1), D(2012, 12, 31)
+    days = {start + dt.timedelta(days=i) for i in range((end - start).days + 1)}
+    rule = set(ca.sifma_rule_holidays(2012))
+    # 10-29 债市提前收盘，财政部有数据；10-30 无数据
+    treasury = {d for d in days if d.weekday() < 5 and d not in rule} - {D(2012, 10, 30)}
+    treasury |= {D(2012, 4, 6)}                                   # 耶稣受难日财政部有数据
+    a = ca.audit_calendar(treasury, start, end)
+    assert D(2012, 10, 30) in a.only_treasury and D(2012, 4, 6) in a.only_rule
+    assert a.unresolved == []
+    assert D(2012, 10, 30) in a.bond_holidays and D(2012, 4, 6) not in a.bond_holidays
+    assert "提前收盘" in a.bond_early_closes[D(2012, 4, 6)]
+    text = ca.render_audit(a, [], "t", D(1997, 1, 1))
+    assert "待判断：0 个" in text and "飓风桑迪：财政部无数据，按债市休市" in text
+    yml = ca.render_holidays_yaml(a, {})
+    assert "2012-10-30   # 飓风桑迪：财政部无数据，按债市休市（2026-09-27 裁定以财政部数据为准）" in yml
+    data = yaml.safe_load(yml)
+    assert D(2012, 4, 6) in data["bond"]["early_closes"] and D(2012, 4, 6) not in data["bond"]["holidays"]

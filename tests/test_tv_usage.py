@@ -164,11 +164,36 @@ def test_compare_reports_mismatch_and_gaps():
 
 
 def test_exchange_prefix_fallback(paths):
-    """导出前缀与登记不同（BATS_SPY vs AMEX:SPY）：按代码唯一匹配，并用 known_values 校验。"""
+    """导出前缀与登记不同（AMEX_SPY vs 登记的 BATS:SPY）：按代码唯一匹配，并用 known_values 校验。"""
     closes = load_sample_raw("2025-11-28").closes["SPY"]
     rows = {d: v for d, v in closes.items() if d >= D(2025, 10, 1)}
-    rep = _import(paths, {"BATS_SPY, 1D.csv": _tv_file_from_series(rows)}).reports[0]
-    assert rep.tv_symbol == "AMEX:SPY" and rep.symbol == "SPY"
+    rep = _import(paths, {"AMEX_SPY, 1D.csv": _tv_file_from_series(rows)}).reports[0]
+    assert rep.tv_symbol == "BATS:SPY" and rep.symbol == "SPY"
     assert rep.status == tv.PASSED
     assert any("交易所前缀与登记不同" in i.message for i in rep.issues)
     assert any("已知读数核对通过 2/4" in i.message for i in rep.issues)
+
+
+def _daily(start: dt.date, n: int) -> list[dt.date]:
+    return [start + dt.timedelta(days=i) for i in range(n)]
+
+
+def test_dividend_adjustment_detected():
+    """TV 相对 Yahoo 不复权收盘价系统性偏低、越早偏差越大：报告疑似开启了股息调整。"""
+    info = SymbolInfo("SPY", "BATS:SPY", api_source="yahoo:SPY")
+    days = _daily(D(2020, 1, 1), 200)
+    api = dict.fromkeys(days, 100.0)
+    tv_adj = {d: 100.0 * (1 - 0.03 * (len(days) - i) / len(days)) for i, d in enumerate(days)}   # 早期低 3%
+    r = compare_series(info, tv_adj, api, 0.005)
+    assert r.adjustment_suspected and r.max_abs_diff > 2.5
+    assert "疑似开启了股息调整" in format_results([r], "t", "t")
+    same = compare_series(info, dict(api), api, 0.005)
+    assert not same.adjustment_suspected and same.max_abs_diff == 0.0
+    assert "未见股息调整迹象" in format_results([same], "t", "t")
+
+
+def test_no_adjustment_check_for_fred():
+    info = SymbolInfo("VIX", "CBOE_DLY:VIX", api_source="fred:VIXCLS")
+    days = _daily(D(2020, 1, 1), 50)
+    r = compare_series(info, dict.fromkeys(days, 15.0), dict.fromkeys(days, 15.0), 0.005)
+    assert not r.check_adjustment and "股息调整检查" not in format_results([r], "t", "t")

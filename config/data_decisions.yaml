@@ -7,10 +7,12 @@
 #   reason      理由
 #   decided_on  裁定日期
 #
-# 未裁定的"债市休市日 OAS 数值与前一观测不同"仍按 SPEC 5.6 第10条提示；全部候选见 reports/oas_bond_holiday_audit.md。
+# 2026-09-27 起债市休市日的 OAS 观测按统一规则处理（SPEC 5.6 第10条）：一律排除，自然月末例外（v2-M 计入，v3-R1 不计入）。
+# 本表只用于规则无法覆盖或需要偏离规则的日期；表中裁定优先于规则。清单见 reports/holiday_calendar_audit.md 第三部分。
 
 - date: 2015-01-19
   symbol: BAMLH0A0HYM2
   decision: exclude
   reason: 马丁·路德·金纪念日；SIFMA 建议全天休市，财政部无数据，已确认为债市休市日
   decided_on: 2026-09-27
+  # 与 2026-09-27 的统一规则一致（一般债市休市日排除），保留作为记录
