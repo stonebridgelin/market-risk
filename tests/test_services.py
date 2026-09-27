@@ -120,9 +120,11 @@ def test_tv_services_with_injected_loader(ctx):
     with pytest.raises(services.ServiceError, match="api_source"):
         services.tv_compare(ctx, "S5FI", loader=lambda *a: {})
 
-    report = services.tv_crosscheck(ctx, loader=lambda *a: {}, now=dt.datetime(2026, 9, 27, tzinfo=dt.UTC))
+    report = services.tv_crosscheck(ctx, loader=lambda *a: {}, now=dt.datetime(2026, 9, 27, tzinfo=dt.UTC),
+                                    third_party=(None, "未配置"))
     assert report.path == ctx.paths.tv_crosscheck_md and report.path.exists()
-    assert all(r.status == "无法比对" for r in report.results)   # 尚未导入 crosscheck 标的
+    # 尚未导入 crosscheck 标的；口径不同的 DGS10 为"不适用"
+    assert {r.symbol: r.status for r in report.results if r.status != "无法比对"} == {"DGS10": "不适用"}
 
     def failing(*_):
         raise ConnectionError("down")

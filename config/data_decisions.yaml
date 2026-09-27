@@ -4,6 +4,7 @@
 #   date        日期
 #   symbol      标的（与 symbols.yaml 的 symbol 相同，如 BAMLH0A0HYM2）
 #   decision    exclude（排除该日观测，两个版本都不计入）/ keep（保留该日观测，不再提示）
+#               / invalid（无效数据：数据源错误，TradingView 导入时排除该行，对该标的该日期的所有导出文件生效）
 #   reason      理由
 #   decided_on  裁定日期
 #
@@ -16,3 +17,15 @@
   reason: 马丁·路德·金纪念日；SIFMA 建议全天休市，财政部无数据，已确认为债市休市日
   decided_on: 2026-09-27
   # 与 2026-09-27 的统一规则一致（一般债市休市日排除），保留作为记录
+
+- date: 2026-06-18
+  symbol: PCCE
+  decision: invalid
+  reason: 数据源错误：最低价与收盘价为 0（TradingView USI:PCCE，2026-09-26 导出），不重新导出
+  decided_on: 2026-09-27
+
+- date: 2026-07-02
+  symbol: PCCE
+  decision: invalid
+  reason: 数据源错误：最低价与收盘价为 0（TradingView USI:PCCE，2026-09-26 导出），不重新导出
+  decided_on: 2026-09-27

@@ -112,5 +112,6 @@ def test_move_versions_and_bond_holidays():
     gaps = {"HIGN": [D(2011, 8, 8)], "LOWN": [D(2010, 3, d) for d in (2, 3, 8)]}
     text = render([], "t", c, gaps)
     assert "## MOVE 两个版本比对" in text and "其他 1 个" in text
-    assert "2011-08-08  **剧烈波动日" in text and "2010-03（3 个）" in text
+    assert "2011-08-08  **剧烈波动日" in text and "**集中缺口**（同月 ≥3 个）：2010-03（3 个）" in text
+    assert "## 缺口清单（HIGN、LOWN）" in text
     assert missing_trading_days({}) == []

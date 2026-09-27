@@ -14,7 +14,7 @@ from pathlib import Path
 
 MARKET = "MARKET"
 RISK_SCORING = "risk_scoring"
-CACHE_SOURCES = ("yahoo", "fred", "treasury", "cboe")
+CACHE_SOURCES = ("yahoo", "fred", "treasury", "cboe", "tiingo")
 
 _SUBJECT_RE = re.compile(r"^[A-Z0-9]{1,10}([.\-][A-Z0-9]{1,5})?$")  # 如 NVDA、BRK.B
 _TV_SYMBOL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_\-]{0,39}$")  # 如 S5FI、ES1_、US10Y

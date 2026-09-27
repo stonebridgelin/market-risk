@@ -23,7 +23,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from market_risk import calendar as mcal
-from market_risk.config import SymbolInfo
+from market_risk.config import DataDecision, SymbolInfo
 from market_risk.storage.paths import StoragePaths
 
 NEW_YORK = ZoneInfo("America/New_York")
@@ -192,14 +192,27 @@ def _unregistered(tv_symbol: str) -> SymbolInfo:
     return SymbolInfo(symbol=symbol, tv_symbol=tv_symbol)
 
 
+def invalid_rows(decisions: Iterable[DataDecision]) -> dict[str, dict[dt.date, str]]:
+    """已裁定日期表中的无效数据（decision=invalid）：{标的: {日期: 理由}}。"""
+    out: dict[str, dict[dt.date, str]] = {}
+    for d in decisions:
+        if d.decision == "invalid":
+            out.setdefault(d.symbol, {})[d.date] = d.reason
+    return out
+
+
 def read_file(
     path: Path,
     export_date: dt.date,
     symbols: Mapping[str, SymbolInfo],
     root: Path,
     export_time: dt.datetime | None = None,
+    invalid: Mapping[str, Mapping[dt.date, str]] | None = None,
 ) -> FileReport:
-    """读取并校验一个导出文件（第5.1、5.2节）。不修改原始文件。"""
+    """读取并校验一个导出文件（第5.1、5.2节）。不修改原始文件。
+
+    invalid：已裁定为无效数据的行（按标的），读取后排除，并在说明中列出。
+    """
     data = path.read_bytes()
     try:
         rel = path.resolve().relative_to(root.resolve()).as_posix()
@@ -231,6 +244,9 @@ def read_file(
     except (TradingViewError, ValueError) as exc:
         report.add(FAILED, f"读取失败：{exc}")
         return report
+    for d, reason in sorted((invalid or {}).get(report.symbol, {}).items()):
+        if report.bars.pop(d, None) is not None:
+            report.add("info", f"按已裁定日期表排除无效数据 {d}（{reason}）")
     if not report.bars:
         report.add(FAILED, "文件中没有数据行")
         return report
@@ -601,6 +617,7 @@ def import_directory(
     export_date: dt.date | None = None,
     export_time: dt.datetime | None = None,
     now: dt.datetime | None = None,
+    decisions: Iterable[DataDecision] = (),
 ) -> ImportResult:
     """导入一个目录下的全部 CSV：校验、更新 manifest、重建清洗结果。原始文件不做任何修改。"""
     directory = directory.resolve()
@@ -617,8 +634,9 @@ def import_directory(
     imported_at = (now or dt.datetime.now(dt.UTC)).astimezone(dt.UTC).isoformat(timespec="seconds")
     manifest = read_manifest(paths.tv_manifest)
     new_reports = []
+    invalid = invalid_rows(decisions)
     for p in files:
-        rep = read_file(p, export_date, symbols, paths.root, export_time)
+        rep = read_file(p, export_date, symbols, paths.root, export_time, invalid)
         old = manifest.get(rep.file_path)
         row = manifest_row(rep, imported_at)
         if old is not None and old.get("sha256") and old["sha256"] != rep.sha256:
@@ -627,7 +645,7 @@ def import_directory(
         manifest[rep.file_path] = row
         new_reports.append(rep)
 
-    return rebuild(paths, symbols, manifest, new_reports, export_time)
+    return rebuild(paths, symbols, manifest, new_reports, export_time, decisions)
 
 
 def rebuild(
@@ -636,6 +654,7 @@ def rebuild(
     manifest: Mapping[str, Mapping[str, str]],
     fresh: list[FileReport] | None = None,
     export_time: dt.datetime | None = None,
+    decisions: Iterable[DataDecision] = (),
 ) -> ImportResult:
     """按 manifest 中的全部原始文件重建清洗结果（本次新读取的报告优先使用）。
 
@@ -645,6 +664,7 @@ def rebuild(
     by_path = {r.file_path: r for r in fresh or []}
     all_reports: list[FileReport] = []
     rows_out: dict[str, dict[str, str]] = {k: dict(v) for k, v in manifest.items()}
+    invalid = invalid_rows(decisions)
     for rel, row in manifest.items():
         rep = by_path.get(rel)
         if rep is None:
@@ -652,7 +672,7 @@ def rebuild(
             if not p.exists():
                 continue
             rep = read_file(p, dt.date.fromisoformat(row["export_date"]), symbols, paths.root,
-                            export_time)
+                            export_time, invalid)
             if row.get("sha256") and row["sha256"] != rep.sha256:
                 rep.add(FAILED, "原始文件与上次导入时不同（sha256 不符），原始文件不得修改")
             rows_out[rel] = {**manifest_row(rep, row.get("imported_at", "")),

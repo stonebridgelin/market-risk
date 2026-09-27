@@ -175,10 +175,11 @@ class SymbolInfo:
     known_values: dict[dt.date, float] | None = None
     api_source: str | None = None      # 交叉校验用的接口数据，如 yahoo:SPY、fred:BAMLH0A0HYM2
     tolerance: float = 0.005           # 交叉校验容差
+    crosscheck_note: str | None = None  # 口径不同、交叉校验"不适用"的原因
 
 
 DEFAULT_DECISIONS_PATH = PROJECT_ROOT / "config" / "data_decisions.yaml"
-_DECISIONS = {"exclude", "keep"}
+_DECISIONS = {"exclude", "keep", "invalid"}
 
 
 @dataclass(frozen=True)
@@ -187,7 +188,7 @@ class DataDecision:
 
     date: dt.date
     symbol: str
-    decision: str          # exclude / keep
+    decision: str          # exclude / keep / invalid（无效数据：TradingView 导入时排除该行）
     reason: str
     decided_on: dt.date
 
@@ -247,6 +248,7 @@ def load_symbols(path: Path = DEFAULT_SYMBOLS_PATH) -> dict[str, SymbolInfo]:
                 filename_aliases=tuple(str(a) for a in item.get("filename_aliases") or ()),
                 api_source=item.get("api_source"),
                 tolerance=float(item.get("tolerance", 0.005)),
+                crosscheck_note=item.get("crosscheck_note"),
                 known_values={
                     _one_date(d, "known_values"): float(v)
                     for d, v in (item.get("known_values") or {}).items()
@@ -264,6 +266,18 @@ def load_symbols(path: Path = DEFAULT_SYMBOLS_PATH) -> dict[str, SymbolInfo]:
             raise ConfigError(f"{path} 中 {info.tv_symbol} 重复登记")
         result[info.tv_symbol] = info
     return result
+
+
+def get_optional_secret(name: str, placeholder: str = "", env_path: Path | None = None) -> str | None:
+    """从 .env 或环境变量读取可选的密钥或连接地址；未设置（或仍为占位符）时返回 None。不输出其内容。"""
+    load_dotenv(env_path or PROJECT_ROOT / ".env", override=False)
+    value = os.environ.get(name, "").strip()
+    return None if not value or value == placeholder else value
+
+
+def get_tiingo_api_key(env_path: Path | None = None) -> str | None:
+    """TIINGO_API_KEY（可选）：只用于 tv crosscheck 的第三方收盘价核对。"""
+    return get_optional_secret("TIINGO_API_KEY", "your_tiingo_api_key_here", env_path)
 
 
 def get_fred_api_key(env_path: Path | None = None) -> str:

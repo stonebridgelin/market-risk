@@ -6,7 +6,8 @@
 3. 节假日（非 NYSE 交易日）有数据的日期是否都落在单值阶段内；
 4. 重复值：交易日收盘值与前一个交易日完全相同的日期（全部历史），与离散取值下的偶然期望对照。
    结论（2026-09-27）：S5FI、S5TW 重复值属偶然，不标注；NC 系列明显偏多，更可能是陈旧值（仅作参考，不参与评分）。
-另有：MOVE 两个版本（ICE_DLY 与 TVC）的比对、ICE 版本缺失日与债市休市日对照、新高新低家数（HIGN、LOWN）缺口清单。
+另有：MOVE 两个版本（MOVE_ICE 与 MOVE_TVC，均为参考）的比对、各版本缺失日与债市休市日对照、
+新高新低家数（HIGN、LOWN）与 VIX3M、SKEW 的缺口清单（列出集中缺口）。
 """
 
 from __future__ import annotations
@@ -207,7 +208,7 @@ def compare_versions(primary: str, alternative: str, a: Mapping[dt.date, float],
 
 
 def render_move(c: VersionComparison) -> list[str]:
-    lines = [f"## MOVE 两个版本比对（{c.primary} 主，{c.alternative} 备用）", "",
+    lines = [f"## MOVE 两个版本比对（{c.primary} 与 {c.alternative}；均为参考，不指定主数据源）", "",
              f"- 重叠日期 {c.overlap} 个；不一致（两位小数，差值 > 0.005）{len(c.mismatches)} 个；"
              f"最大差值 {c.max_abs_diff:.2f}。"]
     if c.mismatches:
@@ -229,7 +230,7 @@ def render_move(c: VersionComparison) -> list[str]:
 
 
 def render_gaps(gaps: Mapping[str, list[dt.date]]) -> list[str]:
-    lines = ["## 新高新低家数（HIGN、LOWN）缺口清单", "",
+    lines = [f"## 缺口清单（{'、'.join(gaps)}）", "",
              "缺口 = 数据范围内缺失的 NYSE 交易日。剧烈波动日缺失需特别留意"
              "（这些日子的新高新低家数最有参考价值）。", ""]
     for sym, ds in gaps.items():
@@ -242,7 +243,7 @@ def render_gaps(gaps: Mapping[str, list[dt.date]]) -> list[str]:
             by_month[(d.year, d.month)] = by_month.get((d.year, d.month), 0) + 1
         dense = [f"{y}-{m:02d}（{n} 个）" for (y, m), n in sorted(by_month.items()) if n >= 3]
         if dense:
-            lines.append(f"- 集中缺口（同月 ≥3 个）：{'、'.join(dense)}")
+            lines.append(f"- **集中缺口**（同月 ≥3 个）：{'、'.join(dense)}")
         lines.append("")
     return lines
 

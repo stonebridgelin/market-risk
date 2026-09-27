@@ -261,3 +261,14 @@ def test_missing_ratio_symbol_and_breadth_noted():
     assert snap.hyg_lqd is None
     assert any("HYG/LQD" in n for n in snap.data_notes)
     assert any("S5FI" in n for n in snap.data_notes)
+
+
+def test_vix_t5_uses_stock_trading_days_2022_06_24():
+    """VIXCLS 在部分股市休市日也有数值（Cboe 延长交易时段，如 2022-06-20 六月节）：
+    V、V5 按股票交易日取值。基准日 2022-06-24 的 V5 取 2022-06-16（跳过 06-20），不取 06-17 或 06-20。"""
+    base = D(2022, 6, 24)
+    raw = synthetic_raw(base)
+    vix = {**raw.vix_fred, D(2022, 6, 16): 30.0, D(2022, 6, 17): 31.0, D(2022, 6, 20): 32.0, base: 29.0}
+    snap = build_snapshot(dataclasses.replace(raw, vix_fred=vix))
+    assert snap.refs.t_minus_5 == D(2022, 6, 16)
+    assert (snap.vix, snap.vix_t5) == (29.0, 30.0)

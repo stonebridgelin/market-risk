@@ -16,7 +16,15 @@ from pathlib import Path
 from typing import Any
 
 from market_risk import calendar as mcal
-from market_risk.config import MarketHolidays, Settings, SymbolInfo, load_holidays, load_settings, load_symbols
+from market_risk.config import (
+    MarketHolidays,
+    Settings,
+    SymbolInfo,
+    load_data_decisions,
+    load_holidays,
+    load_settings,
+    load_symbols,
+)
 from market_risk.models import BreadthReading, DateReferences, MarketSnapshot
 from market_risk.storage.paths import MARKET, RISK_SCORING, StoragePaths
 
@@ -211,7 +219,8 @@ def tv_import(ctx: Context, directory: Path, export_date: dt.date | None = None,
     from market_risk.data import tradingview as tv
 
     try:
-        return tv.import_directory(directory, ctx.paths, symbols or load_symbols(), export_date, export_time)
+        return tv.import_directory(directory, ctx.paths, symbols or load_symbols(), export_date, export_time,
+                                   decisions=load_data_decisions())
     except tv.TradingViewError as exc:
         raise ServiceError(str(exc)) from exc
 
@@ -223,7 +232,7 @@ def tv_validate(ctx: Context, symbol: str | None = None) -> Any | None:
     manifest = tv.read_manifest(ctx.paths.tv_manifest)
     if not manifest:
         return None
-    result = tv.rebuild(ctx.paths, load_symbols(), manifest)
+    result = tv.rebuild(ctx.paths, load_symbols(), manifest, decisions=load_data_decisions())
     if symbol:
         result.reports = [r for r in result.reports if r.symbol.upper() == symbol.upper()]
     return result
@@ -269,6 +278,10 @@ def compare_symbols(ctx: Context, infos: list[SymbolInfo], loader: ApiLoader) ->
     for info in infos:
         series = tv.read_processed(ctx.paths, info.symbol)
         base = CompareResult(info.symbol, info.tv_symbol, info.api_source or "", info.tolerance)
+        if info.crosscheck_note:
+            base.not_applicable = info.crosscheck_note
+            results.append(base)
+            continue
         if not series:
             base.error = "尚未导入该标的的 TradingView 数据"
             results.append(base)
@@ -304,13 +317,64 @@ def tv_compare(ctx: Context, symbol: str, refresh: bool = False, loader: ApiLoad
     return CompareReport(results, text, path)
 
 
+ThirdPartyLoader = Callable[[str, dt.date, dt.date], Mapping[dt.date, float | None]]
+
+
+def _default_third_party(ctx: Context, refresh: bool) -> tuple[ThirdPartyLoader | None, str]:  # pragma: no cover
+    """第三方不复权收盘价：Tiingo（需 .env 中的 TIINGO_API_KEY；未设置时不核对）。"""
+    from market_risk.config import get_tiingo_api_key
+    from market_risk.data import tiingo
+
+    key = get_tiingo_api_key()
+    if key is None:
+        return None, "未配置 TIINGO_API_KEY，第三方核对未做"
+
+    def load(ticker: str, start: dt.date, end: dt.date) -> Mapping[dt.date, float | None]:
+        return tiingo.fetch_closes(ctx.paths, ticker, start, end, key, refresh,
+                                   ctx.settings.max_retries, ctx.settings.backoff_seconds)
+
+    return load, "Tiingo close"
+
+
+def third_party_checks(results: list[Any], infos: Mapping[str, SymbolInfo],
+                       loader: ThirdPartyLoader | None, source: str) -> None:
+    """对回测区间内差值超过 0.02 的日期取第三方不复权收盘价（先用已知读数验证不复权），结果写入各 CompareResult。"""
+    from market_risk.data.tiingo import verify_unadjusted
+    from market_risk.data.tv_compare import ThirdPartyCheck
+
+    for r in results:
+        items = r.listed_dates()
+        if not items:
+            continue
+        if loader is None:
+            r.third_party_note = source
+            continue
+        known = infos[r.symbol].known_values or {}
+        start = min(items[0][0], *known) if known else items[0][0]
+        end = max(items[-1][0], *known) if known else items[-1][0]
+        try:
+            closes = loader(r.symbol, start, end)
+        except Exception as exc:  # 第三方失败只写入报告
+            r.third_party_note = f"第三方数据获取失败：{exc}"
+            continue
+        problems = verify_unadjusted(closes, known) if known else ["没有已知读数，无法验证是否不复权"]
+        if problems:
+            r.third_party_note = f"{source} 未通过不复权验证（{'；'.join(problems)}），不采用"
+            continue
+        r.third_party_note = f"{source} 已用已知读数验证为不复权（{len(known)} 个读数全部相符）"
+        r.third_party = [ThirdPartyCheck(d, a, b, closes.get(d), source) for d, a, b, _ in items]
+
+
 def tv_crosscheck(ctx: Context, refresh: bool = False, loader: ApiLoader | None = None,
-                  now: dt.datetime | None = None) -> CompareReport:
+                  now: dt.datetime | None = None,
+                  third_party: tuple[ThirdPartyLoader | None, str] | None = None) -> CompareReport:
     """全部 crosscheck 标的比对，写 reports/tradingview_crosscheck.md。"""
     from market_risk.data.tv_compare import format_results
 
     infos = [s for s in load_symbols().values() if s.usage == "crosscheck" and s.api_source]
     results = compare_symbols(ctx, infos, loader or _default_api_loader(ctx, refresh))
+    tp_loader, tp_source = third_party or _default_third_party(ctx, refresh)
+    third_party_checks(results, {s.symbol: s for s in infos}, tp_loader, tp_source)
     stamp = (now or dt.datetime.now(dt.UTC)).isoformat(timespec="seconds")
     text = format_results(results, "TradingView 交叉校验", stamp)
     _write_report(ctx.paths.tv_crosscheck_md, text)
@@ -338,7 +402,7 @@ def tv_quality(ctx: Context, now: dt.datetime | None = None) -> QualityReport:
         if bars:
             results.append(analyze(info.symbol, bars))
     move = None
-    ice, alt = tv.read_processed(ctx.paths, "MOVE"), tv.read_processed(ctx.paths, "MOVE_TVC")
+    ice, alt = tv.read_processed(ctx.paths, "MOVE_ICE"), tv.read_processed(ctx.paths, "MOVE_TVC")
     if ice and alt:
         from market_risk.data.calendar_audit import sifma_rule_holidays
 
@@ -346,8 +410,9 @@ def tv_quality(ctx: Context, now: dt.datetime | None = None) -> QualityReport:
         known = load_holidays().bond_holidays
         first_year = min(known).year if known else max(ice).year + 1
         early = {d for y in range(min(ice).year, first_year) for d in sifma_rule_holidays(y)}
-        move = compare_versions("ICE_DLY:MOVE", "TVC:MOVE", ice, alt, known | early)
-    gaps = {s: missing_trading_days(c) for s in ("HIGN", "LOWN") if (c := tv.read_processed(ctx.paths, s))}
+        move = compare_versions("MOVE_ICE（ICE_DLY:MOVE）", "MOVE_TVC（TVC:MOVE）", ice, alt, known | early)
+    gaps = {s: missing_trading_days(c) for s in ("HIGN", "LOWN", "VIX3M", "SKEW")
+            if (c := tv.read_processed(ctx.paths, s))}
     stamp = (now or dt.datetime.now(dt.UTC)).isoformat(timespec="seconds")
     text = render(results, stamp, move, gaps)
     _write_report(ctx.paths.tv_quality_md, text)
@@ -392,7 +457,7 @@ def audit_calendar(ctx: Context, start_year: int = 2008, oas_start_year: int = 1
                    loader: TreasuryLoader | None = None, holidays_path: Path | None = None,
                    now: dt.datetime | None = None) -> CalendarAuditReport:
     """补齐休市日历并与 SIFMA 常见规则对照；列出 1997 年以来债市休市日 OAS 数值不同的情况（只列出，不修正）。"""
-    from market_risk.config import DEFAULT_HOLIDAYS_PATH, load_data_decisions
+    from market_risk.config import DEFAULT_HOLIDAYS_PATH
     from market_risk.data import calendar_audit as ca
     from market_risk.data import tradingview as tv
 

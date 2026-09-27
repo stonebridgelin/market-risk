@@ -12,6 +12,7 @@
 #   inception     标的起始日期（可选），用于提示"历史是否已完整加载"
 #   filename_aliases  文件名无法按"交易所_代码, 周期.csv"解析时，在此登记文件名前缀
 #   known_values  已知读数（收盘值），用于校验数值与日期是否对齐（容差 0.005）
+#   crosscheck_note  口径不同、交叉校验"不适用"的原因（tv crosscheck 标为"不适用"，不再报"无法比对"）
 #
 # 文件名解析：带 _DLY 的延迟数据源前缀整体作为数据源（ICE_DLY_MOVE → ICE_DLY:MOVE）。
 # BATS = Cboe BZX 交易所：BATS 的成交量只含 Cboe BZX 一家交易所，不得用于成交量计算；
@@ -126,6 +127,7 @@
   calendar: bond
   api_source: treasury:10Y
   tolerance: 0.0
+  crosscheck_note: 未导出 FRED:DGS10；TradingView 的 TVC:US10Y 为市场报价，与财政部官方值口径不同，不做比对
   known_values: {2025-08-29: 4.23, 2025-09-26: 4.20, 2025-10-03: 4.13, 2025-10-31: 4.11, 2025-11-28: 4.02}
 - symbol: US10Y
   tv_symbol: TVC:US10Y
@@ -255,9 +257,9 @@
   inception: 2013-10-14   # TradingView 导出的最早日期
 
 # ---- reference：波动率、市场内部指标与指数（2026-09-26 导出，只保存，不参与计算）----
-- symbol: MOVE
+- symbol: MOVE_ICE
   tv_symbol: ICE_DLY:MOVE
-  name: ICE BofA MOVE 指数（美债隐含波动率，主版本）
+  name: ICE BofA MOVE 指数（美债隐含波动率，ICE 延迟数据版本；与 MOVE_TVC 均为参考，不指定主数据源）
   category: volatility
   usage: reference
   unit: index
@@ -267,7 +269,7 @@
   # 见 reports/tradingview_data_quality.md；2013-08-22 为 98.30（TVC 版本 58.30），疑似录入错误
 - symbol: MOVE_TVC
   tv_symbol: TVC:MOVE
-  name: MOVE 指数（TVC 版本，备用）
+  name: MOVE 指数（TVC 版本；与 MOVE_ICE 均为参考，不指定主数据源）
   category: volatility
   usage: reference
   unit: index

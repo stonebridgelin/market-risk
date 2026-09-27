@@ -90,7 +90,7 @@ def test_registered_new_symbols_resolve():
     """2026-09-26 导出的新标的都能按登记解析；两个 MOVE 版本是不同标的。"""
     expect = {
         "BATS:SPY": "SPY", "BATS:QQQ": "QQQ", "BATS:RSP": "RSP", "BATS:HYG": "HYG", "BATS:LQD": "LQD",
-        "CBOE_DLY:VIX": "VIX", "ICE_DLY:MOVE": "MOVE", "TVC:MOVE": "MOVE_TVC", "SP_DLY:SPX": "SPX",
+        "CBOE_DLY:VIX": "VIX", "ICE_DLY:MOVE": "MOVE_ICE", "TVC:MOVE": "MOVE_TVC", "SP_DLY:SPX": "SPX",
         "NASDAQ_DLY:NDX": "NDX", "USI:ADD": "ADD", "INDEX:HIGN": "HIGN", "TVC:US02Y": "US02Y",
     }
     for tv_symbol, symbol in expect.items():
@@ -110,10 +110,10 @@ def test_rebuild_corrects_old_symbol_and_removes_orphans(paths):
     orphan.parent.mkdir(parents=True, exist_ok=True)
     orphan.write_text("date,close\n", encoding="utf-8")
     result = tv.rebuild(paths, SYMBOLS, tv.read_manifest(paths.tv_manifest))
-    assert result.processed == {"MOVE": 2}
-    assert not orphan.exists() and paths.tv_processed_file("MOVE").exists()
+    assert result.processed == {"MOVE_ICE": 2}
+    assert not orphan.exists() and paths.tv_processed_file("MOVE_ICE").exists()
     row = tv.read_manifest(paths.tv_manifest)[rel]
-    assert (row["tv_symbol"], row["symbol"]) == ("ICE_DLY:MOVE", "MOVE")
+    assert (row["tv_symbol"], row["symbol"]) == ("ICE_DLY:MOVE", "MOVE_ICE")
     assert row["imported_at"] == "2026-09-26T00:00:00+00:00"   # 保留原导入时间
     assert row["sha256"]
 
@@ -416,3 +416,26 @@ def test_cli_tv_import_list_validate(paths, monkeypatch):
     assert r.exit_code == 2
     r = runner.invoke(cli.app, ["tv", "import", "--dir", str(paths.root)])
     assert r.exit_code == 1
+
+
+def test_invalid_rows_excluded_by_decision(paths):
+    """已裁定为无效数据（decision=invalid）的行在导入时排除，其余正常写入；汇总中以说明列出。"""
+    from market_risk.config import DataDecision
+
+    text = ("time,open,high,low,close\n2026-06-17,0.55,0.75,0.53,0.74\n"
+            "2026-06-18,0.74,0.78,0,0\n2026-06-22,0.63,0.75,0.61,0.74\n")
+    put(paths, None, name="USI_PCCE, 1D.csv", text=text)
+    dec = DataDecision(D(2026, 6, 18), "PCCE", "invalid", "数据源错误：收盘价为 0", D(2026, 9, 27))
+    other = DataDecision(D(2026, 6, 17), "PCC", "invalid", "其他标的", D(2026, 9, 27))
+    result = tv.import_directory(paths.tv_raw_dir(EXPORT), paths, SYMBOLS, decisions=[dec, other])
+    rep = result.reports[0]
+    assert rep.status == tv.WARNING                       # 仍缺 NYSE 交易日，但不再失败
+    assert D(2026, 6, 18) not in rep.bars and D(2026, 6, 17) in rep.bars
+    assert any("排除无效数据 2026-06-18" in m for m in issues(rep, "info"))
+    assert "排除无效数据 2026-06-18" in tv.format_import_summary(result)
+    assert set(tv.read_processed(paths, "PCCE")) == {D(2026, 6, 17), D(2026, 6, 22)}
+    # 重建时同样生效
+    again = tv.rebuild(paths, SYMBOLS, tv.read_manifest(paths.tv_manifest), decisions=[dec])
+    assert again.processed == {"PCCE": 2}
+    without = _one(paths, "USI_PCCE, 1D.csv", text)
+    assert without.status == tv.FAILED

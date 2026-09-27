@@ -197,3 +197,74 @@ def test_no_adjustment_check_for_fred():
     days = _daily(D(2020, 1, 1), 50)
     r = compare_series(info, dict.fromkeys(days, 15.0), dict.fromkeys(days, 15.0), 0.005)
     assert not r.check_adjustment and "股息调整检查" not in format_results([r], "t", "t")
+
+
+def test_period_stats_and_listed_dates():
+    """按 2008-08-01 分段统计；回测区间内 |差值| > 0.02 的日期（SPY、QQQ、RSP）全部列出。"""
+    info = SymbolInfo("SPY", "BATS:SPY", api_source="yahoo:SPY")
+    days = [D(2008, 7, 30), D(2008, 7, 31), D(2008, 8, 1), D(2009, 7, 16), D(2012, 1, 20), D(2015, 8, 24)]
+    api = dict.fromkeys(days, 100.0)
+    tv = {**api, D(2008, 7, 31): 100.5, D(2008, 8, 1): 100.02, D(2009, 7, 16): 101.04,
+          D(2012, 1, 20): 99.59, D(2015, 8, 24): 100.01}
+    r = compare_series(info, tv, api, 0.005)
+    before, after = r.periods()
+    assert (before.overlap, before.mismatches, before.max_abs_diff, before.over_report) == (2, 1, 0.5, 1)
+    assert (after.overlap, after.mismatches, after.over_report, after.positive, after.negative) == (4, 4, 3, 3, 1)
+    assert after.max_abs_diff == 1.04
+    assert [m[0] for m in r.listed_dates()] == [D(2009, 7, 16), D(2012, 1, 20)]   # 2008-08-01 差 0.02 不列
+    text = format_results([r], "t", "t")
+    assert "## 按时期统计" in text and "2008-08-01 起（回测区间）" in text and "| 2009-07-16 |" in text
+    hyg = compare_series(SymbolInfo("HYG", "BATS:HYG", api_source="yahoo:HYG"), tv, api, 0.005)
+    assert hyg.listed_dates() == []
+
+
+def test_crosscheck_not_applicable_and_third_party(paths, monkeypatch):
+    """口径不同的标的标为"不适用"；第三方数据先用已知读数验证不复权，再判断哪一方正确。"""
+    from market_risk import services
+
+    known = {D(2025, 10, 31): 682.06, D(2025, 11, 28): 683.39}
+    symbols = {
+        "BATS:SPY": SymbolInfo("SPY", "BATS:SPY", usage="crosscheck", api_source="yahoo:SPY", known_values=known),
+        "FRED:DGS10": SymbolInfo("DGS10", "FRED:DGS10", usage="crosscheck", api_source="treasury:10Y",
+                                 crosscheck_note="口径不同"),
+    }
+    monkeypatch.setattr(services, "load_symbols", lambda: symbols)
+    days = [D(2009, 7, 15), D(2009, 7, 16), D(2012, 1, 20), *known]
+    api = {**dict.fromkeys(days, 100.0), **known}
+    tv_rows = {**api, D(2009, 7, 16): 101.04, D(2012, 1, 20): 99.59}
+    out = paths.tv_processed_file("SPY")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("date,close\n" + "".join(f"{d},{v}\n" for d, v in sorted(tv_rows.items())), encoding="utf-8")
+    from market_risk.config import load_settings
+    from market_risk.storage import db
+
+    ctx = services.Context(load_settings(), paths, db.sqlite_url(paths.root / "db" / "m.sqlite"))
+    third = {**known, D(2009, 7, 16): 100.0, D(2012, 1, 20): 99.59}
+    report = services.tv_crosscheck(ctx, loader=lambda info, s, e: api,
+                                    third_party=(lambda sym, s, e: third, "测试来源"))
+    spy, dgs = report.results
+    assert dgs.status == "不适用" and "不适用" in report.text and "无法比对" not in report.text
+    assert [c.verdict for c in spy.third_party] == ["Yahoo 正确", "TradingView 正确"]
+    assert "已用已知读数验证为不复权" in spy.third_party_note
+    # 第三方未通过不复权验证：不采用
+    bad = {**third, D(2025, 10, 31): 679.5}
+    report = services.tv_crosscheck(ctx, loader=lambda info, s, e: api,
+                                    third_party=(lambda sym, s, e: bad, "测试来源"))
+    assert report.results[0].third_party == [] and "未通过不复权验证" in report.results[0].third_party_note
+    report = services.tv_crosscheck(ctx, loader=lambda info, s, e: api, third_party=(None, "未配置"))
+    assert report.results[0].third_party_note == "未配置"
+
+
+def test_tiingo_parse_and_verify():
+    from market_risk.data import tiingo
+    from market_risk.data.cache import DataFetchError
+
+    text = ('[{"date": "2025-10-31T00:00:00.000Z", "close": 682.06, "adjClose": 675.1},'
+            ' {"date": "2025-11-28T00:00:00.000Z", "close": 683.39, "adjClose": 676.4}]')
+    closes = tiingo.parse_prices(text)
+    assert closes == {D(2025, 10, 31): 682.06, D(2025, 11, 28): 683.39}          # 取 close，不取 adjClose
+    assert tiingo.verify_unadjusted(closes, {D(2025, 10, 31): 682.06}) == []
+    assert tiingo.verify_unadjusted(closes, {D(2025, 10, 31): 680.0, D(2025, 9, 26): 661.82}) == [
+        "2025-09-26 无数据", "2025-10-31 为 682.06，已知读数 680.0"]
+    with pytest.raises(DataFetchError):
+        tiingo.parse_prices("not json token=abc")

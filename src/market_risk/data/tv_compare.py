@@ -19,6 +19,49 @@ MAX_LISTED = 20
 ADJ_MIN_REL = 0.0005        # 偏差小于 0.05% 视为一致（两位小数的舍入误差）
 ADJ_NEG_SHARE = 0.8         # 有偏差的日期中 TV 偏低的比例 ≥ 80% 视为"系统性偏低"
 ADJ_TREND = 0.005           # 最早 10% 日期的平均偏差比最近 10% 低 0.5 个百分点以上，视为"偏差随时间向前变大"
+# 按时期统计：逐日回测区间从 2008-08-01（含）开始
+BACKTEST_START = dt.date(2008, 8, 1)
+DIFF_REPORT = 0.01          # 统计"差值绝对值超过 0.01"的天数
+DIFF_LIST = 0.02            # 回测区间内差值绝对值超过 0.02 的日期全部列出（只对 LIST_SYMBOLS）
+LIST_SYMBOLS = ("SPY", "QQQ", "RSP")
+
+
+@dataclass(frozen=True)
+class PeriodStats:
+    """一个时期内的差异统计；差值 = TradingView − 接口。"""
+
+    label: str
+    overlap: int
+    mismatches: int
+    max_abs_diff: float
+    over_report: int            # |差值| > 0.01
+    positive: int
+    negative: int
+
+
+@dataclass(frozen=True)
+class ThirdPartyCheck:
+    """第三方不复权收盘价核对：判断 Yahoo 与 TradingView 哪一方正确。"""
+
+    date: dt.date
+    tv: float
+    api: float
+    third: float | None
+    source: str
+
+    @property
+    def verdict(self) -> str:
+        if self.third is None:
+            return "第三方无数据"
+        t = round(self.third, 2)
+        tv_ok, api_ok = abs(t - self.tv) <= 0.005, abs(t - self.api) <= 0.005
+        if tv_ok and api_ok:
+            return "三方一致"
+        if api_ok:
+            return "Yahoo 正确"
+        if tv_ok:
+            return "TradingView 正确"
+        return "三方都不同"
 
 
 @dataclass
@@ -39,6 +82,28 @@ class CompareResult:
     rel_last: float | None = None               # 最近 10% 重叠日期的平均相对偏差
     neg_share: float | None = None              # 有偏差的日期中 TV 偏低的比例
     check_adjustment: bool = False              # 是否做股息调整检查（接口为 Yahoo 不复权收盘价）
+    overlap_before: int = 0                     # 2008-08-01 之前的重叠天数
+    overlap_after: int = 0                      # 2008-08-01（含）之后的重叠天数
+    not_applicable: str | None = None           # 口径不同、不做比对的原因
+    third_party: list[ThirdPartyCheck] = field(default_factory=list)
+    third_party_note: str | None = None         # 第三方核对未做或部分未做的说明
+
+    def periods(self) -> list[PeriodStats]:
+        """按时期分段：2008-08-01 之前、之后（逐日回测区间，含 2008-08-01）。"""
+        out = []
+        for label, keep, n in ((f"{BACKTEST_START} 之前", lambda d: d < BACKTEST_START, self.overlap_before),
+                               (f"{BACKTEST_START} 起（回测区间）", lambda d: d >= BACKTEST_START, self.overlap_after)):
+            diffs = [diff for d, _, _, diff in self.mismatches if keep(d)]
+            out.append(PeriodStats(label, n, len(diffs), max((abs(x) for x in diffs), default=0.0),
+                                   sum(1 for x in diffs if abs(x) > DIFF_REPORT + 1e-9),
+                                   sum(1 for x in diffs if x > 0), sum(1 for x in diffs if x < 0)))
+        return out
+
+    def listed_dates(self) -> list[tuple[dt.date, float, float, float]]:
+        """回测区间内差值绝对值超过 0.02 的日期（SPY、QQQ、RSP）。"""
+        if self.symbol not in LIST_SYMBOLS:
+            return []
+        return [m for m in self.mismatches if m[0] >= BACKTEST_START and abs(m[3]) > DIFF_LIST + 1e-9]
 
     @property
     def adjustment_suspected(self) -> bool:
@@ -53,6 +118,8 @@ class CompareResult:
 
     @property
     def status(self) -> str:
+        if self.not_applicable:
+            return "不适用"
         if self.error:
             return "无法比对"
         if self.overlap == 0:
@@ -74,6 +141,8 @@ def compare_series(
         return res
     common = sorted(d for d in tv if lo <= d <= hi and d in api_valued)
     res.overlap = len(common)
+    res.overlap_before = sum(1 for d in common if d < BACKTEST_START)
+    res.overlap_after = res.overlap - res.overlap_before
     res.first, res.last = (common[0], common[-1]) if common else (None, None)
     for d in common:
         a, b = round(tv[d], 2), round(api_valued[d], 2)
@@ -131,6 +200,37 @@ def format_results(results: list[CompareResult], title: str, generated_at: str) 
                      f"{len(r.mismatches)} | {r.max_abs_diff:.2f} | {r.mismatches[-1][0] if r.mismatches else '-'} | "
                      f"{sum(1 for m in r.mismatches if m[0].year >= 2010)} | "
                      f"{len(r.tv_only)} | {len(r.api_only)} | {r.status} |")
+    compared = [r for r in results if r.overlap]
+    if compared:
+        lines += ["", "## 按时期统计", "",
+                  f"差值 = TradingView − 接口（两位小数）。不一致：|差值| 超过容差；"
+                  f"\"> {DIFF_REPORT}\"：|差值| 超过 {DIFF_REPORT}。", "",
+                  "| 标的 | 时期 | 重叠天数 | 不一致 | 最大 |差值| | |差值| > 0.01 | 正差值 | 负差值 |",
+                  "|---|---|---|---|---|---|---|---|"]
+        for r in compared:
+            for s in r.periods():
+                lines.append(f"| {r.symbol} | {s.label} | {s.overlap} | {s.mismatches} | {s.max_abs_diff:.2f} | "
+                             f"{s.over_report} | {s.positive} | {s.negative} |")
+    listed = [r for r in results if r.listed_dates()]
+    if listed or any(r.symbol in LIST_SYMBOLS for r in compared):
+        lines += ["", f"## 回测区间内差值超过 {DIFF_LIST} 的日期（{'、'.join(LIST_SYMBOLS)}）与第三方核对", ""]
+        for r in (x for x in compared if x.symbol in LIST_SYMBOLS):
+            items = r.listed_dates()
+            lines.append(f"### {r.symbol}（{len(items)} 个）")
+            lines.append("")
+            if not items:
+                lines += ["无", ""]
+                continue
+            checks = {c.date: c for c in r.third_party}
+            lines += ["| 日期 | TradingView | Yahoo | 差值 | 第三方 | 来源 | 判断 |", "|---|---|---|---|---|---|---|"]
+            for d, a, b, diff in items:
+                c = checks.get(d)
+                third = "-" if c is None or c.third is None else f"{c.third:.2f}"
+                lines.append(f"| {d} | {a:.2f} | {b:.2f} | {diff:+.2f} | {third} | {c.source if c else '-'} | "
+                             f"{c.verdict if c else '未核对'} |")
+            if r.third_party_note:
+                lines.append(f"\n{r.third_party_note}")
+            lines.append("")
     adj = [r for r in results if r.check_adjustment and r.rel_first is not None]
     if adj:
         lines += ["", "## 股息调整检查（ETF）", "",
@@ -142,6 +242,9 @@ def format_results(results: list[CompareResult], title: str, generated_at: str) 
             verdict = "疑似开启了股息调整" if r.adjustment_suspected else "未见股息调整迹象"
             lines.append(f"| {r.symbol} | {r.rel_first:+.4%} | {r.rel_last:+.4%} | {r.neg_share:.0%} | {verdict} |")
     for r in results:
+        if r.not_applicable:
+            lines += ["", f"## {r.symbol}：不适用", "", f"- {r.not_applicable}"]
+            continue
         if r.error or r.mismatches or r.tv_only or r.api_only:
             lines += ["", f"## {r.symbol}（容差 {r.tolerance}）"]
             if r.error:
