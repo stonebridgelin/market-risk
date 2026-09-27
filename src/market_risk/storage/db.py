@@ -1,56 +1,149 @@
-"""SQLite 统计数据库（docs/STORAGE.md 第4节）。
+"""统计数据库（docs/STORAGE.md 第4节）。**所有数据库读写集中在本模块**（storage/）。
+
+约定：
+- 使用 SQLAlchemy Core，连接地址来自 .env 的 DATABASE_URL，其次 settings.yaml 的 database.url，
+  默认 sqlite:///db/market_risk.sqlite（相对路径以存储根目录为基准）；
+- 不使用任何数据库的专有语法；小数用 Numeric；表结构由 Alembic 迁移管理（migrations/）；
+- SQLite 开启 WAL 模式（仅在连接 SQLite 时设置）。
 
 数据库内容全部可由文件重建（rebuild）：
-- results/**/run_*/（meta.json、scores.json、snapshot.json 或 metrics.json）与 official.json → runs、dimension_scores、
-  totals、metrics、near_threshold；
-- data/manual/outcomes.csv → outcomes；data/materials/index.csv → materials；data/manual/reviews.csv → reviews。
+results/**/run_*/ 与 official.json → runs、officials、dimension_scores、totals、metrics、near_threshold；
+data/manual/outcomes.csv → outcomes；data/materials/index.csv → materials；data/manual/reviews.csv → reviews。
 """
 
 from __future__ import annotations
 
 import csv
+import datetime as dt
 import json
-import sqlite3
+import os
+import warnings
 from collections.abc import Iterator
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import Engine, create_engine, event, exc, inspect, select, text
+from sqlalchemy.engine import Connection, make_url
+
 from market_risk.metrics import metrics_from_snapshot_json
+from market_risk.storage import schema
 from market_risk.storage.paths import RUN_FILES, StoragePaths
 from market_risk.storage.runs import read_json
 
-SCHEMA = """
-CREATE TABLE runs (
-    run_key TEXT PRIMARY KEY, run_id TEXT, subject TEXT, framework TEXT, base_date TEXT, mode TEXT,
-    created_at_utc TEXT, created_at_local TEXT, git_commit TEXT, git_dirty INTEGER,
-    data_source_type TEXT, status TEXT, run_dir TEXT, is_official INTEGER, reviewed INTEGER,
-    official_set_by TEXT
-);
-CREATE TABLE dimension_scores (
-    run_key TEXT, version TEXT, dimension TEXT, score INTEGER, possible_scores TEXT,
-    triggered_conditions TEXT, pending_reason TEXT, calculation TEXT
-);
-CREATE TABLE totals (
-    run_key TEXT, version TEXT, total INTEGER, total_min INTEGER, total_max INTEGER, stage TEXT,
-    clear_deterioration TEXT, alert TEXT, review_flags TEXT, notes TEXT
-);
-CREATE TABLE metrics (run_key TEXT, key TEXT, value REAL, text TEXT);
-CREATE TABLE near_threshold (run_key TEXT, item TEXT, value REAL, threshold REAL, gap REAL, unit TEXT);
-CREATE TABLE outcomes (
-    subject TEXT, base_date TEXT, window_start TEXT, window_end TEXT, spx_min_close_drawdown REAL,
-    qqq_min_close_drawdown REAL, is_event TEXT, event_date TEXT, source TEXT, entered_at TEXT
-);
-CREATE TABLE materials (
-    subject TEXT, base_date TEXT, type TEXT, file_path TEXT, source TEXT, note TEXT, added_at TEXT
-);
-CREATE TABLE reviews (
-    subject TEXT, base_date TEXT, reviewer TEXT, category TEXT, content TEXT, impact TEXT,
-    run_key TEXT, other_run_key TEXT, created_at TEXT
-);
-CREATE UNIQUE INDEX one_official ON runs(subject, framework, base_date) WHERE is_official = 1;
-"""
-TABLES = ("runs", "dimension_scores", "totals", "metrics", "near_threshold", "outcomes", "materials", "reviews")
+DEFAULT_URL = "sqlite:///db/market_risk.sqlite"
+HEAD_REVISION = "0001"          # 最新迁移版本（新增迁移时同步修改）
 DIMENSION_KEYS = ("price", "breadth", "vix", "rates", "credit")
+TABLE_NAMES = tuple(t.name for t in schema.TABLES)
+_ID_COLUMNS = {"id"}
+
+# SQLite 没有原生 DECIMAL 类型，SQLAlchemy 会提示精度转换；写入时已用 Decimal，读取按 Numeric(20, 8) 还原
+warnings.filterwarnings("ignore", message=r".*does \*not\* support Decimal objects natively.*",
+                        category=exc.SAWarning)
+
+
+# ---------------------------------------------------------------------------
+# 连接
+# ---------------------------------------------------------------------------
+
+
+def resolve_database_url(settings: Any, env: dict[str, str] | None = None) -> str:
+    """DATABASE_URL（环境变量 / .env）优先，其次 settings.database_url；SQLite 相对路径以存储根目录为基准。"""
+    from dotenv import load_dotenv
+
+    from market_risk.config import PROJECT_ROOT
+
+    if env is None:
+        load_dotenv(PROJECT_ROOT / ".env", override=False)
+        env = dict(os.environ)
+    raw = env.get("DATABASE_URL") or getattr(settings, "database_url", None) or DEFAULT_URL
+    return absolutize(raw, Path(settings.storage_root))
+
+
+def absolutize(url: str, root: Path) -> str:
+    u = make_url(url)
+    if u.get_backend_name() == "sqlite" and u.database and u.database != ":memory:":
+        p = Path(u.database)
+        if not p.is_absolute():
+            return sqlite_url(root / p)
+    return url
+
+
+def sqlite_url(path: Path) -> str:
+    return f"sqlite:///{path.resolve().as_posix()}"
+
+
+def default_url(paths: StoragePaths) -> str:
+    """不读环境变量的默认地址（测试与离线使用）：<存储根>/db/market_risk.sqlite。"""
+    return sqlite_url(paths.db_path)
+
+
+def make_engine(url: str) -> Engine:
+    engine = create_engine(url, future=True)
+    if engine.dialect.name == "sqlite":
+        @event.listens_for(engine, "connect")
+        def _sqlite_pragmas(dbapi_conn: Any, _record: Any) -> None:  # 仅 SQLite：WAL 与外键约束
+            cur = dbapi_conn.cursor()
+            cur.execute("PRAGMA journal_mode=WAL")
+            cur.execute("PRAGMA foreign_keys=ON")
+            cur.close()
+    return engine
+
+
+def _sqlite_file(url: str) -> Path | None:
+    u = make_url(url)
+    if u.get_backend_name() == "sqlite" and u.database and u.database != ":memory:":
+        return Path(u.database)
+    return None
+
+
+def upgrade_schema(url: str) -> None:
+    """用 Alembic 把表结构迁移到最新版本。"""
+    from alembic import command
+    from alembic.config import Config
+
+    from market_risk.config import PROJECT_ROOT
+
+    cfg = Config()   # 不读取 alembic.ini（Windows 按系统编码读取），直接设置迁移目录与地址
+    cfg.set_main_option("script_location", str(PROJECT_ROOT / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
+    command.upgrade(cfg, "head")
+
+
+def head_revision() -> str:
+    """migrations/ 中最新的迁移版本号。"""
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    from market_risk.config import PROJECT_ROOT
+
+    cfg = Config()
+    cfg.set_main_option("script_location", str(PROJECT_ROOT / "migrations"))
+    return str(ScriptDirectory.from_config(cfg).get_current_head())
+
+
+def _reset(url: str) -> None:
+    """清空数据库：SQLite 文件直接删除；其他数据库删除全部表（含 alembic_version）。"""
+    file = _sqlite_file(url)
+    if file is not None:
+        for p in (file, Path(f"{file}-wal"), Path(f"{file}-shm")):
+            if p.exists():
+                p.unlink()
+        file.parent.mkdir(parents=True, exist_ok=True)
+        return
+    engine = make_engine(url)
+    try:
+        schema.metadata.drop_all(engine)
+        with engine.begin() as conn:
+            if inspect(conn).has_table("alembic_version"):
+                conn.execute(text("DROP TABLE alembic_version"))
+    finally:
+        engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# 写入（重建）
+# ---------------------------------------------------------------------------
 
 
 def run_key(meta: dict[str, Any]) -> str:
@@ -68,10 +161,8 @@ def alert_status(total: int | None, lo: int, hi: int) -> str:
 
 def iter_run_dirs(paths: StoragePaths) -> Iterator[Path]:
     root = paths.results_root
-    if not root.exists():
-        return
-    for meta in sorted(root.glob("**/run_*/meta.json")):
-        yield meta.parent
+    if root.exists():
+        yield from (m.parent for m in sorted(root.glob("**/run_*/meta.json")))
 
 
 def _csv_rows(path: Path) -> list[dict[str, str]]:
@@ -81,44 +172,66 @@ def _csv_rows(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(f))
 
 
-def _insert_run(conn: sqlite3.Connection, paths: StoragePaths, run_dir: Path) -> None:
+def _dec(v: Any) -> Decimal | None:
+    if v is None or v == "":
+        return None
+    return v if isinstance(v, Decimal) else Decimal(repr(float(v)) if isinstance(v, float) else str(v))
+
+
+def _date(v: Any) -> dt.date | None:
+    return dt.date.fromisoformat(v) if v else None
+
+
+def _yes(v: str | None) -> bool | None:
+    return None if v in (None, "") else v in ("是", "true", "True", "1")
+
+
+def _insert_run(conn: Connection, paths: StoragePaths, run_dir: Path) -> None:
     meta = read_json(run_dir / RUN_FILES["meta"])
     key = run_key(meta)
     official = run_dir.parent / "official.json"
     pointer = read_json(official) if official.exists() else None
     is_official = bool(pointer and pointer.get("run_id") == meta["run_id"])
-    conn.execute(
-        "INSERT INTO runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (key, meta["run_id"], meta["subject"], meta["framework"], meta["base_date"], meta.get("mode"),
-         meta.get("created_at_utc"), meta.get("created_at_local"), meta.get("git_commit"),
-         None if meta.get("git_dirty") is None else int(bool(meta["git_dirty"])),
-         meta.get("data_source_type"), meta.get("status"), run_dir.relative_to(paths.root).as_posix(),
-         int(is_official), int(bool(is_official and pointer and pointer.get("reviewed"))),
-         pointer.get("set_by") if is_official and pointer else None),
-    )
+    conn.execute(schema.runs.insert().values(
+        run_key=key, run_id=meta["run_id"], subject=meta["subject"], framework=meta["framework"],
+        base_date=_date(meta["base_date"]), mode=meta.get("mode"), created_at_utc=meta.get("created_at_utc"),
+        created_at_local=meta.get("created_at_local"), git_commit=meta.get("git_commit"),
+        git_dirty=meta.get("git_dirty"), data_source_type=meta.get("data_source_type"),
+        status=meta.get("status"), run_dir=run_dir.relative_to(paths.root).as_posix(),
+        is_official=is_official, reviewed=bool(is_official and pointer and pointer.get("reviewed")),
+        official_set_by=pointer.get("set_by") if is_official and pointer else None,
+    ))
+    if is_official and pointer:
+        conn.execute(schema.officials.insert().values(
+            subject=meta["subject"], framework=meta["framework"], base_date=_date(meta["base_date"]),
+            run_key=key, set_by=pointer.get("set_by"), reviewed=bool(pointer.get("reviewed")),
+            set_at_utc=pointer.get("set_at_utc"), reviewed_at_utc=pointer.get("reviewed_at_utc"),
+        ))
     scores_path = run_dir / RUN_FILES["scores"]
     if scores_path.exists():
         scores = read_json(scores_path)
         for r in scores.get("results", []):
             for dk in DIMENSION_KEYS:
                 d = r[dk]
-                conn.execute(
-                    "INSERT INTO dimension_scores VALUES (?,?,?,?,?,?,?,?)",
-                    (key, r["version"], d["name"], d["score"], json.dumps(d["possible_scores"]),
-                     json.dumps(d["triggered_conditions"], ensure_ascii=False), d.get("pending_reason"),
-                     d.get("calculation")),
-                )
+                conn.execute(schema.dimension_scores.insert().values(
+                    run_key=key, version=r["version"], dimension=d["name"], score=d["score"],
+                    possible_scores=json.dumps(d["possible_scores"]),
+                    triggered_conditions=json.dumps(d["triggered_conditions"], ensure_ascii=False),
+                    pending_reason=d.get("pending_reason"), calculation=d.get("calculation"),
+                ))
             lo, hi = r["total_range"]
-            conn.execute(
-                "INSERT INTO totals VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (key, r["version"], r["total"], lo, hi, r["stage"],
-                 dict(r["clear_deterioration"]).get("大盘明确恶化"), alert_status(r["total"], lo, hi),
-                 json.dumps(r.get("review_flags", []), ensure_ascii=False),
-                 json.dumps(r.get("notes", []), ensure_ascii=False)),
-            )
+            conn.execute(schema.totals.insert().values(
+                run_key=key, version=r["version"], total=r["total"], total_min=lo, total_max=hi, stage=r["stage"],
+                clear_deterioration=dict(r["clear_deterioration"]).get("大盘明确恶化"),
+                alert=alert_status(r["total"], lo, hi),
+                review_flags=json.dumps(r.get("review_flags", []), ensure_ascii=False),
+                notes=json.dumps(r.get("notes", []), ensure_ascii=False),
+            ))
         for n in scores.get("near_threshold", []):
-            conn.execute("INSERT INTO near_threshold VALUES (?,?,?,?,?,?)",
-                         (key, n["item"], n.get("value"), n.get("threshold"), n.get("gap"), n.get("unit")))
+            conn.execute(schema.near_threshold.insert().values(
+                run_key=key, item=n["item"], value=_dec(n.get("value")), threshold=_dec(n.get("threshold")),
+                gap=_dec(n.get("gap")), unit=n.get("unit"),
+            ))
     metrics_path, snap_path = run_dir / RUN_FILES["metrics"], run_dir / RUN_FILES["snapshot"]
     if metrics_path.exists():
         metrics = read_json(metrics_path)
@@ -127,59 +240,112 @@ def _insert_run(conn: sqlite3.Connection, paths: StoragePaths, run_dir: Path) ->
     else:
         metrics = {}
     for k, v in sorted(metrics.items()):
-        if isinstance(v, int | float) or v is None:
-            conn.execute("INSERT INTO metrics VALUES (?,?,?,?)", (key, k, v, None))
-        else:
-            conn.execute("INSERT INTO metrics VALUES (?,?,?,?)", (key, k, None, str(v)))
+        numeric = isinstance(v, int | float) and not isinstance(v, bool)
+        conn.execute(schema.metrics.insert().values(
+            run_key=key, key=k, value=_dec(v) if numeric else None,
+            text=None if numeric or v is None else str(v),
+        ))
 
 
-def rebuild(paths: StoragePaths, db_path: Path | None = None) -> Path:
-    """删除并重建数据库（STORAGE 第4节 rebuild-db）。"""
-    db_path = db_path or paths.db_path
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    if db_path.exists():
-        db_path.unlink()
-    conn = sqlite3.connect(db_path)
+def _insert_files(conn: Connection, paths: StoragePaths) -> None:
+    for r in _csv_rows(paths.outcomes_csv):
+        values: dict[str, Any] = {
+            "subject": r["subject"], "base_date": _date(r["base_date"]), "source": r["source"],
+            "window_start": _date(r["window_start"]), "window_end": _date(r["window_end"]),
+            "spx_min_close_drawdown": _dec(r["spx_min_close_drawdown"]),
+            "qqq_min_close_drawdown": _dec(r["qqq_min_close_drawdown"]),
+            "is_event": bool(_yes(r["is_event"])), "event_date": _date(r.get("event_date")),
+            "entered_at": r["entered_at"],
+        }
+        for col in ("spx_max_drawdown", "qqq_max_drawdown"):
+            if col in schema.outcomes.c:
+                values[col] = _dec(r.get(col))
+        if "near_event" in schema.outcomes.c:
+            values["near_event"] = _yes(r.get("near_event"))
+        conn.execute(schema.outcomes.insert().values(**values))
+    for r in _csv_rows(paths.materials_index_csv):
+        conn.execute(schema.materials.insert().values(
+            subject=r["subject"], base_date=_date(r["base_date"]), type=r["type"], file_path=r["file_path"],
+            source=r["source"], note=r["note"], added_at=r["added_at"]))
+    for r in _csv_rows(paths.reviews_csv):
+        conn.execute(schema.reviews.insert().values(
+            subject=r["subject"], base_date=_date(r.get("base_date")), reviewer=r["reviewer"],
+            category=r["category"], content=r["content"], impact=r["impact"], run_key=r.get("run_key") or None,
+            other_run_key=r.get("other_run_key") or None, created_at=r["created_at"]))
+
+
+def rebuild(paths: StoragePaths, url: str | None = None) -> str:
+    """清空并重建数据库（rebuild-db）：Alembic 迁移到最新结构后，由文件写入全部内容。返回连接地址。"""
+    url = url or default_url(paths)
+    _reset(url)
+    upgrade_schema(url)
+    engine = make_engine(url)
     try:
-        conn.executescript(SCHEMA)
-        for run_dir in iter_run_dirs(paths):
-            _insert_run(conn, paths, run_dir)
-        for r in _csv_rows(paths.outcomes_csv):
-            conn.execute("INSERT INTO outcomes VALUES (?,?,?,?,?,?,?,?,?,?)",
-                         (r["subject"], r["base_date"], r["window_start"], r["window_end"],
-                          _float(r["spx_min_close_drawdown"]), _float(r["qqq_min_close_drawdown"]),
-                          r["is_event"], r.get("event_date") or None, r["source"], r["entered_at"]))
-        for r in _csv_rows(paths.materials_index_csv):
-            conn.execute("INSERT INTO materials VALUES (?,?,?,?,?,?,?)",
-                         (r["subject"], r["base_date"], r["type"], r["file_path"], r["source"], r["note"],
-                          r["added_at"]))
-        for r in _csv_rows(paths.reviews_csv):
-            conn.execute("INSERT INTO reviews VALUES (?,?,?,?,?,?,?,?,?)",
-                         (r["subject"], r["base_date"], r["reviewer"], r["category"], r["content"],
-                          r["impact"], r.get("run_key") or None, r.get("other_run_key") or None, r["created_at"]))
-        conn.commit()
+        with engine.begin() as conn:
+            for run_dir in iter_run_dirs(paths):
+                _insert_run(conn, paths, run_dir)
+            _insert_files(conn, paths)
     finally:
-        conn.close()
-    return db_path
+        engine.dispose()
+    return url
 
 
-def _float(v: str | None) -> float | None:
-    return float(v) if v not in (None, "") else None
+# ---------------------------------------------------------------------------
+# 读取
+# ---------------------------------------------------------------------------
 
 
-def dump(db_path: Path) -> dict[str, list[tuple[Any, ...]]]:
-    """全部表的内容（排序后），用于比较两次重建是否一致。"""
-    conn = sqlite3.connect(db_path)
+def _rows(url: str, stmt: Any) -> list[dict[str, Any]]:
+    engine = make_engine(url)
     try:
-        return {t: sorted(conn.execute(f"SELECT * FROM {t}").fetchall(), key=repr) for t in TABLES}
+        with engine.connect() as conn:
+            return [dict(r._mapping) for r in conn.execute(stmt)]
     finally:
-        conn.close()
+        engine.dispose()
 
 
-def query(db_path: Path, sql: str, params: tuple[Any, ...] = ()) -> list[sqlite3.Row]:
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        return list(conn.execute(sql, params))
-    finally:
-        conn.close()
+def official_runs(url: str, framework: str) -> list[dict[str, Any]]:
+    """正式记录（按基准日升序）。"""
+    r = schema.runs
+    return _rows(url, select(r).where(r.c.is_official.is_(True), r.c.framework == framework)
+                 .order_by(r.c.base_date))
+
+
+def totals_by_version(url: str, key: str) -> dict[str, dict[str, Any]]:
+    t = schema.totals
+    return {row["version"]: row for row in _rows(url, select(t).where(t.c.run_key == key))}
+
+
+def dimensions_by_version(url: str, key: str) -> dict[str, dict[str, dict[str, Any]]]:
+    d = schema.dimension_scores
+    out: dict[str, dict[str, dict[str, Any]]] = {}
+    for row in _rows(url, select(d).where(d.c.run_key == key)):
+        out.setdefault(row["version"], {})[row["dimension"]] = row
+    return out
+
+
+def near_threshold_for(url: str, key: str) -> list[dict[str, Any]]:
+    n = schema.near_threshold
+    return _rows(url, select(n).where(n.c.run_key == key).order_by(n.c.id))
+
+
+def metrics_for(url: str, key: str) -> dict[str, Any]:
+    m = schema.metrics
+    return {row["key"]: row["value"] if row["value"] is not None else row["text"]
+            for row in _rows(url, select(m).where(m.c.run_key == key))}
+
+
+def runs_table(url: str) -> list[dict[str, Any]]:
+    r = schema.runs
+    return _rows(url, select(r).order_by(r.c.base_date, r.c.data_source_type, r.c.run_id))
+
+
+def dump(url: str) -> dict[str, list[tuple[Any, ...]]]:
+    """全部表的内容（去掉自增 id、排序后），用于比较两次重建是否一致。"""
+    out = {}
+    for table in schema.TABLES:
+        cols = [c for c in table.c if c.name not in _ID_COLUMNS]
+        rows = _rows(url, select(*cols))
+        out[table.name] = sorted((tuple(r.values()) for r in rows), key=repr)
+    return out
+

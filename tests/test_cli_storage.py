@@ -19,6 +19,7 @@ from market_risk.storage.paths import MARKET, RISK_SCORING, StoragePaths
 def env(tmp_path, monkeypatch):
     settings = dataclasses.replace(load_settings(), storage_root=tmp_path)
     monkeypatch.setattr(cli, "load_settings", lambda: settings)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setattr(runs, "git_info", lambda repo: runs.GitInfo("c" * 40, False))
     return StoragePaths(tmp_path), CliRunner()
 
@@ -46,7 +47,7 @@ def test_official_and_import_legacy_and_stats(env):
     r = runner.invoke(cli.app, ["outcome", "add", "--date", "2025-10-31", "--spx", "-5.5", "--qqq", "-8"])
     assert r.exit_code == 0 and "风险事件=是" in r.stdout
     r = runner.invoke(cli.app, ["rebuild-db"])
-    assert r.exit_code == 0 and "runs 8" in r.stdout and "outcomes 1" in r.stdout
+    assert r.exit_code == 0 and "runs 8" in r.stdout and "officials 4" in r.stdout and "outcomes 1" in r.stdout
     r = runner.invoke(cli.app, ["stats"])
     assert r.exit_code == 0 and "不确定" in r.stdout and paths.backtest_history_xlsx.exists()
 

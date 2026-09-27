@@ -88,22 +88,16 @@ def newcombe_diff(k1: int, n1: int, k2: int, n2: int) -> tuple[float, float] | N
 
 
 def load_samples(paths: StoragePaths, framework: str, start: dt.date | None, end: dt.date | None,
-                 db_path: Path | None = None) -> list[Sample]:
-    db_path = db_path or db.rebuild(paths)
-    runs = db.query(db_path, "SELECT * FROM runs WHERE is_official = 1 AND framework = ? ORDER BY base_date",
-                    (framework,))
+                 url: str) -> list[Sample]:
+    """正式记录及其分数（经 storage.db 读取）与结果标签。"""
     outcomes = effective_outcomes(read_outcomes(paths.outcomes_csv))
     samples = []
-    for r in runs:
-        d = dt.date.fromisoformat(r["base_date"])
+    for r in db.official_runs(url, framework):
+        d = r["base_date"]
         if (start and d < start) or (end and d > end):
             continue
-        totals = {t["version"]: dict(t) for t in db.query(db_path, "SELECT * FROM totals WHERE run_key = ?",
-                                                           (r["run_key"],))}
-        dims: dict[str, dict[str, dict]] = {}
-        for x in db.query(db_path, "SELECT * FROM dimension_scores WHERE run_key = ?", (r["run_key"],)):
-            dims.setdefault(x["version"], {})[x["dimension"]] = dict(x)
-        samples.append(Sample(d, r["run_key"], r["data_source_type"], bool(r["reviewed"]), totals, dims,
+        samples.append(Sample(d, r["run_key"], r["data_source_type"], bool(r["reviewed"]),
+                              db.totals_by_version(url, r["run_key"]), db.dimensions_by_version(url, r["run_key"]),
                               outcomes.get((r["subject"], d))))
     return samples
 
@@ -241,7 +235,7 @@ HISTORY_HEADERS = ["序号", "基准日", "星期", "状态", "v2-M 价格", "v2
                    "风险事件(是/否)", "贴近门槛的读数", "Remark：参数变化与数据问题", "数据来源"]
 
 
-def write_history_xlsx(path: Path, samples: list[Sample], db_path: Path) -> None:
+def write_history_xlsx(path: Path, samples: list[Sample], url: str) -> None:
     """样本汇总表（列与旧 Excel 的"样本汇总"相同，最后一列改为数据来源）。"""
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -254,7 +248,7 @@ def write_history_xlsx(path: Path, samples: list[Sample], db_path: Path) -> None
         cell.fill = PatternFill("solid", fgColor="DDDDDD")
     for i, s in enumerate(samples, start=1):
         r = 4 + i
-        near = db.query(db_path, "SELECT item, gap, unit FROM near_threshold WHERE run_key = ?", (s.run_key,))
+        near = db.near_threshold_for(url, s.run_key)
         values = [i, s.base_date, f"周{'一二三四五六日'[s.base_date.weekday()]}",
                   "已复核" if s.reviewed else "未复核"]
         for v in VERSIONS:
@@ -265,7 +259,7 @@ def write_history_xlsx(path: Path, samples: list[Sample], db_path: Path) -> None
         w0, w1 = mcal.shift_trading_days(s.base_date, 1), mcal.shift_trading_days(s.base_date, 20)
         values.append(f"{w0}至{w1}")
         values.append("" if s.outcome is None else ("是" if s.outcome.is_event else "否"))
-        values.append("；".join(f"{n['item']} {n['gap']:+.2f}{n['unit']}" for n in near
+        values.append("；".join(f"{n['item']} {float(n['gap']):+.2f}{n['unit']}" for n in near
                                 if n["gap"] is not None))
         notes = json.loads(s.totals.get("v2-M", {}).get("notes") or "[]")
         values.append("；".join(notes))
@@ -276,14 +270,15 @@ def write_history_xlsx(path: Path, samples: list[Sample], db_path: Path) -> None
     wb.save(path)
 
 
-def run_stats(paths: StoragePaths, framework: str = "risk_scoring", start: dt.date | None = None,
+def run_stats(paths: StoragePaths, url: str, framework: str = "risk_scoring", start: dt.date | None = None,
               end: dt.date | None = None, now: dt.datetime | None = None) -> tuple[str, list[Sample]]:
-    db_path = db.rebuild(paths)
-    samples = load_samples(paths, framework, start, end, db_path)
+    """重建数据库后统计，写 reports/backtest_stats.md 与 reports/backtest_history.xlsx。"""
+    db.rebuild(paths, url)
+    samples = load_samples(paths, framework, start, end, url)
     stats = {v: version_stats(samples, v) for v in VERSIONS}
     generated = (now or dt.datetime.now(dt.UTC)).astimezone(dt.UTC).isoformat(timespec="seconds")
     text = render_markdown(samples, stats, generated, start, end)
     paths.backtest_stats_md.parent.mkdir(parents=True, exist_ok=True)
     paths.backtest_stats_md.write_text(text, encoding="utf-8")
-    write_history_xlsx(paths.backtest_history_xlsx, samples, db_path)
+    write_history_xlsx(paths.backtest_history_xlsx, samples, url)
     return text, samples

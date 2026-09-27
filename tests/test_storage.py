@@ -7,6 +7,7 @@ import dataclasses
 import datetime as dt
 import json
 import shutil
+from decimal import Decimal
 from pathlib import Path
 
 import openpyxl
@@ -78,19 +79,67 @@ def test_rebuild_db_is_reproducible(paths):
     add_material(paths, "MARKET", D(2025, 11, 28), "notes", note)
     add_reviews(paths, [Review("MARKET", D(2025, 11, 28), "claude", "核查", "无问题")])
 
-    first = db.dump(db.rebuild(paths))
-    paths.db_path.unlink()
-    shutil.rmtree(paths.db_path.parent)
-    second = db.dump(db.rebuild(paths))
+    url = db.default_url(paths)
+    first = db.dump(db.rebuild(paths, url))
+    shutil.rmtree(paths.db_path.parent)      # 删除 db/ 后重建
+    second = db.dump(db.rebuild(paths, url))
     assert first == second
     assert len(first["runs"]) == 5 and len(first["outcomes"]) == 1
     assert len(first["materials"]) == 1 and len(first["reviews"]) == 1
     assert len(first["dimension_scores"]) == 5 * 2 * 5 and len(first["totals"]) == 5 * 2
-    officials = db.query(paths.db_path, "SELECT base_date, COUNT(*) n FROM runs WHERE is_official=1 GROUP BY base_date")
-    assert {r["base_date"]: r["n"] for r in officials} == {s: 1 for s in SAMPLE_BREADTH}
-    metrics = {r["key"]: r["value"] for r in db.query(
-        paths.db_path, "SELECT key, value FROM metrics m JOIN runs r USING(run_key) WHERE r.base_date='2025-10-31'")}
-    assert metrics["SPY.close"] == 682.06 and metrics["L"] == 38.56 and metrics["doas_v3r1_bp"] == pytest.approx(-11)
+    # 同一基准日只有一个正式记录（officials 表的复合主键保证）
+    officials = {row[2]: row[3] for row in first["officials"]}
+    assert set(officials) == {D.fromisoformat(s) for s in SAMPLE_BREADTH}
+    key = next(r["run_key"] for r in db.official_runs(url, RISK_SCORING) if r["base_date"] == D(2025, 10, 31))
+    metrics = db.metrics_for(url, key)
+    assert metrics["SPY.close"] == Decimal("682.06") and metrics["L"] == Decimal("38.56")
+    assert metrics["doas_v3r1_bp"] == Decimal("-11")
+
+
+def test_database_url_resolution(tmp_path):
+    settings = dataclasses.replace(load_settings(), storage_root=tmp_path)
+    url = db.resolve_database_url(settings, env={})
+    assert url == db.sqlite_url(tmp_path / "db" / "market_risk.sqlite")
+    assert db.resolve_database_url(settings, env={"DATABASE_URL": "postgresql://u:p@h/db"}) == "postgresql://u:p@h/db"
+    assert db.absolutize("sqlite:///:memory:", tmp_path) == "sqlite:///:memory:"
+
+
+def test_sqlite_wal_and_migration(paths):
+    import sqlalchemy as sa
+
+    url = db.rebuild(paths, db.default_url(paths))
+    engine = db.make_engine(url)
+    try:
+        with engine.connect() as conn:
+            assert conn.execute(sa.text("PRAGMA journal_mode")).scalar() == "wal"
+            version = conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar()
+            assert version == db.head_revision()
+    finally:
+        engine.dispose()
+
+
+def test_official_unique_per_date(paths):
+    import sqlalchemy as sa
+
+    from market_risk.storage import schema
+
+    url = db.rebuild(paths, db.default_url(paths))
+    engine = db.make_engine(url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(schema.runs.insert().values(run_key="k1", run_id="r1", subject="MARKET", framework="f",
+                                                     base_date=D(2025, 1, 2), is_official=True, reviewed=False))
+            conn.execute(schema.runs.insert().values(run_key="k2", run_id="r2", subject="MARKET", framework="f",
+                                                     base_date=D(2025, 1, 2), is_official=True, reviewed=False))
+            conn.execute(schema.officials.insert().values(subject="MARKET", framework="f",
+                                                          base_date=D(2025, 1, 2), run_key="k1", reviewed=False))
+            with pytest.raises(sa.exc.IntegrityError):
+                with conn.begin_nested():
+                    conn.execute(schema.officials.insert().values(subject="MARKET", framework="f",
+                                                                  base_date=D(2025, 1, 2), run_key="k2",
+                                                                  reviewed=False))
+    finally:
+        engine.dispose()
 
 
 def test_alert_status():
@@ -261,7 +310,7 @@ def test_stats_with_legacy_samples(paths):
                                                -5.3, -7.9, True, D(2025, 11, 20), "manual", "t"))
     record_outcome(paths.outcomes_csv, Outcome("MARKET", D(2025, 8, 29), D(2025, 9, 2), D(2025, 9, 29),
                                                -1.0, -1.5, False, None, "manual", "t"))
-    text, samples = run_stats(paths, now=dt.datetime(2026, 9, 27, tzinfo=dt.UTC))
+    text, samples = run_stats(paths, db.default_url(paths), now=dt.datetime(2026, 9, 27, tzinfo=dt.UTC))
     assert len(samples) == 4 and all(s.data_source_type == "screenshot" for s in samples)
     assert "正式记录样本数：4（已复核 4，未复核 0）" in text
     assert "| 命中 / 误报 / 漏报 / 正确静默 | 1 / 0 / 0 / 1 | 1 / 0 / 0 / 1 |" in text
@@ -282,5 +331,5 @@ def test_stats_with_legacy_samples(paths):
 
 def test_stats_unreviewed_and_mixed(paths):
     program_runs(paths)     # 自动设为正式记录，reviewed=false
-    text, _ = run_stats(paths)
+    text, _ = run_stats(paths, db.default_url(paths))
     assert "已复核 0，未复核 4" in text and "程序 4" in text

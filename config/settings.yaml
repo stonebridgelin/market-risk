@@ -30,6 +30,10 @@ vix:
 treasury:
   fallback_series: DGS10       # 主源失败时的备用源
 
+database:
+  # SQLAlchemy 连接地址；.env 的 DATABASE_URL 优先。SQLite 相对路径以存储根目录为基准（STORAGE 第4节）
+  url: sqlite:///db/market_risk.sqlite
+
 storage:
   # 存储根目录（相对路径以项目根目录为基准）。具体路径统一由 storage/paths.py 生成，见 docs/STORAGE.md
   root: .

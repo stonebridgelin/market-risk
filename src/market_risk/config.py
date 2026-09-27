@@ -54,6 +54,7 @@ class Settings:
     cboe_vix_history_url: str
     treasury_fallback_series: str
     storage_root: Path
+    database_url: str
     max_retries: int
     backoff_seconds: float
     near_threshold: NearThreshold
@@ -110,6 +111,7 @@ def load_settings(path: Path = DEFAULT_SETTINGS_PATH, root: Path = PROJECT_ROOT)
             cboe_vix_history_url=str(raw["vix"]["cboe_history_url"]),
             treasury_fallback_series=str(raw["treasury"]["fallback_series"]),
             storage_root=_resolve(str(raw["storage"]["root"]), root).resolve(),
+            database_url=str((raw.get("database") or {}).get("url", "sqlite:///db/market_risk.sqlite")),
             max_retries=int(raw["network"]["max_retries"]),
             backoff_seconds=float(raw["network"]["backoff_seconds"]),
             near_threshold=NearThreshold(

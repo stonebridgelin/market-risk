@@ -138,7 +138,17 @@ market-risk/
 
 要求：
 - 数据库可以随时由 `results/`、`data/manual/`、`data/materials/` 重建（提供命令 `rebuild-db`）。
-- 同一对象、框架、基准日只能有一个正式记录（`is_official`）。
+- 同一对象、框架、基准日只能有一个正式记录（`is_official`）。实现：`officials` 表以（对象, 框架, 基准日）为复合主键。
+
+### 4.1 数据库约定（2026-09-27 确认，为以后接 Vue 前端和更换数据库做准备）
+
+1. 数据库访问统一使用 **SQLAlchemy**（Core）。连接地址从 `.env` 的 `DATABASE_URL` 读取，其次 `config/settings.yaml` 的 `database.url`，默认 `sqlite:///db/market_risk.sqlite`（SQLite 相对路径以存储根目录为基准）。
+2. **不使用任何数据库的专有语法**（例如不用 SQLite 的部分索引；唯一性用主键或唯一约束表达）。小数一律用 `Numeric`（与程序的 Decimal 精确计算一致），不用 `Float`；日期用 `Date`，是否用 `Boolean`。
+3. 表结构用 **Alembic** 管理：迁移脚本在 `migrations/versions/`，表结构的最新描述在 `src/market_risk/storage/schema.py`。修改表结构必须新增迁移，不得直接改已有迁移。`rebuild-db` 会先清空数据库并执行 `upgrade head`，再由文件写入内容。
+4. **所有数据库读写集中在 `src/market_risk/storage/`**（`db.py`、`schema.py`）；其他模块只调用其中的函数（如 `official_runs`、`totals_by_version`），不写 SQL、不直接连接数据库。
+5. SQLite 开启 **WAL 模式**（并开启外键约束），只在连接 SQLite 时设置。
+6. 说明：SQLite 没有原生 DECIMAL，`Numeric(20, 8)` 在 SQLite 中按数值存储、读出时还原为 Decimal；换用 PostgreSQL 等数据库后为精确小数。`alembic.ini` 只含 ASCII 字符（Windows 上 Alembic 按系统编码读取该文件）；程序内部运行迁移时不读取该文件。
+7. 改造验证（2026-09-27）：改为 SQLAlchemy 后运行 `rebuild-db`，与改造前的 8 张表逐行比对，内容全部一致（仅"全部样本"类复核记录的日期由空字符串改为 NULL）；新增 `officials` 表 4 行。
 
 ---
 

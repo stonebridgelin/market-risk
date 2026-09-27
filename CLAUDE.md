@@ -12,4 +12,10 @@
 9. 存储设计以 `docs/STORAGE.md` 为准：所有路径一律由 `src/market_risk/storage/paths.py` 生成，不在其他地方拼接路径字符串；
    每次运行保留独立目录，不覆盖；测试只能写入临时目录，不得写入真实的 `results/`、`data/`、`db/`、`reports/`。
 10. 结果标签隔离：`scoring/`、`report.py` 中生成 prompt 的部分、`data/snapshot.py` 不得读取 `outcomes`（标签文件与标签表）。
-11. 本机 git 不在 PATH 中，路径为 `C:\Execute\Git\bin`；在 PowerShell 中先执行 `$env:PATH = "C:\Execute\Git\bin;$env:PATH"`。
+11. 数据库约定（docs/STORAGE.md 4.1）：统一使用 SQLAlchemy，连接地址来自 `DATABASE_URL`（.env）或 settings.yaml 的 `database.url`，
+    默认 `sqlite:///db/market_risk.sqlite`；不使用任何数据库的专有语法；小数用 `Numeric`，不用 `Float`；
+    表结构变更必须新增 Alembic 迁移（`migrations/versions/`）并同步 `storage/schema.py`；
+    所有数据库读写集中在 `src/market_risk/storage/`；SQLite 开启 WAL 模式。
+12. 代码分层：`cli.py` 只负责解析参数和格式化输出，所有业务逻辑必须写在可被直接调用的函数中（主要入口在 `services.py`），
+    返回数据类或可序列化为 JSON 的结构；以后的 FastAPI 接口、Vue 前端和 LangChain Agent 都将调用这些函数。
+13. 本机 git 不在 PATH 中，路径为 `C:\Execute\Git\bin`；在 PowerShell 中先执行 `$env:PATH = "C:\Execute\Git\bin;$env:PATH"`。

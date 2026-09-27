@@ -396,10 +396,16 @@ def _paths() -> StoragePaths:
     return StoragePaths(load_settings().storage_root)
 
 
+def _db_url() -> str:
+    from market_risk.storage import db
+
+    return db.resolve_database_url(load_settings())
+
+
 def _rebuild_db(paths: StoragePaths) -> None:
     from market_risk.storage import db
 
-    db.rebuild(paths)
+    db.rebuild(paths, _db_url())
 
 
 @official_app.command("set")
@@ -629,9 +635,9 @@ def rebuild_db_cmd() -> None:
     from market_risk.storage import db
 
     paths = _paths()
-    path = db.rebuild(paths)
-    counts = {t: len(v) for t, v in db.dump(path).items()}
-    typer.echo(f"已重建 {path}：" + "，".join(f"{t} {n}" for t, n in counts.items()))
+    url = db.rebuild(paths, _db_url())
+    counts = {t: len(v) for t, v in db.dump(url).items()}
+    typer.echo(f"已重建 {url}：" + "，".join(f"{t} {n}" for t, n in counts.items()))
 
 
 @app.command()
@@ -644,6 +650,7 @@ def stats(
     from market_risk.stats import run_stats
 
     paths = _paths()
-    text, _ = run_stats(paths, framework, _parse_date(start) if start else None, _parse_date(end) if end else None)
+    text, _ = run_stats(paths, _db_url(), framework, _parse_date(start) if start else None,
+                        _parse_date(end) if end else None)
     typer.echo(text)
     typer.echo(f"已写入 {paths.backtest_stats_md} 与 {paths.backtest_history_xlsx}")
