@@ -1,0 +1,23 @@
+{
+  "run_id": "run_20260927T010422Z_b8a5171",
+  "created_at_utc": "2026-09-27T01:04:22+00:00",
+  "created_at_local": "2026-09-26T18:04:22-07:00",
+  "subject": "MARKET",
+  "framework": "risk_scoring",
+  "base_date": "2025-10-31",
+  "mode": "backtest",
+  "rule_versions": [
+    "v2-M",
+    "v3-R1"
+  ],
+  "git_commit": "b8a517131645fa1c1ee23aae28a3a3d1e3041b31",
+  "git_dirty": false,
+  "data_source_type": "screenshot",
+  "status": "complete",
+  "legacy": {
+    "excel": "data/legacy/backtest_record_legacy.xlsx",
+    "sha256": "125ba6ddc7670fb019c7371bb8704d097460769bd906e6289081ef2be07a9b65",
+    "row": 7,
+    "seq": 3
+  }
+}

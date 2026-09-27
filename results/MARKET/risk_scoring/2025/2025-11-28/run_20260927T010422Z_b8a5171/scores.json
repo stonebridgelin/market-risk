@@ -1,0 +1,183 @@
+{
+  "results": [
+    {
+      "version": "v2-M",
+      "price": {
+        "name": "价格",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [],
+        "calculation": "截图时代的录入分数（ChatGPT 打分、经 Claude 核查），见 legacy.json",
+        "pending_reason": null
+      },
+      "breadth": {
+        "name": "广度",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [],
+        "calculation": "截图时代的录入分数（ChatGPT 打分、经 Claude 核查），见 legacy.json",
+        "pending_reason": null
+      },
+      "vix": {
+        "name": "VIX",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [],
+        "calculation": "截图时代的录入分数（ChatGPT 打分、经 Claude 核查），见 legacy.json",
+        "pending_reason": null
+      },
+      "rates": {
+        "name": "利率",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [],
+        "calculation": "截图时代的录入分数（ChatGPT 打分、经 Claude 核查），见 legacy.json",
+        "pending_reason": null
+      },
+      "credit": {
+        "name": "信用",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [],
+        "calculation": "截图时代的录入分数（ChatGPT 打分、经 Claude 核查），见 legacy.json",
+        "pending_reason": null
+      },
+      "total": 0,
+      "total_range": [
+        0,
+        0
+      ],
+      "stage": "早期信号",
+      "clear_deterioration": [
+        [
+          "价格=2",
+          "否"
+        ],
+        [
+          "广度=2",
+          "否"
+        ],
+        [
+          "信用=2",
+          "否"
+        ],
+        [
+          "VIX=2",
+          "否"
+        ],
+        [
+          "信用=2 或 VIX=2",
+          "否"
+        ],
+        [
+          "大盘明确恶化",
+          "否"
+        ]
+      ],
+      "notes": [
+        "较样本3：S5FI 40.15%→58.44%、S5TW 38.56%→76.73%（广度2分→0分）；RSP重新站上MA50（价格1分→0分）；VIX 17.44→16.35，但5日前（11-20）高达26.42；ΔOAS −11→−17bp，O1升至3.00%。月中压力（11-17至11-20三只ETF均出现三环节第一步）到月末已修复，月末单日抽样未捕捉。三环节d1候选包含T−20（10-30），与样本3口径不同，本样本结果不受影响。Tiger价格确认为不复权。感恩节次日13:00提前收盘。"
+      ],
+      "review_flags": []
+    },
+    {
+      "version": "v3-R1",
+      "price": {
+        "name": "价格",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [],
+        "calculation": "截图时代的录入分数（ChatGPT 打分、经 Claude 核查），见 legacy.json",
+        "pending_reason": null
+      },
+      "breadth": {
+        "name": "广度",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [],
+        "calculation": "截图时代的录入分数（ChatGPT 打分、经 Claude 核查），见 legacy.json",
+        "pending_reason": null
+      },
+      "vix": {
+        "name": "VIX",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [],
+        "calculation": "截图时代的录入分数（ChatGPT 打分、经 Claude 核查），见 legacy.json",
+        "pending_reason": null
+      },
+      "rates": {
+        "name": "利率",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [],
+        "calculation": "截图时代的录入分数（ChatGPT 打分、经 Claude 核查），见 legacy.json",
+        "pending_reason": null
+      },
+      "credit": {
+        "name": "信用",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [],
+        "calculation": "截图时代的录入分数（ChatGPT 打分、经 Claude 核查），见 legacy.json",
+        "pending_reason": null
+      },
+      "total": 0,
+      "total_range": [
+        0,
+        0
+      ],
+      "stage": "早期信号",
+      "clear_deterioration": [
+        [
+          "价格=2",
+          "否"
+        ],
+        [
+          "广度=2",
+          "否"
+        ],
+        [
+          "信用=2",
+          "否"
+        ],
+        [
+          "VIX=2",
+          "否"
+        ],
+        [
+          "信用=2 或 VIX=2",
+          "否"
+        ],
+        [
+          "大盘明确恶化",
+          "否"
+        ]
+      ],
+      "notes": [
+        "较样本3：S5FI 40.15%→58.44%、S5TW 38.56%→76.73%（广度2分→0分）；RSP重新站上MA50（价格1分→0分）；VIX 17.44→16.35，但5日前（11-20）高达26.42；ΔOAS −11→−17bp，O1升至3.00%。月中压力（11-17至11-20三只ETF均出现三环节第一步）到月末已修复，月末单日抽样未捕捉。三环节d1候选包含T−20（10-30），与样本3口径不同，本样本结果不受影响。Tiger价格确认为不复权。感恩节次日13:00提前收盘。"
+      ],
+      "review_flags": []
+    }
+  ],
+  "near_threshold": []
+}

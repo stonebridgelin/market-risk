@@ -198,6 +198,15 @@ uv run market-risk rebuild-db
 
 ---
 
+## 8.1 实现补充（阶段4.5）
+
+- 数据库的每张表都由文件重建：`reviews` 来自 `data/manual/reviews.csv`，`materials` 来自 `data/materials/index.csv`，`metrics` 来自运行目录的 `metrics.json`（没有时由 `snapshot.json` 计算）。
+- 运行目录另有 `metrics.json`（扁平数值指标）；import-legacy 的运行目录另有 `legacy.json`（Excel 中该样本的原始单元格），`data_source_type=screenshot`，`meta.json` 的 `legacy.sha256` 用于防止重复导入。
+- `outcomes.csv` 在第5节字段之外增加 `event_date`（首次达到门槛的日期），用于计算"命中样本的提前量"。同一样本同时有手工与程序标签时，统计以手工标签为准。
+- 命令补充：`outcome add --date --spx --qqq [--event-date]`（人工录入标签）。
+- 统计中的 95% 区间按 Newcombe 方法（独立样本近似）计算，仅供参考；样本量不足时结论固定为"不确定"。
+- 标签隔离：评分所用的指标提取放在不读取标签的 `metrics.py`；`scoring/`、`report.py`、`data/snapshot.py`、prompt 模板由测试扫描，确认不引用标签。
+
 ## 9. 开发安排
 
 这部分作为 SPEC 第9节的**阶段4.5**，在阶段4（回归测试与输出）之后、阶段5（收尾）之前完成：

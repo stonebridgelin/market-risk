@@ -1,0 +1,183 @@
+{
+  "results": [
+    {
+      "version": "v2-M",
+      "price": {
+        "name": "价格",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [],
+        "calculation": "截图时代的录入分数（ChatGPT 打分、经 Claude 核查），见 legacy.json",
+        "pending_reason": null
+      },
+      "breadth": {
+        "name": "广度",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [],
+        "calculation": "截图时代的录入分数（ChatGPT 打分、经 Claude 核查），见 legacy.json",
+        "pending_reason": null
+      },
+      "vix": {
+        "name": "VIX",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [],
+        "calculation": "截图时代的录入分数（ChatGPT 打分、经 Claude 核查），见 legacy.json",
+        "pending_reason": null
+      },
+      "rates": {
+        "name": "利率",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [],
+        "calculation": "截图时代的录入分数（ChatGPT 打分、经 Claude 核查），见 legacy.json",
+        "pending_reason": null
+      },
+      "credit": {
+        "name": "信用",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [],
+        "calculation": "截图时代的录入分数（ChatGPT 打分、经 Claude 核查），见 legacy.json",
+        "pending_reason": null
+      },
+      "total": 0,
+      "total_range": [
+        0,
+        0
+      ],
+      "stage": "早期信号",
+      "clear_deterioration": [
+        [
+          "价格=2",
+          "否"
+        ],
+        [
+          "广度=2",
+          "否"
+        ],
+        [
+          "信用=2",
+          "否"
+        ],
+        [
+          "VIX=2",
+          "否"
+        ],
+        [
+          "信用=2 或 VIX=2",
+          "否"
+        ],
+        [
+          "大盘明确恶化",
+          "否"
+        ]
+      ],
+      "notes": [
+        "较样本1：S5TW 67.59%→51.09%、S5FI 63.22%→54.67%；ΔOAS由约−20bp转为+5bp；RSP由高于MA20 2.63美元降至0.24美元。前一日（09-25）S5TW为37.97%，单日抽样有偶然性。"
+      ],
+      "review_flags": []
+    },
+    {
+      "version": "v3-R1",
+      "price": {
+        "name": "价格",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [],
+        "calculation": "截图时代的录入分数（ChatGPT 打分、经 Claude 核查），见 legacy.json",
+        "pending_reason": null
+      },
+      "breadth": {
+        "name": "广度",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [],
+        "calculation": "截图时代的录入分数（ChatGPT 打分、经 Claude 核查），见 legacy.json",
+        "pending_reason": null
+      },
+      "vix": {
+        "name": "VIX",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [],
+        "calculation": "截图时代的录入分数（ChatGPT 打分、经 Claude 核查），见 legacy.json",
+        "pending_reason": null
+      },
+      "rates": {
+        "name": "利率",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [],
+        "calculation": "截图时代的录入分数（ChatGPT 打分、经 Claude 核查），见 legacy.json",
+        "pending_reason": null
+      },
+      "credit": {
+        "name": "信用",
+        "score": 0,
+        "possible_scores": [
+          0
+        ],
+        "triggered_conditions": [],
+        "calculation": "截图时代的录入分数（ChatGPT 打分、经 Claude 核查），见 legacy.json",
+        "pending_reason": null
+      },
+      "total": 0,
+      "total_range": [
+        0,
+        0
+      ],
+      "stage": "早期信号",
+      "clear_deterioration": [
+        [
+          "价格=2",
+          "否"
+        ],
+        [
+          "广度=2",
+          "否"
+        ],
+        [
+          "信用=2",
+          "否"
+        ],
+        [
+          "VIX=2",
+          "否"
+        ],
+        [
+          "信用=2 或 VIX=2",
+          "否"
+        ],
+        [
+          "大盘明确恶化",
+          "否"
+        ]
+      ],
+      "notes": [
+        "较样本1：S5TW 67.59%→51.09%、S5FI 63.22%→54.67%；ΔOAS由约−20bp转为+5bp；RSP由高于MA20 2.63美元降至0.24美元。前一日（09-25）S5TW为37.97%，单日抽样有偶然性。"
+      ],
+      "review_flags": []
+    }
+  ],
+  "near_threshold": []
+}
