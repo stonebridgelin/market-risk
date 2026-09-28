@@ -161,8 +161,12 @@ class OutcomeRow:
 
 def outcome_rows(bases: Sequence[dt.date], spx: Mapping[dt.date, Decimal], qqq: Mapping[dt.date, Decimal],
                  cfg: BacktestConfig, unlock: bool = False) -> list[OutcomeRow]:
-    """结果窗口日期已结束的基准日；缺价仍写一行空标签，未解锁时屏蔽跨入保留期的窗口。"""
-    last = max(max(spx, default=dt.date.min), max(qqq, default=dt.date.min))
+    """结果窗口已结束的基准日；未解锁时屏蔽跨入保留期的窗口。
+
+    窗口结束 = SPX、QQQ 两个序列的最新日期都不早于窗口最后一个交易日（取两者较早者比较）；
+    否则为"窗口未结束"，不生成该行。窗口已结束但窗口内缺价时写一行空标签，data_note 注明"数据不齐"。
+    """
+    last = min(max(spx, default=dt.date.min), max(qqq, default=dt.date.min))
     out = []
     for base in bases:
         _, end = outcome_window(base)
@@ -176,7 +180,7 @@ def outcome_rows(bases: Sequence[dt.date], spx: Mapping[dt.date, Decimal], qqq: 
             note = ""
         except OutcomeError as exc:
             lab = None
-            note = f"数据不齐：缺 {exc}"
+            note = f"数据不齐：{exc}"
         out.append(OutcomeRow(base, start, end, lab, period, period_end is not None and end > period_end, note))
     return out
 
@@ -192,6 +196,7 @@ class LabelImpact:
     outcome_bases: int                         # 结果窗口包含该日（或以该日为基准日）的基准日数
     outcome_diffs: tuple[str, ...]
     episode_diffs: tuple[str, ...]
+    incomplete_bases: tuple[dt.date, ...] = ()  # 两种来源都因数据不齐无法生成标签的基准日（不算差异）
 
     @property
     def material(self) -> bool:
@@ -212,10 +217,13 @@ def label_impact(symbol: str, day: dt.date, value_b: Decimal, spx: Mapping[dt.da
     a = {r.base_date: r.label for r in outcome_rows(bases, spx, qqq, cfg, unlock)}
     b = {r.base_date: r.label for r in outcome_rows(bases, alt, qqq, cfg, unlock)}
     outcome_diffs = []
+    incomplete = []
     for base in sorted(set(a) | set(b)):
         la, lb = a.get(base), b.get(base)
-        if la is None or lb is None:
-            outcome_diffs.append(f"{base}：只有一种来源能生成标签")
+        if la is None and lb is None:
+            incomplete.append(base)
+        elif la is None or lb is None:
+            outcome_diffs.append(f"{base}：只有一种来源能生成标签（另一种数据不齐）")
         elif (la.is_event, la.is_near_event, la.event_date) != (lb.is_event, lb.is_near_event, lb.event_date):
             outcome_diffs.append(f"{base}：事件 {la.is_event}/{lb.is_event}，"
                                  f"接近事件 {la.is_near_event}/{lb.is_near_event}")
@@ -225,4 +233,5 @@ def label_impact(symbol: str, day: dt.date, value_b: Decimal, spx: Mapping[dt.da
                                                                                         cfg, unlock)}
     episode_diffs = tuple(f"{'仅 Yahoo' if x in ea else '仅 TradingView'}：层级 {x[0]} 高点 {x[1]} 低点 {x[2]}"
                           for x in sorted(ea ^ eb, key=str))
-    return LabelImpact(symbol, day, value_a, value_b, len(bases), tuple(outcome_diffs), episode_diffs)
+    return LabelImpact(symbol, day, value_a, value_b, len(bases), tuple(outcome_diffs), episode_diffs,
+                       tuple(incomplete))

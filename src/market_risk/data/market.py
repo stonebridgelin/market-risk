@@ -451,10 +451,11 @@ def local_input(paths: StoragePaths, path: Any, source: str) -> SourceInfo:
 
 def breadth_series(readings: Mapping[dt.date, BreadthReading], end: dt.date,
                    paths: StoragePaths | None = None) -> list[NewSeries]:
-    """S5FI、S5TW：TradingView 清洗结果优先，手工录入补充（SPEC 6.5）。"""
+    """S5FI、S5TW：TradingView 清洗结果优先，手工录入补充（SPEC 6.5）。只写该项有数值的日期（H-05）。"""
     out = []
     for name, attr in zip(BREADTH_SERIES, ("s5fi", "s5tw"), strict=True):
-        rows = {d: {"value": getattr(r, attr), "source": r.source} for d, r in readings.items() if d <= end}
+        rows = {d: {"value": getattr(r, attr), "source": r.source} for d, r in readings.items()
+                if d <= end and getattr(r, attr) is not None}
         inputs = [] if paths is None else [local_input(paths, paths.tv_processed_file(name), "tradingview"),
                                            local_input(paths, paths.breadth_csv, "manual")]
         out.append(NewSeries(name, "value", rows, "tradingview", inputs))
@@ -652,20 +653,6 @@ def raw_inputs_from_series(
         oas_sources={d: str(r["source"]) for d, r in oas_w.items()},
         treasury_sources={d: str(r["source"]) for d, r in t_w.items()},
     )
-
-
-def load_breadth_readings(paths: StoragePaths, base: dt.date | None = None) -> dict[dt.date, BreadthReading]:
-    """S5FI、S5TW 都有数值的日期组成读数（截断到基准日）。"""
-    fi = {d: r for d, r in _load(paths, "S5FI").items() if base is None or d <= base}
-    tw = {d: r for d, r in _load(paths, "S5TW").items() if base is None or d <= base}
-    out = {}
-    for d in sorted(set(fi) & set(tw)):
-        a, b = fi[d], tw[d]
-        if a["value"] is None or b["value"] is None:
-            continue
-        out[d] = BreadthReading(d, a["value"], b["value"], a["source"] or "manual",
-                                "TradingView 导出" if a["source"] == "tradingview" else "")
-    return out
 
 
 def write_vintage(paths: StoragePaths, series: str, base: dt.date, values: Mapping[dt.date, float | None],

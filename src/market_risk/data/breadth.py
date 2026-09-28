@@ -102,13 +102,21 @@ def merge_breadth(
 ) -> tuple[dict[dt.date, BreadthReading], dict[dt.date, str]]:
     """合并两个来源。同一日期都有数值但不一致时记录差异，以 TradingView 为准。
 
-    TradingView 只有 S5FI、S5TW 其中之一的日期不采用（两项需同时来自同一来源）。
+    TradingView 只有 S5FI、S5TW 其中之一的日期保留已知项，另一项为 None（审查 H-05，2026-09-28 负责人确认）。
+    该日期若同时有手工录入，两个来源不混合拼成一条读数，报错要求人工裁定。
     返回 (读数, {日期: 差异说明})。
 
     S5FI、S5TW 与前一交易日相同属离散取值下的偶然（TRADINGVIEW 7.2），不标注疑似陈旧值（stale_fields 为空）。
     """
     result: dict[dt.date, BreadthReading] = dict(manual)
     conflicts: dict[dt.date, str] = {}
+    for d in sorted(set(tv_s5fi) ^ set(tv_s5tw)):
+        if d in manual:
+            raise BreadthError(f"{d}：TradingView 只有 S5FI、S5TW 其中一项，同日又有手工录入；"
+                               "两个来源不混合，请人工裁定")
+        f = _check_value("S5FI", tv_s5fi[d], d) if d in tv_s5fi else None
+        w = _check_value("S5TW", tv_s5tw[d], d) if d in tv_s5tw else None
+        result[d] = BreadthReading(d, f, w, "tradingview", "TradingView 导出（只有一项）")
     for d in sorted(set(tv_s5fi) & set(tv_s5tw)):
         tv = make_reading(d, tv_s5fi[d], tv_s5tw[d], "TradingView 导出")
         tv = BreadthReading(tv.date, tv.s5fi, tv.s5tw, "tradingview", tv.note)

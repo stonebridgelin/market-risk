@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import csv
+import itertools
 import datetime as dt
 import json
 import random
@@ -17,6 +18,7 @@ from decimal import ROUND_HALF_UP, Decimal as D
 from pathlib import Path
 
 import pandas_market_calendars as pmc
+import yaml
 
 ROOT = Path(sys.argv[1])
 OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(__file__).parent / "audit_out"
@@ -51,7 +53,12 @@ VXC = {d: p2(r["value"]) for d, r in rows("VIX_CBOE").items() if r["value"]}
 UST = {d: p2(r["value"]) for d, r in rows("UST10Y").items() if r["value"]}
 OAS_ROWS = rows("BAMLH0A0HYM2")
 OAS = {d: p2(r["value"]) for d, r in OAS_ROWS.items() if r["value"]}
-EXCLUDED = {dt.date(2015, 1, 19)}   # config/data_decisions.yaml：BAMLH0A0HYM2 exclude
+# config/data_decisions.yaml 的 OAS 裁定（直接读 YAML，不经项目代码）
+_DECISIONS = yaml.safe_load((ROOT / "config/data_decisions.yaml").read_text(encoding="utf-8")) or []
+EXCLUDED = {dt.date.fromisoformat(str(x["date"])) for x in _DECISIONS
+            if x["symbol"] == "BAMLH0A0HYM2" and x["decision"] == "exclude"}
+KEEP = {dt.date.fromisoformat(str(x["date"])) for x in _DECISIONS
+        if x["symbol"] == "BAMLH0A0HYM2" and x["decision"] == "keep"}
 SPX = {d: p2(r["value"]) for d, r in rows("SPX").items() if r["value"]}
 
 BOND_DAYS = {d for d in UST if d.weekday() < 5}   # 债市营业日 = 财政部有数值的工作日（SPEC 5.2）
@@ -72,11 +79,14 @@ def ma(sym, i, n):
     return sum(vals) / D(n)
 
 
+# H-04（负责人决定）：按标的的评分窗口。SPY 需 MA200 → T−199 至 T；QQQ、RSP 需 MA50 与三环节 → T−49 至 T
+LOOKBACK = {"SPY": 199, "QQQ": 49, "RSP": 49}
+
+
 def etf_ok(sym, base):
-    """回看窗口（与项目相同的 420 个自然日内全部交易日）无缺日。"""
-    lo = base - dt.timedelta(days=420)
-    first = min(d for d in CL[sym] if d >= lo)
-    return all(d in CL[sym] for d in TD[TI[first]: TI[base] + 1])
+    """评分窗口内每个 NYSE 交易日都有收盘价。"""
+    i = TI[base]
+    return all(d in CL[sym] for d in TD[i - LOOKBACK[sym]: i + 1])
 
 
 def three_seg(sym, i):
@@ -100,60 +110,70 @@ def bool_opts(known_val):
 
 
 # ---------------- 各维度（SOP 7.2 / 7.3 原文） ----------------
-def price_v2m(i, missing):
-    if missing:
-        return None, (0, 1, 2)
-    b50 = b20 = 0
-    for s in ("SPY", "QQQ", "RSP"):
-        c = CL[s][TD[i]]
-        b50 += c < ma(s, i, 50)
-        b20 += c < ma(s, i, 20)
-    seg = any(three_seg(s, i) for s in ("SPY", "QQQ", "RSP"))
-    spy = CL["SPY"][TD[i]] < ma("SPY", i, 200)
-    if b50 >= 2 or seg or spy:
-        return 2, (2,)
-    if b50 == 0 and b20 <= 1:
-        return 0, (0,)
-    return 1, (1,)
+def etf_conditions(s, i):
+    """一只 ETF 的价格条件真值：(收盘<MA20, 收盘<MA50, 收盘<MA200（只对 SPY 有意义）, MA5<MA50, 三环节完成)。"""
+    c = CL[s][TD[i]]
+    m50 = ma(s, i, 50)
+    b200 = c < ma(s, i, 200) if s == "SPY" else False
+    return (c < ma(s, i, 20), c < m50, b200, ma(s, i, 5) < m50, three_seg(s, i))
 
 
-def price_v3r1(i, missing):
-    if missing:
-        return None, (0, 1, 2)
-    both = b50 = b20 = 0
-    for s in ("SPY", "QQQ", "RSP"):
-        c, m5, m20, m50 = CL[s][TD[i]], ma(s, i, 5), ma(s, i, 20), ma(s, i, 50)
-        b50 += c < m50
-        b20 += c < m20
-        both += (c < m50 and m5 < m50)
-    spy = CL["SPY"][TD[i]] < ma("SPY", i, 200)
-    if both >= 2 or spy:
-        return 2, (2,)
-    if b50 == 0 and b20 <= 1:
-        return 0, (0,)
-    return 1, (1,)
+def price_rules(conds):
+    """conds：{标的: 条件真值}。返回 (v2-M 分数, v3-R1 分数)，逐条按 SOP 7.2、7.3。"""
+    n20 = sum(x[0] for x in conds.values())
+    n50 = sum(x[1] for x in conds.values())
+    spy200 = conds["SPY"][2]
+    both = sum(x[1] and x[3] for x in conds.values())
+    seg = any(x[4] for x in conds.values())
+    zero = n50 == 0 and n20 <= 1
+    v2 = 2 if (n50 >= 2 or seg or spy200) else 0 if zero else 1
+    v3 = 2 if (both >= 2 or spy200) else 0 if zero else 1
+    return v2, v3
+
+
+def price_both(i, missing):
+    """H-03（负责人决定）：缺失 ETF 的全部相关条件取所有真值组合（QQQ、RSP 的 MA200 不参与评分，固定为否），
+    其余 ETF 用实际条件；可能分数为各组合结果的并集，唯一时给确定分数。"""
+    known = {s: etf_conditions(s, i) for s in ("SPY", "QQQ", "RSP") if s not in missing}
+    spaces = []
+    for s in missing:
+        spaces.append([(b20, b50, b200 if s == "SPY" else False, m5, seg)
+                       for b20 in (True, False) for b50 in (True, False) for b200 in (True, False)
+                       for m5 in (True, False) for seg in (True, False)])
+    s2, s3 = set(), set()
+    for combo in itertools.product(*spaces):
+        v2, v3 = price_rules({**known, **dict(zip(missing, combo))})
+        s2.add(v2)
+        s3.add(v3)
+    out = []
+    for s in (s2, s3):
+        p = tuple(sorted(s))
+        out.append((p[0] if len(p) == 1 else None, p))
+    return out[0], out[1]
+
+
+PCT_GRID = [D(k) / 100 for k in range(0, 10001)]   # 0.00 至 100.00，按公布精度逐一穷举
 
 
 def breadth(i, version, near_high):
-    """F、W 已知时，F5、W5 缺失按"F<F5 / W<W5 两种真值"枚举（与项目的临界点取值方法不同）。
-    near_high 为 None 表示 SPY 缺失（v2-M 条件 b 两种假设）。"""
+    """F、W 缺一项时，对缺失项在 0.00–100.00 上按 0.01 逐一穷举（H-05，负责人决定：保留已知项）；
+    F5、W5 缺失时按"F<F5 / W<W5 两种真值"枚举（F5∈[0,100]：F<F5 可能当且仅当 F<100；F≥F5 总可能）。
+    两种方法都与项目的临界点取值不同。near_high 为 None 表示 SPY 缺失（v2-M 条件 b 两种假设）。"""
     d, d5 = TD[i], TD[i - 5]
-    f, w = FI.get(d) if d in TW else None, TW.get(d) if d in FI else None
-    f5, w5 = (FI.get(d5), TW.get(d5)) if (d5 in FI and d5 in TW) else (None, None)
-    if f is None or w is None:
+    f, w = FI.get(d), TW.get(d)
+    f5, w5 = FI.get(d5), TW.get(d5)
+    if f is None and w is None:
         return "BASE_MISSING", None
-    low = min(f, w)
     outs = set()
-    for ff5 in bool_opts(None if f5 is None else f < f5):
-        if f5 is None and ff5 and f >= 100:
-            continue
-        for ww5 in bool_opts(None if w5 is None else w < w5):
-            if w5 is None and ww5 and w >= 100:
-                continue
-            for nh in bool_opts(near_high) if version == "v2-M" else [None]:
-                a = low < 40 and ff5 and ww5
-                b = (f < 40 and nh) if version == "v2-M" else (f < 40 and ff5)
-                outs.add(2 if (a or b) else 0 if low >= 50 else 1)
+    for fv in ([f] if f is not None else PCT_GRID):
+        for wv in ([w] if w is not None else PCT_GRID):
+            low = min(fv, wv)
+            for ff5 in ([fv < f5] if f5 is not None else ([True, False] if fv < 100 else [False])):
+                for ww5 in ([wv < w5] if w5 is not None else ([True, False] if wv < 100 else [False])):
+                    for nh in bool_opts(near_high) if version == "v2-M" else [None]:
+                        a = low < 40 and ff5 and ww5
+                        b = (fv < 40 and nh) if version == "v2-M" else (fv < 40 and ff5)
+                        outs.add(2 if (a or b) else 0 if low >= 50 else 1)
     outs = tuple(sorted(outs))
     return (outs[0] if len(outs) == 1 else None), outs
 
@@ -246,14 +266,20 @@ def month_end(d):
 
 
 def v2m_obs_before(base):
-    """v2-M 观测：有数值；排除债市休市日（工作日且财政部无数值）的观测，自然月末除外；排除已裁定 exclude。"""
+    """v2-M 观测：有数值；排除债市休市日（工作日且财政部无数值）的观测，自然月末除外；
+    排除非月末的周末观测（H-06）；排除已裁定 exclude；已裁定 keep 的保留。"""
     out = []
     d = base
     while len(out) < 6:
         d -= dt.timedelta(days=1)
         if d not in OAS or d in EXCLUDED:
             continue
+        if d in KEEP:
+            out.append(d)
+            continue
         if d.weekday() < 5 and d not in BOND_DAYS and not month_end(d):
+            continue
+        if d.weekday() >= 5 and not month_end(d):
             continue
         out.append(d)
     return out
@@ -299,7 +325,10 @@ for base in bases:
     if "SPY" not in missing:
         hi20 = max(CL["SPY"][x] for x in TD[i - 19: i + 1])
         near_high = CL["SPY"][base] >= hi20 * D("0.98")
-        for s in ("SPY", "QQQ", "RSP"):
+    for s in ("SPY", "QQQ", "RSP"):
+        if s in missing:
+            continue
+        if True:
             for x in TD[i - 199: i + 1]:
                 if x in CL[s] and x in CL_ROUND[s] and D(repr(CL_ROUND[s][x])) != CL[s][x]:
                     round_diffs.append((s, x))
@@ -315,8 +344,9 @@ for base in bases:
     vx = vix_dim(i)
     c3 = v3r1_credit(base)
     c2 = v2m_credit(base)
+    prices = dict(zip(("v2-M", "v3-R1"), price_both(i, missing)))
     for ver in ("v2-M", "v3-R1"):
-        pr = price_v2m(i, missing) if ver == "v2-M" else price_v3r1(i, missing)
+        pr = prices[ver]
         br = breadth(i, ver, near_high)
         if br[0] == "BASE_MISSING":
             base_missing.append((base, ver))
@@ -361,7 +391,9 @@ rnd = random.Random(20260927)
 by_year = {}
 for b in bases:
     by_year.setdefault(b.year, []).append(b)
-sample = sorted(set(special) | {rnd.choice(v) for v in by_year.values()})
+base_set = set(bases)
+sample = sorted({d for d in special if d in base_set} | {rnd.choice(v) for v in by_year.values()})
+EARLY = set(pmc.get_calendar('NYSE').early_closes(sched).index.date)
 checks = []
 
 
@@ -383,14 +415,14 @@ for base in sample:
     met = metrics[base.isoformat()]
     res, rv, vx, c3, c2, missing, near_high = indep[base]
     t5, t20 = TD[i - 5], TD[i - 20]
-    parts = [f"## {base}（T−5 {t5}，T−20 {t20}，窗口 {TD[i-19]} 至 {base}；提前收盘={base in set(pmc.get_calendar('NYSE').early_closes(sched).index.date)}）"]
+    parts = [f"## {base}（T−5 {t5}，T−20 {t20}，窗口 {TD[i-19]} 至 {base}；提前收盘={base in EARLY}）"]
     for s in ("SPY", "QQQ", "RSP"):
         if s in missing:
             parts.append(f"{s} 缺失")
             continue
         parts.append(" ".join([cmp(f"{s}.close", CL[s][base], met[f"{s}.close"])] +
                               [cmp(f"{s}.ma{n}", ma(s, i, n), met[f"{s}.ma{n}"]) for n in (5, 20, 50, 200)]))
-    hi20 = max(CL["SPY"][x] for x in TD[i - 19: i + 1])
+    hi20 = None if "SPY" in missing else max(CL["SPY"][x] for x in TD[i - 19: i + 1])
     parts.append(cmp("SPY20日最高", hi20, met["spy_window_max_close"]))
     parts.append(" ".join([cmp("F", FI.get(base), met["F"]), cmp("W", TW.get(base), met["W"]),
                            cmp("F5(T−5)", FI.get(t5), met["F5"]), cmp("W5(T−5)", TW.get(t5), met["W5"])]))
@@ -524,27 +556,37 @@ with open(OUT / "zigzag_compare.md", "w", encoding="utf-8") as f:
                     f.write(f"| {sym} | {lvtxt}% | {hd} | {hv} | {ld} | {lval} | {dd}% | {cd} | {verdict} |\n")
 
 # ---------------- 结果标签（全部基准日）----------------
+# 窗口结束：SPX、QQQ 最新日期中较早的一个不早于窗口最后一个交易日；否则不生成该行（窗口未结束）。
+# 窗口已结束但基准日或窗口内缺价：写一行空标签（H-09，负责人决定）。结束于保留期的窗口不写出。
 outs = {r["base_date"]: r for r in read_run("outcomes.csv")}
+LAST = min(max(SPX), max(QQQP))
 lab_diff = 0
 lab_lines = []
+seen = set()
 for base in bases:
     i = TI[base]
-    if i + 20 >= len(TD) or TD[i + 20] >= dt.date(2023, 1, 1):
+    if i + 20 >= len(TD) or TD[i + 20] > LAST or TD[i + 20] >= dt.date(2023, 1, 1):
         continue
+    seen.add(base.isoformat())
     win = TD[i + 1: i + 21]
-    if any(d not in SPX or d not in QQQP for d in win):
-        continue
-    sd = [(SPX[d] / SPX[base] - 1) * 100 for d in win]
-    qd = [(QQQP[d] / QQQP[base] - 1) * 100 for d in win]
-    ev = [d for d, a, b in zip(win, sd, qd, strict=True) if a <= -5 or b <= -7]
-    near = not ev and (min(sd) <= -4 or min(qd) <= -6)
     r = outs.get(base.isoformat())
-    mine = ("是" if ev else "否", ev[0].isoformat() if ev else "", "是" if near else "否",
-            format(min(sd).quantize(D("0.0001"), ROUND_HALF_UP), "f"))
-    theirs = None if r is None else (r["is_event"], r["event_date"], r["is_near_event"], r["spx_drawdown_from_base"])
+    theirs = None if r is None else (r["is_event"], r["event_date"], r["is_near_event"], r["spx_drawdown_from_base"],
+                                     bool(r.get("data_note")))
+    if any(d not in SPX or d not in QQQP for d in (base, *win)):
+        mine = ("", "", "", "", True)
+    else:
+        sd = [(SPX[d] / SPX[base] - 1) * 100 for d in win]
+        qd = [(QQQP[d] / QQQP[base] - 1) * 100 for d in win]
+        ev = [d for d, a, b in zip(win, sd, qd, strict=True) if a <= -5 or b <= -7]
+        near = not ev and (min(sd) <= -4 or min(qd) <= -6)
+        mine = ("是" if ev else "否", ev[0].isoformat() if ev else "", "是" if near else "否",
+                format(min(sd).quantize(D("0.0001"), ROUND_HALF_UP), "f"), False)
     if mine != theirs:
         lab_diff += 1
         lab_lines.append(f"{base}: 独立 {mine} 正式 {theirs}")
+for extra in sorted(set(outs) - seen):
+    lab_diff += 1
+    lab_lines.append(f"{extra}: 正式有标签行，独立判定窗口未结束或在保留期")
 with open(OUT / "label_compare.txt", "w", encoding="utf-8") as f:
     f.write(f"结果标签不一致 {lab_diff}\n" + "\n".join(lab_lines[:50]) + "\n")
 print("done", len(score_diffs), checks.count(False), mism, lab_diff)

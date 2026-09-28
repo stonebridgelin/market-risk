@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-09-27T15:46:37+00:00",
+  "generated_at_utc": "2026-09-28T11:14:20+00:00",
   "series": {
     "BAMLH0A0HYM2": {
       "file": "data/market/daily/BAMLH0A0HYM2.csv",
@@ -177,17 +177,17 @@
       "file": "data/market/daily/S5TW.csv",
       "kind": "value",
       "sources": {
-        "tradingview": 4575
+        "tradingview": 4582
       },
-      "downloaded_at_utc": "2026-09-27T11:11:35+00:00",
+      "downloaded_at_utc": "2026-09-28T11:14:20+00:00",
       "inputs": [
         "data/manual/breadth.csv",
         "data/processed/tradingview/S5TW.csv"
       ],
-      "rows": 4575,
-      "first_date": "2008-08-04",
+      "rows": 4582,
+      "first_date": "2008-07-24",
       "last_date": "2026-09-25",
-      "sha256": "ad977fe30931dbe5c223a4a3b4e7e747fae5c8dbda52c44c847ae409517bc904"
+      "sha256": "df05e4db5f86abb43bf6ae08c324d0f7c1a06370018efc4badccdceb09f48e35"
     },
     "SPX": {
       "file": "data/market/daily/SPX.csv",

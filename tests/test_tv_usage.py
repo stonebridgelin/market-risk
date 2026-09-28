@@ -61,9 +61,31 @@ def test_merge_breadth_tradingview_first():
     merged, conflicts = merge_breadth(tv_fi, tv_tw, manual)
     assert merged[D(2025, 11, 28)].s5fi == 58.44 and merged[D(2025, 11, 28)].source == "tradingview"
     assert merged[D(2025, 12, 1)].source == "manual"
-    assert D(2025, 11, 25) not in merged
+    # H-05（2026-09-28 负责人确认）：只有一项的日期保留已知项，另一项为 None
+    one = merged[D(2025, 11, 25)]
+    assert (one.s5fi, one.s5tw, one.source) == (50.0, None, "tradingview")
     assert list(conflicts) == [D(2025, 11, 28)]
     assert "以 TradingView 为准" in conflicts[D(2025, 11, 28)]
+
+
+def test_merge_breadth_one_sided_with_manual_requires_decision():
+    """TradingView 只有一项、同日又有手工录入：两个来源不混合，报错要求人工裁定。"""
+    from market_risk.data.breadth import BreadthError
+
+    manual = {D(2025, 11, 25): BreadthReading(D(2025, 11, 25), 50.0, 60.0)}
+    with pytest.raises(BreadthError, match="人工裁定"):
+        merge_breadth({D(2025, 11, 25): 50.0}, {}, manual)
+
+
+def test_breadth_series_writes_only_valued_dates():
+    """数据集中每个序列只写该项有数值的日期：只有 S5TW 的日期进入 S5TW.csv，不在 S5FI.csv 留空行。"""
+    from market_risk.data.market import breadth_series
+
+    merged, _ = merge_breadth({D(2008, 8, 4): 34.75}, {D(2008, 8, 1): 52.1, D(2008, 8, 4): 52.93}, {})
+    fi, tw = breadth_series(merged, D(2008, 8, 4))
+    assert sorted(fi.rows) == [D(2008, 8, 4)]
+    assert sorted(tw.rows) == [D(2008, 8, 1), D(2008, 8, 4)]
+    assert tw.rows[D(2008, 8, 1)] == {"value": 52.1, "source": "tradingview"}
 
 
 def test_load_breadth_from_processed_and_manual(paths):

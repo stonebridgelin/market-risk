@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as dt
+from decimal import Decimal
 
 import pytest
-from conftest import load_sample_raw
+from conftest import load_sample_raw, synthetic_raw
 
 from market_risk import calendar as mcal
 from market_risk.backtest.engine import day_flags
@@ -143,12 +144,81 @@ def test_qqq_missing_t_minus_100_only_blanks_reference_ma200() -> None:
     assert all(result.price.score is not None for result in score_versions(snapshot))
 
 
+SYN_BASE = D(2025, 11, 28)
+
+
+def synthetic(overrides: dict[str, dict[dt.date, float]] | None = None,
+              drop: dict[str, list[dt.date]] | None = None):
+    """构造数据：三只 ETF 收盘价恒为 100（conftest.synthetic_raw），再按需覆盖或删除某些日期。"""
+    raw = synthetic_raw(SYN_BASE, overrides)
+    closes = {s: {d: v for d, v in c.items() if d not in (drop or {}).get(s, [])} for s, c in raw.closes.items()}
+    return snap(dataclasses.replace(raw, closes=closes))
+
+
+def tail(n: int, value: float) -> dict[dt.date, float]:
+    """截至基准日（含）最后 n 个交易日的收盘价改为 value。"""
+    days = mcal.stock_trading_days(SYN_BASE - dt.timedelta(days=30), SYN_BASE)[-n:]
+    return dict.fromkeys(days, value)
+
+
 def test_spy_missing_t_minus_100_is_enumerated() -> None:
-    """H-04：SPY 的必需窗口为 T−199 至 T，缺 T−100 应进入 H-03 枚举。"""
-    missing = mcal.shift_trading_days(BASE, -100)
-    snapshot = snap(raw_with((55.0, 60.0, 52.0, 57.0), {"SPY": [missing]}))
+    """H-04：SPY 的必需窗口为 T−199 至 T，缺 T−100 应进入 H-03 枚举。
+
+    人工推算（SOP 7.2、7.3）：QQQ、RSP 收盘价恒为 100 → 收盘 = MA20 = MA50，不低于任何均线，三环节不完成。
+    SPY 的 5 个条件（收盘<MA20、<MA50、<MA200、MA5<MA50、三环节完成）全部枚举：
+    - v2-M：(a) 至少两只低于 MA50 不可能（只有 SPY 可能）；(b) SPY 三环节完成 → 2；(c) SPY<MA200 → 2；
+      SPY 不低于 MA50、无三环节、不低于 MA200 → 0 分条件成立（最多一只低于 MA20）→ 0；
+      SPY 低于 MA50、无三环节、不低于 MA200 → 1。可能取值 {0,1,2}。
+    - v3-R1：(a) 需两只 → 不可能；(b) SPY<MA200 → 2；SPY 不低于 MA50 且不低于 MA200 → 0；
+      SPY 低于 MA50 但不低于 MA200 → 1。可能取值 {0,1,2}。
+    """
+    missing = mcal.shift_trading_days(SYN_BASE, -100)
+    snapshot = synthetic(drop={"SPY": [missing]})
     assert "SPY" in dict(snapshot.missing_etfs)
-    assert all(result.price.possible_scores for result in score_versions(snapshot))
+    a, b = score_versions(snapshot)
+    assert (a.price.score, a.price.possible_scores) == (None, (0, 1, 2))
+    assert (b.price.score, b.price.possible_scores) == (None, (0, 1, 2))
+
+
+def test_rsp_missing_three_segment_decides_v2m() -> None:
+    """H-03：RSP 缺失，SPY、QQQ 收盘价恒为 100（不低于任何均线、三环节不完成）。
+
+    人工推算：
+    - v2-M：(a) 需两只低于 MA50，只有 RSP 可能 → 不成立；(c) SPY 不低于 MA200 → 不成立；
+      只有 (b)「RSP 三环节完成」能给 2 分。RSP 无三环节时：不低于 MA50 → 0 分（最多一只低于 MA20）；
+      低于 MA50 → 1。可能取值 {0,1,2}，其中 2 只来自三环节——若枚举漏掉三环节，结果会是 {0,1}。
+    - v3-R1：三环节不计分；(a) 需两只 → 不成立；(b) SPY 不低于 MA200 → 不成立；
+      RSP 不低于 MA50 → 0，低于 MA50 → 1。可能取值 {0,1}。
+    """
+    snapshot = synthetic(drop={"RSP": [SYN_BASE]})
+    assert dict(snapshot.missing_etfs).keys() == {"RSP"}
+    a, b = score_versions(snapshot)
+    assert (a.price.score, a.price.possible_scores) == (None, (0, 1, 2))
+    assert (b.price.score, b.price.possible_scores) == (None, (0, 1))
+
+
+def test_qqq_missing_other_two_confirm_both_versions() -> None:
+    """H-03：QQQ 缺失；SPY、RSP 最后 5 个交易日（T−4 至 T）收盘价为 90，之前为 100；SPY 在 T−50 以前为 80。
+
+    人工推算（SPY）：MA5 = 90；MA50 = (45×100 + 5×90)/50 = 99；MA200 = (150×80 + 45×100 + 5×90)/200 = 84.75。
+    收盘 90 < MA50 99，MA5 90 < MA50 99；收盘 90 ≥ MA200 84.75（(c) 不成立）。
+    RSP：MA5 = 90，MA50 = 99 → 收盘与 MA5 都低于 MA50。
+    三环节：d1=T−4（90）的 Lc = 100，第一步成立，但 d1 与基准日之间没有 90 < d2 ≤ 100 的日子；其余 d1 收盘 100
+    不低于 Lc → SPY、RSP 都不完成。
+    - v2-M：(a) SPY、RSP 两只低于 MA50 → 2，与 QQQ 的任何取值无关 → 确定 2。
+    - v3-R1：(a) SPY、RSP 两只同时满足收盘<MA50 与 MA5<MA50 → 2 → 确定 2。
+    """
+    old = {d: 80.0 for d in mcal.stock_trading_days(SYN_BASE - dt.timedelta(days=420),
+                                                     mcal.shift_trading_days(SYN_BASE, -50))}
+    snapshot = synthetic({"SPY": {**old, **tail(5, 90.0)}, "RSP": tail(5, 90.0)}, drop={"QQQ": [SYN_BASE]})
+    assert dict(snapshot.missing_etfs).keys() == {"QQQ"}
+    spy, rsp = snapshot.etfs["SPY"], snapshot.etfs["RSP"]
+    assert (spy.ma5, spy.ma50, spy.ma200) == (90, 99, Decimal("84.75"))       # 核对手算的中间值
+    assert (rsp.ma5, rsp.ma50) == (90, 99)
+    assert not any(r.completed for r in snapshot.three_segment[True])
+    a, b = score_versions(snapshot)
+    assert (a.price.score, a.price.possible_scores) == (2, (2,))
+    assert (b.price.score, b.price.possible_scores) == (2, (2,))
 
 
 def test_extra_non_trading_price_never_fills_missing_stock_day() -> None:

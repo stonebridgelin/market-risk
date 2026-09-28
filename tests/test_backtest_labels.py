@@ -147,6 +147,34 @@ def test_label_impact_detects_changes_and_ignores_ndx():
     assert not label_impact("NDX", day, D("1"), spx, qqq, SPX_ONLY_5).material
 
 
+def test_only_one_series_updated_means_window_not_finished() -> None:
+    """只更新了一个序列：SPX 已有窗口最后一个交易日，QQQ 只到前一天 → 窗口未结束，不生成该行（不是"数据不齐"）。"""
+    days = mcal.stock_trading_days(dt.date(2012, 3, 1), dt.date(2012, 5, 31))
+    base = days[0]
+    end = days[20]
+    spx = {d: D("100") for d in days if d <= end}
+    qqq = {d: D("100") for d in days if d < end}
+    assert outcome_rows([base], spx, qqq, CFG) == []
+    assert outcome_rows([base], qqq, spx, CFG) == []             # 反过来（QQQ 更新、SPX 未更新）同样
+    (row,) = outcome_rows([base], spx, {**qqq, end: D("100")}, CFG)   # 两者都到窗口末日 → 生成标签
+    assert row.label is not None and row.data_note == ""
+
+
+def test_label_impact_both_sources_incomplete_is_not_a_difference() -> None:
+    """两种来源都因窗口内缺价无法生成标签：不算差异，单独列出。"""
+    from market_risk.backtest.labels import label_impact
+
+    days = mcal.stock_trading_days(dt.date(2012, 3, 1), dt.date(2012, 5, 31))
+    day = days[25]
+    spx = {d: D("100") for d in days}
+    qqq = {d: D("100") for d in days if d != days[22]}          # QQQ 窗口内缺一天：两种 SPX 来源都算不出标签
+    imp = label_impact("SPX", day, D("100.03"), spx, qqq, SPX_ONLY_5)
+    assert not imp.outcome_diffs and not imp.material
+    # 检验的基准日为 days[5] 至 days[25]；其中 days[5] 至 days[21] 的结果窗口包含 days[22]，days[22] 是基准日本身，
+    # 都缺价；days[23] 至 days[25] 的窗口在 days[22] 之后，能生成标签（两种来源相同，不算差异）
+    assert imp.incomplete_bases == tuple(days[5:23])
+
+
 def test_incomplete_outcome_window_keeps_blank_row() -> None:
     """H-09：结果窗口已经结束，SPX 缺一天时保留一行，标签全部留空。"""
     days = mcal.stock_trading_days(dt.date(2012, 3, 1), dt.date(2012, 5, 31))
@@ -157,7 +185,7 @@ def test_incomplete_outcome_window_keeps_blank_row() -> None:
     (row,) = outcome_rows([base], spx, qqq, CFG)
     serialized = outcome_row(row)
     assert row.label is None and str(missing) in row.data_note
-    assert row.data_note.startswith("数据不齐：缺 ")
+    assert row.data_note.startswith("数据不齐：")
     assert serialized["base_date"] == base and serialized["window_end"] == days[20]
     assert all(serialized[k] is None for k in ("spx_drawdown_from_base", "qqq_drawdown_from_base",
                                                   "spx_peak_to_trough_drawdown", "qqq_peak_to_trough_drawdown",

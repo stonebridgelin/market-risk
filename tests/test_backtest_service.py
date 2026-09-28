@@ -69,6 +69,26 @@ def test_explicit_from_before_config_start_is_rejected(ctx):
         services.backtest_run(ctx, D(2008, 8, 8), D(2008, 8, 11), git=CLEAN)
 
 
+def test_backtest_run_passes_data_decisions_to_engine(ctx, monkeypatch):
+    """H-02：services.backtest_run 把 config/data_decisions.yaml 的全部裁定传给回测引擎。"""
+    from market_risk.backtest import engine
+    from market_risk.config import load_data_decisions
+
+    seen = {}
+    real = engine.run_backtest
+
+    import inspect
+
+    def spy(*args, **kwargs):
+        seen["decisions"] = inspect.signature(real).bind(*args, **kwargs).arguments.get("decisions")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(engine, "run_backtest", spy)
+    services.backtest_run(ctx, D(2018, 1, 3), D(2018, 1, 5), git=CLEAN,
+                          now=dt.datetime(2026, 9, 27, 13, tzinfo=dt.UTC))
+    assert seen["decisions"] == load_data_decisions() and seen["decisions"]
+
+
 def test_official_pointer_gitignore_and_rebuild(ctx, run):
     services.backtest_set_official(ctx, run.run_id)
     assert backtests.read_official(ctx.paths)["run_id"] == run.run_id

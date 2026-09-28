@@ -157,9 +157,11 @@ def data_build(ctx: Context, offline: bool = False, refresh: bool = False, accep
 
             def collect(e: dt.date) -> Any:
                 return collect_online(ctx.paths, ctx.settings, e, key, refresh, only)
+    from market_risk.data.breadth import BreadthError
+
     try:
         series, conflicts = collect(day)
-    except DataFetchError as exc:
+    except (DataFetchError, BreadthError) as exc:
         raise ServiceError(f"数据集生成失败：{exc}") from exc
     names = {s.name for s in series}
     from market_risk.config import ConfigError
@@ -1174,8 +1176,11 @@ def index_dispute_label_impact(ctx: Context, tolerance: str = "0.02") -> IndexIm
              "| 指数 | 日期 | Yahoo | TradingView | 受影响基准日数 | 结果标签差异 | 回调事件差异 | 结论 |",
              "|---|---|---|---|---|---|---|---|"]
     for i in impacts:
+        incomplete = ("（两种来源均数据不齐、无法生成标签：" + "、".join(map(str, i.incomplete_bases)) + "）"
+                      if i.incomplete_bases else "")
         lines.append(f"| {i.symbol} | {i.date} | {i.value_a} | {i.value_b} | {i.outcome_bases} | "
-                     f"{'；'.join(i.outcome_diffs) or '无'} | {'；'.join(i.episode_diffs) or '无'} | "
+                     f"{'；'.join(i.outcome_diffs) or '无'}{incomplete}"
+                     f" | {'；'.join(i.episode_diffs) or '无'} | "
                      f"{'有实质影响' if i.material else '无实质影响'} |")
     text = "\n".join(lines) + "\n"
     path = ctx.paths.reports_dir / "index_dispute_label_impact.md"

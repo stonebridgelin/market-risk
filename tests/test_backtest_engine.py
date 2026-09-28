@@ -168,8 +168,18 @@ def test_fallback_source_flags(series):
 
 
 def test_configured_start_is_earliest_complete_day(series):
-    """配置的起点 2008-08-11 = 第一个基准日与其 T−5 都有广度读数的交易日。"""
+    """配置的起点 2008-08-11 = 第一个基准日与其 T−5 的 S5FI、S5TW 都有数值（齐全）的交易日。
+
+    H-05 之后数据集保留只有一项的日期（2008-07-24 至 08-01 只有 S5TW），单项读数不算齐全（backtest.yaml：
+    所有评分必需输入都齐全；SPEC 阶段6：S5FI、S5TW 都有数值），起点不变。
+    """
     breadth = series.breadth
+
+    def complete(d: dt.date) -> bool:
+        r = breadth.get(d)
+        return r is not None and r.s5fi is not None and r.s5tw is not None
+
     first = next(d for d in mcal.stock_trading_days(D(2008, 7, 1), D(2008, 9, 30))
-                 if d in breadth and mcal.shift_trading_days(d, -5) in breadth)
+                 if complete(d) and complete(mcal.shift_trading_days(d, -5)))
     assert first == CFG.start == D(2008, 8, 11)
+    assert breadth[D(2008, 7, 24)].s5fi is None and breadth[D(2008, 7, 24)].s5tw is not None
