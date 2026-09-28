@@ -165,9 +165,22 @@ def test_oas_fetch_failure_preserves_series_and_records_manifest(paths, monkeypa
     result = market.build_dataset(paths, [*series, extra], now=stamp)
     assert paths.market_daily_file(SETTINGS.oas_series).read_bytes() == old
     assert "SPY" in result.changed and SETTINGS.oas_series not in result.changed
-    failure = market.read_manifest(paths)["fetch_failures"][SETTINGS.oas_series]
-    assert failure == {"failed_at_utc": "2026-09-27T00:00:00+00:00", "reason": "HTTP 500 api_key=***"}
+    manifest = market.read_manifest(paths)
+    failure = manifest["fetch_failures"][SETTINGS.oas_series]
+    assert failure == [{"failed_at_utc": "2026-09-27T00:00:00+00:00",
+                        "reason": "HTTP 500 api_key=***", "recovered_at_utc": None}]
+    assert manifest["fetch_failure_status"][SETTINGS.oas_series] is True
     assert "SECRET" not in paths.market_manifest.read_text(encoding="utf-8")
+
+    restored = NewSeries(SETTINGS.oas_series, "value",
+                         {D(2025, 1, 3): {"value": 3.3, "source": "fred"}}, "fred")
+    market.build_dataset(paths, [restored], now=dt.datetime(2026, 9, 28, tzinfo=dt.UTC))
+    manifest = market.read_manifest(paths)
+    assert manifest["fetch_failures"][SETTINGS.oas_series][0]["recovered_at_utc"] == "2026-09-28T00:00:00+00:00"
+    assert manifest["fetch_failure_status"][SETTINGS.oas_series] is False
+    market.build_dataset(paths, [NewSeries(SETTINGS.oas_series, "value", {}, "fred")])
+    assert (market.read_manifest(paths)["fetch_failures"][SETTINGS.oas_series]
+            == manifest["fetch_failures"][SETTINGS.oas_series])
 
 
 def test_offline_build_reads_dgs10_cache_only_for_missing_year(paths):

@@ -63,6 +63,12 @@ def test_second_run_gets_new_directory(ctx, run):
     assert again.run_id != run.run_id and again.run_id.startswith(run.run_id)
 
 
+def test_explicit_from_before_config_start_is_rejected(ctx):
+    """L-14：显式起点不能静默改为配置起点。"""
+    with pytest.raises(services.ServiceError, match="早于回测配置起点"):
+        services.backtest_run(ctx, D(2008, 8, 8), D(2008, 8, 11), git=CLEAN)
+
+
 def test_official_pointer_gitignore_and_rebuild(ctx, run):
     services.backtest_set_official(ctx, run.run_id)
     assert backtests.read_official(ctx.paths)["run_id"] == run.run_id

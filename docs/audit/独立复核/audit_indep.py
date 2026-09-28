@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 import datetime as dt
+import json
 import random
 import sys
 from decimal import ROUND_HALF_UP, Decimal as D
@@ -20,7 +21,8 @@ import pandas_market_calendars as pmc
 ROOT = Path(sys.argv[1])
 OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(__file__).parent / "audit_out"
 OUT.mkdir(exist_ok=True)
-RUN = ROOT / "results/MARKET/risk_scoring/backtests/run_20260928T005522Z_d18e55c"
+BACKTESTS = ROOT / "results/MARKET/risk_scoring/backtests"
+RUN = BACKTESTS / json.loads((BACKTESTS / "official.json").read_text(encoding="utf-8"))["run_id"]
 C2 = D("0.01")
 
 

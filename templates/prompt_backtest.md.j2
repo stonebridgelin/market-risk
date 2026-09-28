@@ -38,8 +38,8 @@
 本 prompt 不附截图，全部数据由程序通过接口取得，并已截断到{{ base_date }}（含），不含任何之后的数据：
 - ETF 日线：Yahoo Finance 不复权收盘价（Close，非 Adj Close）；均线（MA5/MA20/MA50/MA200）为程序对收盘价计算的简单移动平均。
 - VIX：FRED VIXCLS（缺失时用 Cboe 官方 VIX_History.csv，下文注明）。
-- 10年期收益率：美国财政部 Daily Treasury Par Yield Curve Rates 的 10 Yr 列。
-- OAS：FRED BAMLH0A0HYM2（两位小数）。
+- 10年期收益率：{{ rate_source_text }}（按本次实际使用日期的来源）。
+- OAS：{{ oas_source_text }} BAMLH0A0HYM2（两位小数，按本次实际使用日期的来源）。
 - S5FI、S5TW：{{ breadth_source }}。
 - 三环节：附程序的完整遍历表与逐日收盘价，请只用这些数据独立复核，**不要联网查询**。
 

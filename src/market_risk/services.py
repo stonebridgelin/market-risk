@@ -994,6 +994,8 @@ def backtest_run(ctx: Context, start: dt.date | None = None, end: dt.date | None
     if bad or not versions:
         raise ServiceError(f"版本只能是 {'、'.join(VERSIONS)}")
     cfg = load_backtest_config()
+    if start is not None and start < cfg.start:
+        raise ServiceError(f"--from {start} 早于回测配置起点 {cfg.start}，请重新指定")
     try:
         series = load_market_series(ctx.paths, ctx.settings)
         for name in ("SPX", "QQQ"):

@@ -351,7 +351,7 @@ def test_max_drawdown_and_near_event(paths):
     assert peak_to_trough_drawdown([100, 110, 99, 105]) == pytest.approx(-10.0)     # 110 → 99
     assert peak_to_trough_drawdown([100, 101, 102]) == 0.0
     base = D(2025, 10, 31)
-    # 先涨后跌：基准日口径 −4.5%（接近事件），最大收盘跌幅 −9.5%（105 → 95.5）
+    # 构造数据，与实际 2025-10-31 标签无关：基准日口径 −4.5%，峰谷 (95.5÷105−1)×100 = −9.0476%。
     spx = _closes(base, [100.0, 105.0] + [100.0] * 5 + [95.5] + [99.0] * 13)
     qqq = _closes(base, [100.0] + [98.0] * 20)
     o = compute_outcome(base, spx, qqq, D(2026, 1, 1))
@@ -401,6 +401,9 @@ def test_peak_to_trough_peak_starts_at_base():
 
 def test_outcomes_csv_old_column_names(paths):
     """2026-09-27 改名前的 outcomes.csv 仍可读取与重建数据库。"""
+    # 实际 2025-10-31 标签独立核对：SPX 6840.20→6538.76 = −4.4069%，
+    # SPX 6851.97→6538.76 = −4.5711%；QQQ 629.07→585.67 = −6.8991%，
+    # QQQ 632.08→585.67 = −7.3424%。这些数值来自负责人核对的独立收盘价。
     paths.outcomes_csv.parent.mkdir(parents=True)
     paths.outcomes_csv.write_text(
         "subject,base_date,window_start,window_end,spx_min_close_drawdown,qqq_min_close_drawdown,is_event,"

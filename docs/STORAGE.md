@@ -124,6 +124,9 @@ results/MARKET/risk_scoring/backtests/
 - 保留期屏蔽原则：任何字段，只要其取值需要用到保留期的数据，未解锁时一律屏蔽（SPEC 阶段6）。
 - 数据库（迁移 0006、0007）：`backtest_runs`、`backtest_daily_scores`、`backtest_outcomes`（隔离，保留单日 `outcomes` 表）、`pullback_episodes`，rebuild-db 由回测运行目录重建。0007 允许 `backtest_outcomes` 的事件布尔值为空并增加 `data_note`，用于记录窗口缺价、标签留空的基准日。
 - `daily_metrics.csv` 中 QQQ/RSP 的 MA200 仅用于展示；T−199 至 T 缺价时该列留空，不影响按 T−49 至 T 评分。`outcomes.csv` 在窗口日期已结束但基准日或窗口缺价时保留一行，标签字段留空、`data_note` 说明缺价；回测基础报告单独列出开发期和验证期的这类行。
+- `episode_windows.csv` 的 `drawdown_from_peak` =（当日收盘价÷高点收盘价−1）×100，`rebound_from_trough` =（当日收盘价÷低点收盘价−1）×100，单位均为百分数；`decline_progress` =（高点收盘价−当日收盘价）÷（高点收盘价−低点收盘价），保存原始计算值，不截断。高点当天为 0，低点当天为 1；高点至低点期间在 0 至 1 之间。窗口其他日期可能超范围：低点后随反弹减小，超过高点时小于 0；高点前若收盘价低于本段低点，会大于 1。低点未确认或被屏蔽时本列留空。回调窗口只写有分数的日期；起点以前开始的回调从回测起点开始（L-26）。
+- **H-07**：ZigZag 从价格序列首日开始，以首日为候选高点。低点确认门槛与下跌门槛同一层级，按低点计算：收盘价 ≥ 低点×（1＋层级）；确认低点的当天成为新的候选高点。“交易日数”为高低点在序列中的行号差。收复日期取低点之后第一个收盘价 ≥ 高点收盘价的日期（含等号）。
+- **L-27**：回调跌幅为百分数，保留 4 位小数并以 `ROUND_HALF_UP` 舍入；层级在 CSV 中写为 5、10、20。
 
 ### 2.1 正式记录 `official.json`（2026-09-26 确认）
 
@@ -132,6 +135,7 @@ results/MARKET/risk_scoring/backtests/
   1. 该对象、框架、基准日尚无正式记录；
   2. 运行状态为 `complete` 或 `pending`（`failed` 不设）；
   3. git 工作区干净（无未提交的修改）。口径（2026-09-27 确认）：排除 `results/`、`reports/`、`data/`、`db/`（数据与输出，否则每次运行后工作区都会变"脏"），**但 `data/market/` 例外、纳入检查**（它是计分输入；2026-09-27 第二次确认）；其余全部纳入检查，**特别是 `docs/SOP.md` 和 `templates/`**——prompt 的规则全文与格式来自这两处，它们有未提交的修改时不自动设定。代码、`config/`、`migrations/` 同样纳入检查。
+  4. 无法确定 git 状态时按工作区不干净处理，不自动设正式记录（L-22）。
   否则不自动设定，并在命令行提示。
 - 之后再运行只新增运行目录，不改变正式记录；更换正式记录必须用 `official set` 手动指定（手动指定后 `reviewed=false`，需要重新确认）。
 - `official confirm` 把当前正式记录设为 `reviewed=true`。
@@ -150,6 +154,7 @@ results/MARKET/risk_scoring/backtests/
 - 配置开关与口径的取值（如 `oas.revision_check`、三环节 d1 范围）
 - 每个数据源的来源 URL、下载时间、数据截止日期（从数据集读取时为 `data/market/` 中的文件）
 - `market_manifest_sha256`：`data/market/manifest.json` 的 sha256，作为数据集版本
+- JSON 文件（如 scores.json、metrics.json）的 Decimal 以浮点数写出；metrics.json 先保留 6 位小数。需要精确值时以 CSV 中的字符串为准（L-10）。
 - `data_source_type`：`api`（程序获取）或 `screenshot`（历史上的截图方式，用于导入样本1至4）
 - 运行状态：`complete` / `pending`（有待补维度）/ `failed`
 

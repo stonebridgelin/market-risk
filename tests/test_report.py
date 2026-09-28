@@ -114,6 +114,19 @@ def test_prompt_content(paths):
     assert "风险事件标签" not in prompt.replace("不计算基准日之后的风险事件标签", "")
 
 
+def test_prompt_uses_actual_oas_and_rate_sources(paths):
+    """L-03：数据说明使用本次实际参与评分的来源。"""
+    raw = raw4()
+    changed = dataclasses.replace(
+        raw,
+        oas_sources={d: "tradingview" for d in raw.oas},
+        treasury_sources={d: "fred:DGS10" for d in raw.treasury},
+    )
+    out = run_scoring(changed, SETTINGS, paths, CLEAN, now=NOW)
+    prompt = (out.run_dir / "prompt.md").read_text("utf-8")
+    assert "TradingView" in prompt and "FRED DGS10" in prompt
+
+
 def test_daily_mode_prompt_and_summary(paths):
     raw = dataclasses.replace(raw4(), mode="daily")
     out = run_scoring(raw, SETTINGS, paths, CLEAN, now=NOW)

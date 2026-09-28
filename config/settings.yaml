@@ -5,14 +5,8 @@ symbols:
   scored: [SPY, QQQ, RSP]      # 参与计分的 ETF
   reference: [HYG, LQD]        # 仅作参考
 
-moving_averages: [5, 10, 20, 30, 50, 200]   # 简单均线周期，基于不复权 Close
-
 prices:
   lookback_calendar_days: 420  # 基准日往前至少下载的自然日数
-
-three_segment:
-  # d1 候选范围为 T−20 至 T−2（SOP 7.2，2026-09-27 确定，不再设开关）；另一口径只作参考
-  query_start_offset: 45       # 三环节查询起点 T−45（股票交易日）
 
 oas:
   series: BAMLH0A0HYM2
@@ -26,9 +20,6 @@ vix:
   series: VIXCLS
   # SPEC 5.6 第7条：FRED 缺失时的官方备用源
   cboe_history_url: https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv
-
-treasury:
-  fallback_series: DGS10       # 主源失败时的备用源
 
 database:
   # SQLAlchemy 连接地址；.env 的 DATABASE_URL 优先。SQLite 相对路径以存储根目录为基准（STORAGE 第4节）

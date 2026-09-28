@@ -123,7 +123,9 @@ def run_backtest(
     t0 = time.perf_counter()
     scored = tuple(settings.scored_symbols)
     days_all, idx = trading_index(series, scored)
-    first = max(start or cfg.start, cfg.start)
+    if start is not None and start < cfg.start:
+        raise ValueError(f"--from {start} 早于回测配置起点 {cfg.start}，请重新指定")
+    first = start or cfg.start
     last_price = max(series.dates[s][-1] for s in scored)
     last = min(end or last_price, last_price)
     bases = [d for d in days_all if first <= d <= last]

@@ -99,6 +99,18 @@ def test_episode_windows_rows_and_blank_columns():
                         and r.rebound_from_trough is None for r in rows)
 
 
+def test_episode_windows_progress_outside_high_to_trough():
+    """高点之前低于本段低点、低点之后超过高点时，输出未截断的进度。"""
+    closes = path(dt.date(2012, 3, 1), ["90", "101", "96", "94", "99", "102"])
+    days = [d for d, _ in closes]
+    scores = {(d, "v2-M"): (1, 1, 1, "早期信号") for d in days}
+    (ep,) = build_episodes("SPX", closes, SPX_ONLY_5)
+    rows = episode_windows(ep, days, scores, ("v2-M",), SPX_ONLY_5, closes=dict(closes))
+    by = {r.date: r for r in rows}
+    assert by[days[0]].decline_progress == D("1.571429")  # (101−90)÷(101−94)
+    assert by[days[-1]].decline_progress == D("-0.142857")  # (101−102)÷(101−94)
+
+
 def test_masked_episode_windows_stop_at_validation_end():
     closes = path(dt.date(2022, 12, 23), ["100", "94", "93", "92", "93", "97", "99"])
     days = [d for d, _ in closes]

@@ -28,3 +28,4 @@
 14. `db/sql/` 下的 SQL 文件由 `market-risk db export-sql` 导出，不得手工修改；表结构以 Alembic 为唯一源头。
 15. 不得在任何地方（文件、日志、报告、汇报）输出数据库密码或连接地址（如 `MYSQL_VERIFY_URL`），也不得输出 API 密钥。
 16. 本机 git 不在 PATH 中，路径为 `C:\Execute\Git\bin`；在 PowerShell 中先执行 `$env:PATH = "C:\Execute\Git\bin;$env:PATH"`。
+17. 每次修改评分、指标、结果标签或 ZigZag 相关代码后，除常规测试外，运行长期独立复核工具：`uv run python docs/audit/独立复核/audit_indep.py . docs/audit/独立复核`。该脚本不得导入 `market_risk` 模块；用途与输出见 `docs/audit/独立复核/README.md`。

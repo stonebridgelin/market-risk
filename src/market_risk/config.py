@@ -44,15 +44,12 @@ class Settings:
 
     scored_symbols: tuple[str, ...]
     reference_symbols: tuple[str, ...]
-    moving_averages: tuple[int, ...]
     lookback_calendar_days: int
-    three_segment_query_offset: int
     oas_series: str
     oas_revision_check: bool
     oas_long_history_source: str
     vix_series: str
     cboe_vix_history_url: str
-    treasury_fallback_series: str
     storage_root: Path
     database_url: str
     max_retries: int
@@ -100,15 +97,12 @@ def load_settings(path: Path = DEFAULT_SETTINGS_PATH, root: Path = PROJECT_ROOT)
         return Settings(
             scored_symbols=tuple(raw["symbols"]["scored"]),
             reference_symbols=tuple(raw["symbols"]["reference"]),
-            moving_averages=tuple(int(x) for x in raw["moving_averages"]),
             lookback_calendar_days=int(raw["prices"]["lookback_calendar_days"]),
-            three_segment_query_offset=int(raw["three_segment"]["query_start_offset"]),
             oas_series=str(raw["oas"]["series"]),
             oas_revision_check=bool(raw["oas"]["revision_check"]),
             oas_long_history_source=_long_history(raw["oas"].get("long_history_source", "none")),
             vix_series=str(raw["vix"]["series"]),
             cboe_vix_history_url=str(raw["vix"]["cboe_history_url"]),
-            treasury_fallback_series=str(raw["treasury"]["fallback_series"]),
             storage_root=_resolve(str(raw["storage"]["root"]), root).resolve(),
             database_url=str((raw.get("database") or {}).get("url", "sqlite:///db/market_risk.sqlite")),
             max_retries=int(raw["network"]["max_retries"]),

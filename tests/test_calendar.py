@@ -60,6 +60,20 @@ def test_sample4_sequence_and_holidays(bond_cal_2025h2):
     assert refs.is_last_trading_day_of_week is True
 
 
+def test_daily_100_day_window_covers_current_rule_dates(bond_cal_2025h2):
+    """M-05：100 个自然日足以覆盖当前规则的 T−20 及 O6。"""
+    from market_risk.data.market import DAILY_LOOKBACK_DAYS
+
+    assert DAILY_LOOKBACK_DAYS == 100
+    observations = dict.fromkeys(bond_cal_2025h2.days, 3.0)
+    for base, *_ in SAMPLES:
+        refs = mcal.compute_date_references(base, bond_cal_2025h2, observations)
+        cutoff = base - dt.timedelta(days=DAILY_LOOKBACK_DAYS)
+        assert refs.t_minus_20 >= cutoff
+        assert refs.oas_o6_v2m is not None and refs.oas_o6_v2m >= cutoff
+        assert refs.oas_o6_v3r1 is not None and refs.oas_o6_v3r1 >= cutoff
+
+
 def test_sample3_bond_holiday_in_window(bond_cal_2025h2):
     refs = mcal.compute_date_references(D(2025, 10, 31), bond_cal_2025h2)
     assert refs.bond_holidays_in_window == (D(2025, 10, 13),)

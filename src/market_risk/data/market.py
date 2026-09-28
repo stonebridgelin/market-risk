@@ -216,7 +216,14 @@ def build_dataset(
     changed: list[str] = []
     notes: list[str] = []
     stamp = (now or utc_now()).astimezone(dt.UTC).isoformat(timespec="seconds")
-    fetch_failures: dict[str, dict[str, str]] = dict(manifest.get("fetch_failures", {}))
+    # 历史失败只追加；旧版 manifest 的单条记录读入时转换成列表。
+    fetch_failures: dict[str, list[dict[str, Any]]] = {
+        name: [dict(item) for item in (value if isinstance(value, list) else [value])]
+        for name, value in manifest.get("fetch_failures", {}).items()
+    }
+    fetch_failure_status: dict[str, bool] = dict(manifest.get("fetch_failure_status", {}))
+    for name, history in fetch_failures.items():
+        fetch_failure_status.setdefault(name, any(item.get("recovered_at_utc") is None for item in history))
     current_failures: dict[str, dict[str, str]] = {}
     from market_risk.data.corrections import apply_corrections, restore_originals
 
@@ -235,11 +242,17 @@ def build_dataset(
                                   frequency=entries[name].get("frequency", "daily")))
     for s in incoming:
         if s.fetch_failure is not None:
-            fetch_failures[s.name] = {"failed_at_utc": stamp, "reason": s.fetch_failure}
-            current_failures[s.name] = fetch_failures[s.name]
+            failure = {"failed_at_utc": stamp, "reason": s.fetch_failure, "recovered_at_utc": None}
+            fetch_failures.setdefault(s.name, []).append(failure)
+            fetch_failure_status[s.name] = True
+            current_failures[s.name] = failure
             notes.append(f"{s.name} 本次未更新：FRED 获取失败（{s.fetch_failure}）")
             continue
-        fetch_failures.pop(s.name, None)
+        if fetch_failure_status.get(s.name):
+            for failure in fetch_failures.get(s.name, []):
+                if failure.get("recovered_at_utc") is None:
+                    failure["recovered_at_utc"] = stamp
+            fetch_failure_status[s.name] = False
         path = paths.market_series_file(s.name, s.frequency)
         old = read_series_file(path)[1] if path.exists() else None
         prev = entries.get(s.name, {})
@@ -296,11 +309,10 @@ def build_dataset(
         **manifest,
         "series": dict(sorted(entries.items())),
         **({"fetch_failures": dict(sorted(fetch_failures.items()))} if fetch_failures else {}),
+        **({"fetch_failure_status": dict(sorted(fetch_failure_status.items()))} if fetch_failure_status else {}),
         "breadth_conflicts": {d.isoformat(): m for d, m in sorted((breadth_conflicts or {}).items())}
         if breadth_conflicts is not None else manifest.get("breadth_conflicts", {}),
     }
-    if not fetch_failures:
-        new_manifest.pop("fetch_failures", None)
     if new_manifest != manifest:
         new_manifest["generated_at_utc"] = stamp
         write_manifest(paths, new_manifest)
@@ -637,6 +649,8 @@ def raw_inputs_from_series(
         treasury_coverage_start=start, oas=oas, oas_vintage=oas_vintage, breadth=breadth,
         sources=tuple(sources), notes=tuple(notes), mode=mode, decisions=decisions,
         oas_symbol=settings.oas_series,
+        oas_sources={d: str(r["source"]) for d, r in oas_w.items()},
+        treasury_sources={d: str(r["source"]) for d, r in t_w.items()},
     )
 
 

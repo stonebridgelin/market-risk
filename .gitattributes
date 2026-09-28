@@ -4,3 +4,5 @@ data/legacy/** -text
 # 市场数据集与导出的 SQL：保持字节不变（manifest 记录 sha256；SQL 由测试比对）
 data/market/** -text
 db/sql/** -text
+# 正式回测目录中的 CSV 必须保持生成时的原始字节（非正式运行目录由 .gitignore 排除）
+results/MARKET/risk_scoring/backtests/**/*.csv -text

@@ -21,8 +21,8 @@ from market_risk.config import (
 def test_load_settings_defaults():
     s = load_settings()
     assert s.scored_symbols == ("SPY", "QQQ", "RSP")
-    assert s.moving_averages == (5, 10, 20, 30, 50, 200)
-    assert s.three_segment_query_offset == 45
+    assert not hasattr(s, "moving_averages") and not hasattr(s, "three_segment_query_offset")
+    assert not hasattr(s, "treasury_fallback_series")
     assert s.storage_root == PROJECT_ROOT.resolve()
     assert s.max_retries == 3
     assert s.near_threshold.oas_bp == 3

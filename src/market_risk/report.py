@@ -210,10 +210,19 @@ def prompt_context(ctx: ReportContext, rules: Mapping[str, str]) -> dict[str, An
     weekend = [d for d in (refs.oas_o1_v2m, refs.oas_o6_v2m) if d and d.weekday() >= 5]
     same_o6 = refs.oas_o6_v2m == refs.oas_o6_v3r1 and refs.oas_o1_v2m == refs.oas_o1
     oas_note = ("两套规则的 O1、O6 相同。" if same_o6 else
-                "两套规则的 O1/O6 不同：v2-M 按 FRED 所列有数值观测计数（月末周末观测计入、债市休市日沿用值不计），"
+                "两套规则的 O1/O6 不同：v2-M 按有数值观测计数；债市休市日的 OAS 观测一律排除，"
+                "不论数值是否与前一观测相同；自然月末例外，v2-M 计入，"
                 "v3-R1 按债市营业日计数。")
     if weekend:
         oas_note += f"v2-M 使用了月末周末观测：{'、'.join(str(d) for d in weekend)}。"
+    oas_dates = {d for d in (refs.oas_o1, refs.oas_o6_v3r1, refs.oas_o1_v2m, refs.oas_o6_v2m) if d is not None}
+    oas_sources = {ctx.raw.oas_sources.get(d, "fred") for d in oas_dates if ctx.raw.oas.get(d) is not None}
+    oas_source_text = "、".join({"fred": "FRED", "tradingview": "TradingView"}.get(s, s)
+                               for s in sorted(oas_sources)) or "本次无可用数值"
+    rate_dates = {refs.t_minus_20, *refs.window_days}
+    rate_sources = {ctx.raw.treasury_sources.get(d, "treasury") for d in rate_dates if d in snap.yields}
+    rate_source_text = "、".join({"treasury": "美国财政部", "fred:DGS10": "FRED DGS10"}.get(s, s)
+                                for s in sorted(rate_sources)) or "本次无可用数值"
     return {
         "mode": snap.mode,
         "base_date": base,
@@ -237,6 +246,8 @@ def prompt_context(ctx: ReportContext, rules: Mapping[str, str]) -> dict[str, An
                 "o1_v2": fixed2(snap.oas_o1_v2m), "o6_v2": fixed2(snap.oas_o6_v2m), "note": oas_note},
         "hyg_lqd": "缺失" if snap.hyg_lqd is None else f"{snap.hyg_lqd:.4f}",
         "data_notes": list(snap.data_notes),
+        "oas_source_text": oas_source_text,
+        "rate_source_text": rate_source_text,
         "rules_71": rules["7.1"],
         "rules_72": rules["7.2"],
         "rules_73": rules["7.3"],

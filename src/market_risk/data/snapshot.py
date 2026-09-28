@@ -64,6 +64,8 @@ class RawInputs:
     mode: str = "backtest"
     decisions: tuple[DataDecision, ...] = ()     # 已裁定日期表（config/data_decisions.yaml）
     oas_symbol: str = "BAMLH0A0HYM2"
+    oas_sources: dict[dt.date, str] = field(default_factory=dict)
+    treasury_sources: dict[dt.date, str] = field(default_factory=dict)
 
 
 @dataclass

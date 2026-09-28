@@ -54,6 +54,8 @@ def save_raw_inputs(raw: RawInputs, directory: Path) -> None:
         "sources": [_src(s) for s in raw.sources],
         "notes": list(raw.notes),
         "oas_symbol": raw.oas_symbol,
+        "oas_sources": {d.isoformat(): source for d, source in raw.oas_sources.items()},
+        "treasury_sources": {d.isoformat(): source for d, source in raw.treasury_sources.items()},
         "decisions": [
             {**dataclasses.asdict(d), "date": d.date.isoformat(), "decided_on": d.decided_on.isoformat(),
              "corrected_value": str(d.corrected_value) if d.corrected_value is not None else None}
@@ -104,4 +106,7 @@ def load_raw_inputs(
             for d in meta.get("decisions", [])
         ),
         oas_symbol=meta.get("oas_symbol", "BAMLH0A0HYM2"),
+        oas_sources={dt.date.fromisoformat(d): source for d, source in meta.get("oas_sources", {}).items()},
+        treasury_sources={dt.date.fromisoformat(d): source
+                          for d, source in meta.get("treasury_sources", {}).items()},
     )
