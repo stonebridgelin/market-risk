@@ -1,0 +1,23 @@
+基准日 4560 个 × 2 个版本
+维度或总分不一致：4
+  (datetime.date(2024, 4, 5), 'v2-M', 'price', '0', '1')
+  (datetime.date(2024, 4, 5), 'v2-M', 'total', '5-5', '6-6')
+  (datetime.date(2024, 4, 5), 'v3-R1', 'price', '0', '1')
+  (datetime.date(2024, 4, 5), 'v3-R1', 'total', '5-5', '6-6')
+基准日广度缺失（未独立枚举）：0 []
+四舍五入方式差异（ROUND_HALF_UP vs round()，回看200日内）：0 []
+收盘价恰等于均线 / MA5 恰等于 MA50 的情形：14
+  (datetime.date(2009, 4, 8), 'QQQ', 'close=MA5', Decimal('31.95'))
+  (datetime.date(2009, 6, 26), 'SPY', 'MA5=MA50', Decimal('90.534'))
+  (datetime.date(2011, 9, 29), 'RSP', 'close=MA5', Decimal('42.60'))
+  (datetime.date(2012, 1, 17), 'RSP', 'close=MA5', Decimal('47.90'))
+  (datetime.date(2013, 12, 16), 'QQQ', 'close=MA5', Decimal('85.32'))
+  (datetime.date(2014, 7, 25), 'QQQ', 'close=MA5', Decimal('96.74'))
+  (datetime.date(2015, 11, 5), 'RSP', 'close=MA5', Decimal('79.47'))
+  (datetime.date(2016, 11, 18), 'QQQ', 'close=MA50', Decimal('117.32'))
+  (datetime.date(2017, 6, 30), 'RSP', 'close=MA5', Decimal('92.68'))
+  (datetime.date(2019, 1, 28), 'QQQ', 'close=MA5', Decimal('163.11'))
+  (datetime.date(2019, 11, 11), 'RSP', 'close=MA5', Decimal('111.51'))
+  (datetime.date(2021, 1, 19), 'RSP', 'close=MA5', Decimal('131.85'))
+  (datetime.date(2024, 4, 5), 'RSP', 'close=MA20', Decimal('166.39'))
+  (datetime.date(2025, 9, 15), 'RSP', 'close=MA5', Decimal('188.63'))
