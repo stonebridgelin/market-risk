@@ -1,0 +1,59 @@
+{
+  "run_id": "run_20260928T005522Z_d18e55c",
+  "created_at_utc": "2026-09-28T00:55:22+00:00",
+  "git_commit": "d18e55cc14b182d28e584d4d2790b659ba541251",
+  "git_dirty": false,
+  "market_manifest_sha256": "77dc381797a2ccacc0e57508c7cfb98bcc2b99d5482aa8295c004d3571a0fee2",
+  "rule_versions": [
+    "v2-M",
+    "v3-R1"
+  ],
+  "versions": [
+    "v2-M",
+    "v3-R1"
+  ],
+  "start": "2008-08-11",
+  "end": "2026-09-25",
+  "days": 4560,
+  "start_reason": "S5FI、S5TW 都有数值从 2008-08-04 起，且基准日的 T−5 须有广度读数：第一个满足的基准日为 2008-08-11",
+  "periods": {
+    "development": [
+      "2008-08-11",
+      "2016-12-31"
+    ],
+    "validation": [
+      "2017-01-01",
+      "2022-12-31"
+    ],
+    "holdout_start": "2023-01-01"
+  },
+  "config": {
+    "path": "config/backtest.yaml",
+    "config_version": 1,
+    "sha256": "b6d56bb088b70725b9456e128a5df3837854355fc037bdc0ddb265901444be23"
+  },
+  "runtime_seconds": 68.4,
+  "holdout_unlocked": false,
+  "holdout_unlocked_at": null,
+  "corrections_used": [
+    {
+      "symbol": "QQQ",
+      "date": "2008-09-08"
+    },
+    {
+      "symbol": "RSP",
+      "date": "2016-06-24"
+    },
+    {
+      "symbol": "SPY",
+      "date": "2009-07-16"
+    }
+  ],
+  "counts": {
+    "daily_scores": 9120,
+    "daily_metrics": 4560,
+    "outcomes": 3604,
+    "pullback_episodes": 312,
+    "episode_windows": 10036
+  }
+}
