@@ -13,6 +13,8 @@ from collections.abc import Mapping
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
+from market_risk.precision import decimal_value, published_price
+
 SCORED = ("SPY", "QQQ", "RSP")
 MA_KEYS = ("ma5", "ma20", "ma50", "ma200")
 Q6 = Decimal("0.000001")
@@ -23,13 +25,13 @@ Metric = Decimal | str | bool | None
 def _d(v: Any) -> Decimal | None:
     if v is None:
         return None
-    return v if isinstance(v, Decimal) else Decimal(repr(float(v)))
+    return decimal_value(v)
 
 
 def _p2(v: Any) -> Decimal | None:
     """原始数值按公布的两位小数读取。"""
     x = _d(v)
-    return None if x is None else x.quantize(Decimal("0.01"), ROUND_HALF_UP)
+    return None if x is None else published_price(x)
 
 
 def q6(v: Decimal | None) -> Decimal | None:

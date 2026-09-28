@@ -10,15 +10,16 @@
 from __future__ import annotations
 
 import datetime as dt
-import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from decimal import ROUND_HALF_UP, Decimal
 from functools import lru_cache
 
 import pandas_market_calendars as mcal
 
 from market_risk.config import MarketHolidays
 from market_risk.models import DateReferences
+from market_risk.precision import decimal_value
 
 OUTCOME_WINDOW_DAYS = 20
 O6_OFFSET = 5  # O6 为 O1 之前第5个债市营业日 / 第5个观测
@@ -218,11 +219,11 @@ def oas_o6_v3r1(o1: dt.date, bond_cal: BondCalendar) -> dt.date:
     return oas_o1_to_o6_sequence(o1, bond_cal)[-1]
 
 
-def _is_missing(value: float | None) -> bool:
-    return value is None or math.isnan(value)
+def _is_missing(value: float | Decimal | None) -> bool:
+    return value is None or value != value
 
 
-def valued_observation_dates(observations: Mapping[dt.date, float | None]) -> list[dt.date]:
+def valued_observation_dates(observations: Mapping[dt.date, float | Decimal | None]) -> list[dt.date]:
     """FRED 观测中有数值的日期，升序。值为 "."（已转为 None/NaN）的行不算观测（SPEC 5.6 第8条）。"""
     return sorted(d for d, v in observations.items() if not _is_missing(v))
 
@@ -232,9 +233,9 @@ class HolidayObservation:
     """FRED 在债市休市日（工作日）返回的有数值观测（SPEC 5.6 第10条）。"""
 
     date: dt.date
-    value: float
+    value: Decimal
     previous_date: dt.date | None
-    previous_value: float | None
+    previous_value: Decimal | None
 
     @property
     def is_month_end(self) -> bool:
@@ -244,13 +245,14 @@ class HolidayObservation:
     @property
     def carried_forward(self) -> bool:
         """是否为沿用值：与前一个有数值观测相同（按两位小数）。"""
-        return self.previous_value is not None and round(self.value, 2) == round(
-            self.previous_value, 2
-        )
+        quantum = Decimal("0.01")
+        return self.previous_value is not None and decimal_value(self.value).quantize(
+            quantum, rounding=ROUND_HALF_UP) == decimal_value(self.previous_value).quantize(
+                quantum, rounding=ROUND_HALF_UP)
 
 
 def bond_holiday_observations(
-    observations: Mapping[dt.date, float | None], bond_cal: BondCalendar
+    observations: Mapping[dt.date, float | Decimal | None], bond_cal: BondCalendar
 ) -> list[HolidayObservation]:
     """找出落在债市休市日（覆盖范围内、非债市营业日的工作日）的有数值观测。周末观测不在此列。"""
     valued = valued_observation_dates(observations)
@@ -264,16 +266,16 @@ def bond_holiday_observations(
         result.append(
             HolidayObservation(
                 date=d,
-                value=float(observations[d]),  # type: ignore[arg-type]
+                value=decimal_value(observations[d]),  # type: ignore[arg-type]
                 previous_date=prev,
-                previous_value=None if prev is None else float(observations[prev]),  # type: ignore[arg-type]
+                previous_value=None if prev is None else decimal_value(observations[prev]),  # type: ignore[arg-type]
             )
         )
     return result
 
 
 def v2m_observation_dates(
-    observations: Mapping[dt.date, float | None],
+    observations: Mapping[dt.date, float | Decimal | None],
     bond_cal: BondCalendar,
     keep_dates: Iterable[dt.date] = (),
 ) -> list[dt.date]:
@@ -316,8 +318,8 @@ def o1_lag_stock_days(o1: dt.date, base_date: dt.date) -> int:
 
 
 def rate_window_observations(
-    values: Mapping[dt.date, float | None], window_days: Iterable[dt.date]
-) -> tuple[dict[dt.date, float], list[dt.date]]:
+    values: Mapping[dt.date, float | Decimal | None], window_days: Iterable[dt.date]
+) -> tuple[dict[dt.date, Decimal], list[dt.date]]:
     """把财政部逐日数值限定到20日窗口（只按股票交易日，SPEC 5.6 第9条）。
 
     返回 (窗口内的有效数值, 被排除的日期)。被排除的是位于窗口日期范围内、
@@ -328,14 +330,14 @@ def rate_window_observations(
     if not days:
         return {}, []
     day_set = set(days)
-    included: dict[dt.date, float] = {}
+    included: dict[dt.date, Decimal] = {}
     excluded: list[dt.date] = []
     for d in sorted(values):
         v = values[d]
         if not (days[0] <= d <= days[-1]) or _is_missing(v):
             continue
         if d in day_set:
-            included[d] = float(v)  # type: ignore[arg-type]
+            included[d] = decimal_value(v)  # type: ignore[arg-type]
         else:
             excluded.append(d)
     return included, excluded

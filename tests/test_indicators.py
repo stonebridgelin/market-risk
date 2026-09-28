@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from decimal import Decimal
 
 import pytest
 
@@ -61,14 +62,14 @@ def test_window_max_lists_all_ties():
     values = {dt.date(2025, 11, 5): 4.17, dt.date(2025, 11, 20): 4.1700000001,
               dt.date(2025, 11, 28): 4.02}
     h, dates = window_max(values)
-    assert h == 4.17
+    assert h == Decimal("4.17")
     assert dates == (dt.date(2025, 11, 5), dt.date(2025, 11, 20))
 
 
 def test_window_max_base_tied_with_earlier_day_is_max():
     values = {dt.date(2025, 11, 5): 4.17, dt.date(2025, 11, 28): 4.17}
     h, dates = window_max(values)
-    assert round(values[dt.date(2025, 11, 28)], 2) == h
+    assert Decimal(str(values[dt.date(2025, 11, 28)])) == h
     assert dates[0] == dt.date(2025, 11, 5)
     with pytest.raises(InsufficientDataError):
         window_max({})
@@ -181,6 +182,6 @@ def test_three_segment_insufficient_history():
 
 
 def test_ratio():
-    assert ratio(80.123, 110.5) == round(80.123 / 110.5, 4)
+    assert ratio(80.123, 110.5) == Decimal("0.7251")
     with pytest.raises(ValueError):
         ratio(1.0, 0.0)

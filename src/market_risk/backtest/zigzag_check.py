@@ -16,9 +16,8 @@ from decimal import ROUND_HALF_UP, Decimal
 from market_risk.backtest.settings import Grades
 from market_risk.backtest.zigzag import zigzag
 from market_risk.data.market import read_series_file
+from market_risk.precision import published_price
 from market_risk.storage.paths import StoragePaths
-
-PRICE_Q = Decimal("0.01")
 
 
 @dataclass(frozen=True)
@@ -34,8 +33,8 @@ class SwingRow:
 
 def price_swings(paths: StoragePaths, symbol: str, level: Decimal, grades: Grades,
                  start: dt.date, end: dt.date) -> list[SwingRow]:
-    rows = read_series_file(paths.market_daily_file(symbol))[1]
-    closes = [(d, Decimal(repr(float(r["value"]))).quantize(PRICE_Q, ROUND_HALF_UP))
+    rows = read_series_file(paths.market_daily_file(symbol), exact=True)[1]
+    closes = [(d, published_price(r["value"]))
               for d, r in sorted(rows.items()) if r["value"] is not None]
     out = []
     for s in zigzag(closes, level):

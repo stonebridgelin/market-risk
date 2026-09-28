@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from decimal import Decimal
 
 import pytest
 
@@ -215,7 +216,7 @@ def test_rate_window_excludes_treasury_value_on_stock_holiday(bond_cal_2026_spri
     assert D(2026, 4, 3) not in included
     assert excluded == [D(2026, 4, 3)]
     assert len(included) == 20
-    assert max(included.values()) == 4.2
+    assert max(included.values()) == Decimal("4.2")
 
 
 def test_rate_window_bond_holiday_is_missing_not_filled(bond_cal_2025h2, appendix_a_yields):
@@ -224,7 +225,7 @@ def test_rate_window_bond_holiday_is_missing_not_filled(bond_cal_2025h2, appendi
     assert D(2025, 10, 13) not in included
     assert len(included) == 19
     assert excluded == []
-    assert max(included.values()) == 4.18  # H=4.18（2025-10-06）
+    assert max(included.values()) == Decimal("4.18")  # H=4.18（2025-10-06）
     assert mcal.rate_window_observations(appendix_a_yields, []) == ({}, [])
 
 

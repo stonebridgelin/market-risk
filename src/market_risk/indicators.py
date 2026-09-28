@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import datetime as dt
 from collections.abc import Mapping, Sequence
+from decimal import ROUND_HALF_UP, Decimal
 
 from market_risk.models import ThreeSegmentResult, ThreeSegmentTrace
+from market_risk.precision import decimal_value, published_price
 
 PRICE_DECIMALS = 2
 LC_LOOKBACK = 20          # Lc：d1 之前20个交易日的最低收盘价
@@ -21,21 +23,21 @@ class InsufficientDataError(ValueError):
     """数据不足以计算指标（不得用更短的周期代替）。"""
 
 
-def p2(x: float) -> float:
+def p2(x: float | Decimal) -> Decimal:
     """价格按2位小数比较。"""
-    return round(x, PRICE_DECIMALS)
+    return published_price(x)
 
 
 def sorted_closes(
-    closes: Mapping[dt.date, float], base_date: dt.date
-) -> list[tuple[dt.date, float]]:
+    closes: Mapping[dt.date, float | Decimal], base_date: dt.date
+) -> list[tuple[dt.date, Decimal]]:
     """按日期升序排列，并截断到基准日（含）。"""
-    return sorted((d, v) for d, v in closes.items() if d <= base_date)
+    return sorted((d, published_price(v)) for d, v in closes.items() if d <= base_date)
 
 
 def simple_moving_average(
-    closes: Mapping[dt.date, float], base_date: dt.date, period: int
-) -> float:
+    closes: Mapping[dt.date, float | Decimal], base_date: dt.date, period: int
+) -> Decimal:
     """截至基准日（含）最近 period 个收盘价的算术平均。数据不足时报错。"""
     series = sorted_closes(closes, base_date)
     if not series or series[-1][0] != base_date:
@@ -43,16 +45,17 @@ def simple_moving_average(
     if len(series) < period:
         raise InsufficientDataError(f"只有 {len(series)} 个收盘价，不足以计算 MA{period}")
     window = [v for _, v in series[-period:]]
-    return sum(window) / period
+    return sum(window, Decimal(0)) / period
 
 
 def window_max(
-    values: Mapping[dt.date, float], decimals: int = 2
-) -> tuple[float, tuple[dt.date, ...]]:
+    values: Mapping[dt.date, float | Decimal], decimals: int = 2
+) -> tuple[Decimal, tuple[dt.date, ...]]:
     """窗口最高值及全部并列最高的日期（按公布精度比较，SPEC 5.6 第6条）。"""
     if not values:
         raise InsufficientDataError("窗口内没有数据")
-    rounded = {d: round(v, decimals) for d, v in values.items()}
+    quantum = Decimal(1).scaleb(-decimals)
+    rounded = {d: decimal_value(v).quantize(quantum, rounding=ROUND_HALF_UP) for d, v in values.items()}
     h = max(rounded.values())
     return h, tuple(sorted(d for d, v in rounded.items() if v == h))
 
@@ -72,7 +75,7 @@ def three_segment_candidates(
 
 def three_segment_trace(
     symbol: str,
-    closes: Mapping[dt.date, float],
+    closes: Mapping[dt.date, float | Decimal],
     base_date: dt.date,
     include_t_minus_20: bool,
 ) -> ThreeSegmentResult:
@@ -128,7 +131,7 @@ def three_segment_trace(
 
 
 def three_segment_both(
-    symbol: str, closes: Mapping[dt.date, float], base_date: dt.date
+    symbol: str, closes: Mapping[dt.date, float | Decimal], base_date: dt.date
 ) -> dict[bool, ThreeSegmentResult]:
     """按两种 d1 口径（含/不含 T−20）同时计算（SPEC 5.6 第1条）。"""
     return {
@@ -136,8 +139,9 @@ def three_segment_both(
     }
 
 
-def ratio(numerator: float, denominator: float, decimals: int = 4) -> float:
+def ratio(numerator: float | Decimal, denominator: float | Decimal, decimals: int = 4) -> Decimal:
     """两个收盘价之比（HYG/LQD），保留4位小数，仅作参考。"""
     if denominator == 0:
         raise ValueError("分母为 0")
-    return round(numerator / denominator, decimals)
+    quantum = Decimal(1).scaleb(-decimals)
+    return (decimal_value(numerator) / decimal_value(denominator)).quantize(quantum, rounding=ROUND_HALF_UP)

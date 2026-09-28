@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as dt
+from decimal import Decimal
 
 import pytest
 from conftest import load_sample_raw, synthetic_raw
@@ -24,19 +25,21 @@ def test_sample4_snapshot_values():
     reading = BreadthReading(base, 58.44, 76.73)
     snap = build_snapshot(load_sample_raw("2025-11-28", {base: reading}), holidays=load_holidays())
     spy = snap.etfs["SPY"]
-    assert spy.close == 683.39
+    assert spy.close == Decimal("683.39")
     for got, want in ((spy.ma5, 673.17), (spy.ma20, 672.90), (spy.ma50, 670.44),
                       (spy.ma200, 616.06)):
-        assert abs(got - want) <= 0.02
-    assert (snap.vix, snap.vix_t5) == (16.35, 26.42)
-    assert (snap.y, snap.h, snap.h_date, snap.y_t20) == (4.02, 4.17, D(2025, 11, 5), 4.11)
+        assert abs(got - Decimal(str(want))) <= Decimal("0.02")
+    assert (snap.vix, snap.vix_t5) == (Decimal("16.35"), Decimal("26.42"))
+    assert (snap.y, snap.h, snap.h_date, snap.y_t20) == (
+        Decimal("4.02"), Decimal("4.17"), D(2025, 11, 5), Decimal("4.11"))
     assert snap.h_dates == (D(2025, 11, 5),)
-    assert (snap.oas_o1, snap.oas_o6_v3r1) == (3.00, 3.17)
-    assert snap.breadth == reading and snap.breadth_t5 is None
+    assert (snap.oas_o1, snap.oas_o6_v3r1) == (Decimal("3.00"), Decimal("3.17"))
+    assert snap.breadth == dataclasses.replace(reading, s5fi=Decimal("58.44"), s5tw=Decimal("76.73"))
+    assert snap.breadth_t5 is None
     assert snap.refs.is_early_close
     # 利率窗口：10-31 至 11-28 的股票交易日中，11-11 债市休市，共19个观测，另含 T−20
     assert len(snap.yields) == 20 and D(2025, 11, 11) not in snap.yields
-    assert snap.yields[D(2025, 10, 30)] == 4.11
+    assert snap.yields[D(2025, 10, 30)] == Decimal("4.11")
     # 三环节第一步成立的候选（SPEC 样本4）
     step1 = {r.symbol: [t.d1 for t in r.traces if t.step1] for r in snap.three_segment[True]}
     assert step1 == {
@@ -53,16 +56,17 @@ def test_sample3_three_segment_and_lc():
     traces = {r.symbol: [t for t in r.traces if t.step1] for r in snap.three_segment[True]}
     (spy,) = traces["SPY"]
     assert (spy.d1, spy.d1_close, spy.lc, spy.lc_date) == (
-        D(2025, 10, 10), 653.02, 657.41, D(2025, 9, 12)
+        D(2025, 10, 10), Decimal("653.02"), Decimal("657.41"), D(2025, 9, 12)
     )
     (rsp,) = traces["RSP"]
     assert (rsp.d1, rsp.d1_close, rsp.lc, rsp.lc_date) == (
-        D(2025, 10, 10), 185.12, 186.72, D(2025, 9, 25)
+        D(2025, 10, 10), Decimal("185.12"), Decimal("186.72"), D(2025, 9, 25)
     )
     assert traces["QQQ"] == []
     # 10-13 债市休市：利率窗口19个观测
     assert D(2025, 10, 13) in snap.refs.bond_holidays_in_window
-    assert (snap.y, snap.h, snap.h_date, snap.y_t20) == (4.11, 4.18, D(2025, 10, 6), 4.13)
+    assert (snap.y, snap.h, snap.h_date, snap.y_t20) == (
+        Decimal("4.11"), Decimal("4.18"), D(2025, 10, 6), Decimal("4.13"))
 
 
 def test_raw_inputs_roundtrip(tmp_path):
@@ -161,10 +165,10 @@ def test_oas_revision_comparison():
     assert set(by_label) == {"v3-R1 O1", "v3-R1 O6", "v2-M O1", "v2-M O6"}
     o6 = by_label["v3-R1 O6"]
     assert (o6.date, o6.vintage_value, o6.current_value, o6.revised) == (
-        D(2025, 11, 18), 3.10, 3.00, True
+        D(2025, 11, 18), Decimal("3.10"), Decimal("3.00"), True
     )
     assert not by_label["v3-R1 O1"].revised
-    assert snap.oas_o6_v3r1 == 3.00  # 计分使用当前版本
+    assert snap.oas_o6_v3r1 == Decimal("3.00")  # 计分使用当前版本
     assert any("历史修订" in n and "2025-11-18" in n for n in snap.data_notes)
     assert any("不能代表真实发布时间" in n for n in snap.data_notes)
 
@@ -195,7 +199,7 @@ def test_v2m_o1_skips_columbus_day_carry_forward():
     r = snap.refs
     assert r.oas_o1 == r.oas_o1_v2m == D(2025, 10, 10)
     assert r.o1_v2m_lag_stock_days == 2
-    assert snap.oas_o1_v2m == 3.18
+    assert snap.oas_o1_v2m == Decimal("3.18")
     assert any("2025-10-13（债市休市日）沿用值 3.18" in n and "都不计入" in n for n in snap.data_notes)
 
 
@@ -205,7 +209,7 @@ def test_v2m_o6_skips_columbus_day():
     r = snap.refs
     assert r.oas_o1_v2m == r.oas_o1 == D(2025, 10, 16)
     assert r.oas_o6_v2m == r.oas_o6_v3r1 == D(2025, 10, 8)
-    assert snap.oas_o6_v2m == 2.84
+    assert snap.oas_o6_v2m == Decimal("2.84")
 
 
 def test_sample4_v2m_o1_o6_match_spec_table():
@@ -213,7 +217,7 @@ def test_sample4_v2m_o1_o6_match_spec_table():
     snap = build_snapshot(load_sample_raw("2025-11-28"))
     r = snap.refs
     assert (r.oas_o1_v2m, r.oas_o6_v2m) == (D(2025, 11, 26), D(2025, 11, 19))
-    assert (snap.oas_o1_v2m, snap.oas_o6_v2m) == (3.00, 3.17)
+    assert (snap.oas_o1_v2m, snap.oas_o6_v2m) == (Decimal("3.00"), Decimal("3.17"))
     assert r.o1_v2m_lag_stock_days == 1
     assert not any("两种口径的 O1 不同" in n for n in snap.data_notes)
 
@@ -222,11 +226,11 @@ def test_labor_day_2025_09_02():
     """基准日 2025-09-02：09-01 沿用值排除；08-31（周日）月末观测计入。"""
     snap = build_snapshot(_raw_at("2025-09-26", D(2025, 9, 2)))
     r = snap.refs
-    assert (r.oas_o1_v2m, snap.oas_o1_v2m) == (D(2025, 8, 31), 2.84)
-    assert (r.oas_o6_v2m, snap.oas_o6_v2m) == (D(2025, 8, 25), 2.80)
+    assert (r.oas_o1_v2m, snap.oas_o1_v2m) == (D(2025, 8, 31), Decimal("2.84"))
+    assert (r.oas_o6_v2m, snap.oas_o6_v2m) == (D(2025, 8, 25), Decimal("2.80"))
     assert r.o1_v2m_lag_stock_days == 1  # 不滞后
-    assert (r.oas_o1, snap.oas_o1) == (D(2025, 8, 29), 2.82)
-    assert (r.oas_o6_v3r1, snap.oas_o6_v3r1) == (D(2025, 8, 22), 2.88)
+    assert (r.oas_o1, snap.oas_o1) == (D(2025, 8, 29), Decimal("2.82"))
+    assert (r.oas_o6_v3r1, snap.oas_o6_v3r1) == (D(2025, 8, 22), Decimal("2.88"))
     assert any("2025-09-01（债市休市日）沿用值 2.84" in n and "都不计入" in n for n in snap.data_notes)
 
 
@@ -236,7 +240,7 @@ def test_holiday_observation_with_new_value_is_excluded():
     oas = {**raw.oas, D(2025, 10, 13): 3.25}
     snap = build_snapshot(dataclasses.replace(raw, oas=oas))
     assert snap.refs.oas_o1_v2m == D(2025, 10, 10)
-    assert snap.oas_o1_v2m == 3.18
+    assert snap.oas_o1_v2m == Decimal("3.18")
     assert snap.refs.oas_o1 == D(2025, 10, 10)  # v3-R1 不取休市日
     assert not any("需人工判断" in n for n in snap.data_notes)
     assert any("2025-10-13（债市休市日）数值 3.25" in n and "按规则排除" in n for n in snap.data_notes)

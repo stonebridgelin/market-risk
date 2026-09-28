@@ -140,7 +140,7 @@ def _alternative_scores(series: MarketSeries, paths: StoragePaths, settings: Set
         return {}
     alt = series
     for sd in cfg.source_dependent:
-        alt = alt.replace_values(sd.symbol, {sd.date: float(sd.alternative)})
+        alt = alt.replace_values(sd.symbol, {sd.date: sd.alternative})
     raw = raw_inputs_from_series(alt, paths, settings, base, revision_check=False)
     snap = build_snapshot(raw, tuple(settings.scored_symbols), tuple(settings.reference_symbols[:2]),  # type: ignore[arg-type]
                           allow_missing_etfs=True)
@@ -149,10 +149,10 @@ def _alternative_scores(series: MarketSeries, paths: StoragePaths, settings: Set
 
 
 def _snapshot_dict(snap: MarketSnapshot) -> dict[str, object]:
-    """与单日运行写 snapshot.json 相同的结构（report.snapshot_json），供 metrics 提取。"""
-    from market_risk.report import snapshot_json
+    """从原始 Decimal 快照提取指标，不经过 JSON 浮点序列化。"""
+    from market_risk.report import snapshot_metrics_input
 
-    return snapshot_json(snap)
+    return snapshot_metrics_input(snap)
 
 
 def price_decimal(series: MarketSeries, name: str) -> list[tuple[dt.date, Decimal]]:

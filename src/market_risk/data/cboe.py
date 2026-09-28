@@ -9,8 +9,8 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import io
-import math
 from collections.abc import Callable, Mapping
+from decimal import Decimal
 
 from market_risk.data.cache import (
     DataFetchError,
@@ -68,15 +68,15 @@ def fetch_vix_history(
     )
 
 
-def _valid(v: float | None) -> bool:
-    return v is not None and not math.isnan(v)
+def _valid(v: float | Decimal | None) -> bool:
+    return v is not None and v == v
 
 
 def resolve_vix(
     day: dt.date,
-    fred_values: Mapping[dt.date, float | None],
-    cboe_values: Mapping[dt.date, float | None] | None,
-) -> tuple[float | None, list[str]]:
+    fred_values: Mapping[dt.date, float | Decimal | None],
+    cboe_values: Mapping[dt.date, float | Decimal | None] | None,
+) -> tuple[float | Decimal | None, list[str]]:
     """按 SPEC 5.6 第7条取某日 VIX：先 FRED VIXCLS，缺失时用 Cboe CLOSE；两者都缺才返回 None。
 
     两个来源都有值但不一致时报告差异，以 FRED 为准。

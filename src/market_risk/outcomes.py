@@ -15,6 +15,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 from market_risk import calendar as mcal
+from market_risk.precision import published_price
 
 SPX_THRESHOLD = -5.0   # 百分数
 QQQ_THRESHOLD = -7.0
@@ -65,7 +66,7 @@ def is_near_event(spx_min: float, qqq_min: float, is_event: bool) -> bool:
 
 def published(v: float | Decimal) -> Decimal:
     """收盘价按公布的两位小数读取（ROUND_HALF_UP）。"""
-    return (v if isinstance(v, Decimal) else Decimal(repr(float(v)))).quantize(PRICE_Q, ROUND_HALF_UP)
+    return published_price(v)
 
 
 def out4(v: Decimal) -> float:

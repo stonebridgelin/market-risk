@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 from dataclasses import dataclass
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,7 @@ from market_risk.data.raw_io import load_raw_inputs
 from market_risk.data.snapshot import RawInputs, build_snapshot
 from market_risk.models import BreadthReading, MarketSnapshot, ScoreResult
 from market_risk.pipeline import score_snapshot
+from market_risk.precision import decimal_value
 from market_risk.storage.paths import StoragePaths
 
 EXPECTED_PATH = PROJECT_ROOT / "tests" / "fixtures" / "regression" / "expected.json"
@@ -52,12 +54,18 @@ def sample_raw(sample: str, expected: dict[str, Any], raw_dir: Path = RAW_DIR) -
 def _fmt(x: Any) -> str:
     if x is None:
         return "-"
-    return f"{x:.2f}" if isinstance(x, float) else str(x)
+    return f"{x:.2f}" if isinstance(x, float | Decimal) else str(x)
 
 
 def _exact(sample: str, item: str, want: Any, got: Any) -> Check:
-    ok = want == got if not isinstance(want, float) else got is not None and round(got, 2) == round(want, 2)
-    diff = "" if ok else ("不一致" if not isinstance(want, float) or got is None else f"{got - want:+.2f}")
+    if isinstance(want, float):
+        quantum = Decimal("0.01")
+        ok = got is not None and decimal_value(got).quantize(quantum, rounding=ROUND_HALF_UP) == (
+            decimal_value(want).quantize(quantum, rounding=ROUND_HALF_UP))
+        diff = "" if ok else ("不一致" if got is None else f"{decimal_value(got) - decimal_value(want):+.2f}")
+    else:
+        ok = want == got
+        diff = "" if ok else "不一致"
     return Check(sample, item, _fmt(want), _fmt(got), diff, ok)
 
 
@@ -69,9 +77,9 @@ def compare_sample(
         e = snap.etfs[sym]
         got = (e.close, e.ma5, e.ma20, e.ma50, e.ma200)
         for name, want, g in zip(MA_NAMES, values, got, strict=True):
-            d = g - want
+            d = decimal_value(g) - decimal_value(want)
             checks.append(Check(sample, f"{sym} {name}", f"{want:.2f}", f"{g:.2f}", f"{d:+.3f}",
-                                abs(d) <= tol + 1e-9))
+                                abs(d) <= decimal_value(tol)))
     refs = snap.refs
     checks += [
         _exact(sample, "VIX", exp["vix"], snap.vix),
@@ -98,7 +106,7 @@ def compare_sample(
             want = step1[res.symbol]
             if want and isinstance(want[0], list):
                 got_v = [[str(t.d1), t.d1_close, t.lc, str(t.lc_date)] for t in got_list]
-                want_v = [[w[0], w[1], w[2], w[3]] for w in want]
+                want_v = [[w[0], decimal_value(w[1]), decimal_value(w[2]), w[3]] for w in want]
             else:
                 got_v = [str(t.d1) for t in got_list]
                 want_v = list(want)

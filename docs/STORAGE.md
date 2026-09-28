@@ -215,6 +215,7 @@ results/MARKET/risk_scoring/backtests/
 - 可以由程序在结果窗口结束后自动计算（只用收盘价，按 SOP 9.3），也可以人工录入；两者不一致时报告差异。
 - **隔离要求**：`scoring/`、`report.py` 中生成 prompt 的部分、`data/snapshot.py` 都不得读取 `outcomes`。写一个测试：扫描这些模块的导入和文件读取，确认不引用标签文件和标签表。
 - 结果窗口尚未结束时，不得计算标签。
+- 价格精度（审查 M-11）：评分、结果标签及回调事件都从市场数据集的十进制文本读取不复权 Close，按 `ROUND_HALF_UP` 舍入到两位小数后使用 Decimal 计算；写出 JSON/CSV 时才按各字段的展示精度序列化。
 
 ---
 

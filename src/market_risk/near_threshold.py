@@ -9,6 +9,7 @@ from decimal import Decimal
 
 from market_risk.config import NearThreshold
 from market_risk.models import MarketSnapshot, NearThresholdItem
+from market_risk.precision import decimal_value
 from market_risk.scoring.common import bp, d2, exact, pct_change
 
 BREADTH_LEVELS = (Decimal("40"), Decimal("50"))
@@ -26,7 +27,7 @@ def _add(
     unit: str,
     tolerance: float,
 ) -> None:
-    if abs(float(gap)) <= tolerance + 1e-9:
+    if abs(decimal_value(gap)) <= decimal_value(tolerance):
         items.append(NearThresholdItem(label, float(value), float(threshold), float(gap), unit))
 
 

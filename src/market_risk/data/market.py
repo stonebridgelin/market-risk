@@ -20,6 +20,7 @@ import io
 import json
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
 
 from market_risk import calendar as mcal
@@ -125,15 +126,16 @@ def series_text(rows: Mapping[dt.date, Row], columns: list[str]) -> str:
     return out.getvalue()
 
 
-def read_series_file(path: Any) -> tuple[list[str], dict[dt.date, Row]]:
-    """读取数据集中的一个序列；数值列转为 float（空为 None），source 为字符串。"""
+def read_series_file(path: Any, *, exact: bool = False) -> tuple[list[str], dict[dt.date, Row]]:
+    """读取数据集序列；计分或标签使用 exact 保留 CSV 的原始十进制文本。"""
     with open(path, encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
         columns = [c for c in reader.fieldnames or [] if c != "date"]
         rows: dict[dt.date, Row] = {}
         for r in reader:
             rows[dt.date.fromisoformat(r["date"])] = {
-                c: (r[c] if c == "source" else (float(r[c]) if r[c] else None)) for c in columns}
+                c: (r[c] if c == "source" else ((Decimal(r[c]) if exact else float(r[c])) if r[c] else None))
+                for c in columns}
     return columns, rows
 
 
@@ -403,7 +405,7 @@ def _load(paths: StoragePaths, name: str) -> dict[dt.date, Row]:
     path = paths.market_daily_file(name)
     if not path.exists():
         raise MarketDataError(f"数据集缺少 {path.relative_to(paths.root).as_posix()}，请先运行 market-risk data build")
-    return read_series_file(path)[1]
+    return read_series_file(path, exact=True)[1]
 
 
 def _window(rows: Mapping[dt.date, Row], start: dt.date, base: dt.date) -> dict[dt.date, Row]:
@@ -440,7 +442,7 @@ class MarketSeries:
         rows = self.rows[name]
         return {d: rows[d] for d in days[lo:hi]}
 
-    def replace_values(self, name: str, values: Mapping[dt.date, float]) -> MarketSeries:
+    def replace_values(self, name: str, values: Mapping[dt.date, float | Decimal]) -> MarketSeries:
         """替换某序列若干日期的 value/close（用于比较两种价格来源的计分；不改动文件）。"""
         rows = {**self.rows[name]}
         for d, v in values.items():
@@ -508,8 +510,8 @@ def raw_inputs_from_series(
 ) -> Any:
     """由已加载的数据集组装基准日的 RawInputs：所有序列截断到基准日（含）。单日评分与回测共用。"""
     from market_risk.data import fred
-    from market_risk.data.prices import PRICE_DECIMALS
     from market_risk.data.snapshot import RawInputs
+    from market_risk.precision import published_price
 
     manifest = series.manifest
     start = base - dt.timedelta(days=DAILY_LOOKBACK_DAYS)
@@ -520,7 +522,7 @@ def raw_inputs_from_series(
     close_start = base - dt.timedelta(days=settings.lookback_calendar_days)
     for sym in (*settings.scored_symbols, *settings.reference_symbols):
         w = series.window(sym, close_start, base)
-        closes[sym] = {d: round(float(r["value"]), PRICE_DECIMALS) for d, r in w.items() if r["value"] is not None}
+        closes[sym] = {d: published_price(r["value"]) for d, r in w.items() if r["value"] is not None}
         sources.append(_source_info(paths, manifest, sym, w))
 
     vix_w = series.window(settings.vix_series, start, base)

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP, Decimal
 
 from market_risk.models import DimensionScore, OasVintageValue, ScoreResult
+from market_risk.precision import decimal_value
 
 CENT = Decimal("0.01")
 ALL_SCORES = (0, 1, 2)
@@ -29,17 +30,14 @@ def d2(x: float | Decimal | None) -> Decimal | None:
     """原始数据（价格、VIX、OAS、收益率、广度）按公布的两位小数读取为 Decimal。"""
     if x is None:
         return None
-    return Decimal(str(x)).quantize(CENT, rounding=ROUND_HALF_UP)
+    return decimal_value(x).quantize(CENT, rounding=ROUND_HALF_UP)
 
 
 def exact(x: float | Decimal | None) -> Decimal | None:
-    """派生值（如均线）转为 Decimal，不取整。
-
-    float 的最短十进制表示可还原两位小数价格的有限位平均值（如 670.4418）。
-    """
+    """派生值（如均线）转为 Decimal，不取整。计算层应直接传入 Decimal。"""
     if x is None:
         return None
-    return x if isinstance(x, Decimal) else Decimal(repr(float(x)))
+    return decimal_value(x)
 
 
 def bp(a: Decimal, b: Decimal) -> Decimal:

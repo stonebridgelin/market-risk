@@ -6,9 +6,11 @@
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from decimal import Decimal
 
 from market_risk import calendar as mcal
 from market_risk.config import DataDecision, MarketHolidays
@@ -29,8 +31,9 @@ from market_risk.models import (
     SourceInfo,
     ThreeSegmentResult,
 )
+from market_risk.precision import decimal_value
 
-Series = Mapping[dt.date, float | None]
+Series = Mapping[dt.date, float | Decimal | None]
 MA_PERIODS = (5, 10, 20, 30, 50, 200)
 
 
@@ -71,13 +74,13 @@ class _Notes:
             self.items.append(note)
 
 
-def truncate(series: Series, base_date: dt.date) -> dict[dt.date, float | None]:
+def truncate(series: Series, base_date: dt.date) -> dict[dt.date, float | Decimal | None]:
     """截断到基准日（含）。"""
     return {d: v for d, v in series.items() if d <= base_date}
 
 
-def _valued(series: Series) -> dict[dt.date, float]:
-    return {d: float(v) for d, v in series.items() if v is not None and v == v}
+def _valued(series: Series) -> dict[dt.date, Decimal]:
+    return {d: decimal_value(v) for d, v in series.items() if v is not None and v == v}
 
 
 def check_contiguous(symbol: str, closes: Mapping[dt.date, float], base_date: dt.date) -> None:
@@ -120,8 +123,9 @@ def build_snapshot(
 
     # ---- 1. 截断到基准日（含）----
     closes = {s: _valued(truncate(c, base)) for s, c in raw.closes.items()}
-    vix_fred = truncate(raw.vix_fred, base)
-    vix_cboe = None if raw.vix_cboe is None else truncate(raw.vix_cboe, base)
+    vix_fred = {d: None if v is None else decimal_value(v) for d, v in truncate(raw.vix_fred, base).items()}
+    vix_cboe = None if raw.vix_cboe is None else {
+        d: None if v is None else decimal_value(v) for d, v in truncate(raw.vix_cboe, base).items()}
     treasury = _valued(truncate(raw.treasury, base))
     # 已裁定日期表：exclude 的 OAS 观测两个版本都不计入；keep 的不再提示"需人工判断"
     oas_decisions = {d.date: d for d in raw.decisions if d.symbol == raw.oas_symbol}
@@ -129,7 +133,8 @@ def build_snapshot(
     oas = {d: v for d, v in truncate(raw.oas, base).items() if d not in oas_excluded}
     oas_vintage = None if raw.oas_vintage is None else {
         d: v for d, v in truncate(raw.oas_vintage, base).items() if d not in oas_excluded}
-    breadth = {d: r for d, r in raw.breadth.items() if d <= base}
+    breadth = {d: dataclasses.replace(r, s5fi=decimal_value(r.s5fi), s5tw=decimal_value(r.s5tw))
+               for d, r in raw.breadth.items() if d <= base}
 
     # ---- 2. 日期参照 ----
     if raw.mode == "daily" and base not in treasury:
@@ -175,12 +180,12 @@ def build_snapshot(
     if any(a.completed != b.completed for a, b in pairs):
         notes.add("三环节结果依赖口径：d1 是否包含 T−20 会改变结果（SPEC 5.6 第1条）")
 
-    spy_window_max: float | None = None
+    spy_window_max: Decimal | None = None
     if scored_symbols[0] not in missing:
         spy = closes[scored_symbols[0]]
         spy_window_max = max(p2(spy[d]) for d in refs.window_days)
 
-    hyg_lqd: float | None = None
+    hyg_lqd: Decimal | None = None
     a, b = ratio_symbols
     if base in closes.get(a, {}) and base in closes.get(b, {}):
         hyg_lqd = ratio(closes[a][base], closes[b][base])
@@ -207,7 +212,7 @@ def build_snapshot(
     y = included.get(base)
     if y is None and raw.mode != "daily":
         notes.add(f"基准日 {base} 无财政部数值（债市休市），利率维度记待补")
-    h: float | None = None
+    h: Decimal | None = None
     h_dates: tuple[dt.date, ...] = ()
     if included:
         h, h_dates = window_max(included)

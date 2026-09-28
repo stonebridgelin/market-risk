@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as dt
+from decimal import Decimal
 
 import pytest
 from conftest import synthetic_raw
@@ -99,7 +100,7 @@ def raw_2021_month_end():
 
 def test_month_end_bond_holiday_counted_by_v2m():
     snap = build_snapshot(raw_2021_month_end())
-    assert (snap.refs.oas_o1_v2m, snap.oas_o1_v2m) == (MEMORIAL_2021, 3.34)
+    assert (snap.refs.oas_o1_v2m, snap.oas_o1_v2m) == (MEMORIAL_2021, Decimal("3.34"))
     assert snap.refs.oas_o6_v2m == D(2021, 5, 24)
     assert snap.refs.o1_v2m_lag_stock_days == 1
     assert any("恰为自然月末" in n and "v2-M 计入，v3-R1 不计入" in n for n in snap.data_notes)
@@ -108,6 +109,6 @@ def test_month_end_bond_holiday_counted_by_v2m():
 
 def test_month_end_bond_holiday_not_counted_by_v3r1():
     snap = build_snapshot(raw_2021_month_end())
-    assert (snap.refs.oas_o1, snap.oas_o1) == (D(2021, 5, 28), 3.29)
+    assert (snap.refs.oas_o1, snap.oas_o1) == (D(2021, 5, 28), Decimal("3.29"))
     assert snap.refs.oas_o6_v3r1 == D(2021, 5, 21)
     assert MEMORIAL_2021 not in snap.refs.oas_o1_to_o6_sequence

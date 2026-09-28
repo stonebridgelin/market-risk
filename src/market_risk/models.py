@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
+from decimal import Decimal
 
 
 @dataclass(frozen=True)
@@ -57,14 +58,14 @@ class EtfSnapshot:
     """一只 ETF 在基准日的收盘价与简单均线（不复权 Close）。"""
 
     symbol: str
-    close: float
-    ma5: float
-    ma10: float
-    ma20: float
-    ma30: float
-    ma50: float
-    ma200: float
-    closes: tuple[tuple[dt.date, float], ...]  # 截至基准日（含）的逐日收盘价
+    close: Decimal | float
+    ma5: Decimal | float
+    ma10: Decimal | float
+    ma20: Decimal | float
+    ma30: Decimal | float
+    ma50: Decimal | float
+    ma200: Decimal | float
+    closes: tuple[tuple[dt.date, Decimal | float], ...]  # 截至基准日（含）的逐日收盘价
 
 
 @dataclass(frozen=True)
@@ -72,8 +73,8 @@ class BreadthReading:
     """手工录入的广度读数（百分数，58.44 表示 58.44%）。"""
 
     date: dt.date
-    s5fi: float
-    s5tw: float
+    s5fi: Decimal | float
+    s5tw: Decimal | float
     source: str = "manual"
     note: str = ""
     stale_fields: tuple[str, ...] = ()   # 预留：疑似陈旧值字段；S5FI、S5TW 重复值属偶然，不再触发（SPEC 5.6 第11条）
@@ -85,8 +86,8 @@ class ThreeSegmentTrace:
 
     symbol: str
     d1: dt.date
-    d1_close: float
-    lc: float
+    d1_close: Decimal | float
+    lc: Decimal | float
     lc_date: dt.date
     step1: bool
     d2_dates: tuple[dt.date, ...]
@@ -185,19 +186,19 @@ class MarketSnapshot:
     breadth_t5: BreadthReading | None
     vix: float | None
     vix_t5: float | None
-    yields: dict[dt.date, float]               # 利率窗口内逐日财政部数值，另含 T−20
-    y: float | None
-    h: float | None
+    yields: dict[dt.date, Decimal | float]     # 利率窗口内逐日财政部数值，另含 T−20
+    y: Decimal | float | None
+    h: Decimal | float | None
     h_date: dt.date | None                     # 并列最高时为最早一天
     h_dates: tuple[dt.date, ...]               # 全部并列最高日期
-    y_t20: float | None
-    oas_o1: float | None                       # v3-R1 的 O1 数值
-    oas_o6_v3r1: float | None
-    oas_o1_v2m: float | None
-    oas_o6_v2m: float | None
+    y_t20: Decimal | float | None
+    oas_o1: Decimal | float | None             # v3-R1 的 O1 数值
+    oas_o6_v3r1: Decimal | float | None
+    oas_o1_v2m: Decimal | float | None
+    oas_o6_v2m: Decimal | float | None
     oas_vintage: tuple[OasVintageValue, ...]   # 历史修订比对；未取得版本数据时为空
-    hyg_lqd: float | None
-    spy_window_max_close: float | None         # 20日窗口内 SPY 最高收盘价（v2-M 广度 b）；SPY 缺失时为 None
+    hyg_lqd: Decimal | float | None
+    spy_window_max_close: Decimal | float | None  # 20日窗口内 SPY 最高收盘价（v2-M 广度 b）
     three_segment: dict[bool, tuple[ThreeSegmentResult, ...]]  # 键：d1 是否包含 T−20
     data_notes: tuple[str, ...]
     mode: str = "backtest"                     # backtest / daily

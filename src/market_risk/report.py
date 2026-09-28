@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import csv
+import dataclasses
 import datetime as dt
 import re
 from collections.abc import Iterable, Mapping
@@ -314,6 +315,15 @@ def snapshot_json(snap: MarketSnapshot) -> dict[str, Any]:
     return data
 
 
+def snapshot_metrics_input(snap: MarketSnapshot) -> dict[str, Any]:
+    """指标计算使用原始 Decimal 快照，不经 JSON 的浮点序列化。"""
+    data = dataclasses.asdict(snap)
+    for e in data["etfs"].values():
+        e.pop("closes", None)
+    data.pop("three_segment", None)
+    return data
+
+
 def three_segment_rows(snap: MarketSnapshot) -> list[dict[str, Any]]:
     rows = []
     for flag in (True, False):
@@ -366,7 +376,7 @@ def write_run_outputs(
     write_json(run_dir / RUN_FILES["dates"], snap.refs)
     write_json(run_dir / RUN_FILES["snapshot"], snapshot_json(snap))
     completed = {r.symbol: r.completed for r in snap.three_segment[ctx.d1_includes_t_minus_20]}
-    write_json(run_dir / RUN_FILES["metrics"], metrics_from_snapshot_json(snapshot_json(snap), completed))
+    write_json(run_dir / RUN_FILES["metrics"], metrics_from_snapshot_json(snapshot_metrics_input(snap), completed))
     write_json(run_dir / RUN_FILES["scores"], {
         "d1_includes_t_minus_20": ctx.d1_includes_t_minus_20,
         "results": list(ctx.results),

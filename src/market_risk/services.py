@@ -813,7 +813,7 @@ def _default_close_loader(ctx: Context, refresh: bool) -> CloseLoader:
         path = ctx.paths.market_daily_file(name)
         if not path.exists():
             raise MarketDataError(f"数据集缺少 {name}，请先运行 market-risk data build")
-        rows = read_series_file(path)[1]
+        rows = read_series_file(path, exact=True)[1]
         return {d: r["value"] for d, r in rows.items() if start <= d <= end and r["value"] is not None}
 
     return load
@@ -1056,7 +1056,7 @@ def load_market_series_extra(ctx: Context, name: str) -> dict[dt.date, dict[str,
     path = ctx.paths.market_daily_file(name)
     if not path.exists():
         raise MarketDataError(f"数据集缺少 {name}，请先运行 market-risk data build")
-    return read_series_file(path)[1]
+    return read_series_file(path, exact=True)[1]
 
 
 def backtest_set_official(ctx: Context, run_id: str, now: dt.datetime | None = None) -> dict[str, Any]:
