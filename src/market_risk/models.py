@@ -197,7 +197,9 @@ class MarketSnapshot:
     oas_o6_v2m: float | None
     oas_vintage: tuple[OasVintageValue, ...]   # 历史修订比对；未取得版本数据时为空
     hyg_lqd: float | None
-    spy_window_max_close: float                # 20日窗口内 SPY 最高收盘价（v2-M 广度 b）
+    spy_window_max_close: float | None         # 20日窗口内 SPY 最高收盘价（v2-M 广度 b）；SPY 缺失时为 None
     three_segment: dict[bool, tuple[ThreeSegmentResult, ...]]  # 键：d1 是否包含 T−20
     data_notes: tuple[str, ...]
     mode: str = "backtest"                     # backtest / daily
+    # 评分 ETF 当日或回看窗口内缺数据（数据集已覆盖基准日）：(标的, 原因)。价格维度记待补（准备层 prepare.py）
+    missing_etfs: tuple[tuple[str, str], ...] = ()

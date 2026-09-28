@@ -159,13 +159,25 @@ def test_pending_run_and_breadth_message(paths):
 
 
 def test_failed_run_writes_meta(paths):
-    raw = dataclasses.replace(raw4(), closes={k: v for k, v in raw4().closes.items() if k != "RSP"})
-    with pytest.raises(Exception, match="缺少 RSP"):
+    """无法计算（SPY 历史不足200个交易日，MA200 无法计算）时运行失败并写 meta。"""
+    spy = dict(sorted(raw4().closes["SPY"].items())[-60:])
+    raw = dataclasses.replace(raw4(), closes={**raw4().closes, "SPY": spy})
+    with pytest.raises(Exception, match="MA200"):
         run_scoring(raw, SETTINGS, paths, CLEAN, now=NOW)
     (run_id,) = runs.list_runs(paths, MARKET, RISK_SCORING, BASE)
     meta = json.loads((paths.run_dir(MARKET, RISK_SCORING, BASE, run_id) / "meta.json").read_text("utf-8"))
-    assert meta["status"] == "failed" and "缺少 RSP" in meta["error"]
+    assert meta["status"] == "failed" and "MA200" in meta["error"]
     assert runs.read_official(paths, MARKET, RISK_SCORING, BASE) is None
+
+
+def test_missing_etf_run_is_pending_with_warning(paths):
+    """数据集已覆盖基准日但 RSP 缺失：价格维度记待补（0–2），运行不失败，命令行醒目提示。"""
+    raw = dataclasses.replace(raw4(), closes={k: v for k, v in raw4().closes.items() if k != "RSP"})
+    out = run_scoring(raw, SETTINGS, paths, CLEAN, now=NOW)
+    assert out.status == "pending"
+    assert all(r.price.score is None and r.price.possible_scores == (0, 1, 2) for r in out.results)
+    assert any("【数据源可能有问题】" in m for m in out.messages)
+    assert "缺失" in (out.run_dir / "prompt.md").read_text("utf-8")
 
 
 def test_official_set_and_confirm(paths):

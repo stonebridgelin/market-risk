@@ -162,9 +162,11 @@ def alert_status(total: int | None, lo: int, hi: int) -> str:
 
 
 def iter_run_dirs(paths: StoragePaths) -> Iterator[Path]:
+    """单日运行目录（不含逐日回测的运行目录 results/…/backtests/，后者由 _insert_backtests 处理）。"""
     root = paths.results_root
     if root.exists():
-        yield from (m.parent for m in sorted(root.glob("**/run_*/meta.json")))
+        skip = paths.backtests_root
+        yield from (m.parent for m in sorted(root.glob("**/run_*/meta.json")) if skip not in m.parents)
 
 
 def _csv_rows(path: Path) -> list[dict[str, str]]:
@@ -330,6 +332,64 @@ def _insert_reference(conn: Connection, config_dir: Path | None = None) -> None:
             conn.execute(table.insert(), rows[table.name])
 
 
+def _dim_parts(text: str) -> tuple[int | None, str]:
+    """daily_scores.csv 的维度写法："2" 或 "待补[1, 2]" → (分数, 可能取值)。"""
+    if text.startswith("待补"):
+        return None, text.removeprefix("待补")
+    return int(text), f"[{int(text)}]"
+
+
+def _insert_backtests(conn: Connection, paths: StoragePaths) -> None:
+    """由回测运行目录重建：backtest_runs、backtest_daily_scores、backtest_outcomes、pullback_episodes。"""
+    from market_risk.storage import backtests
+
+    official = (backtests.read_official(paths) or {}).get("run_id")
+    for run_id in backtests.list_runs(paths):
+        meta = backtests.read_meta(paths, run_id)
+        conn.execute(schema.backtest_runs.insert().values(
+            run_id=run_id, created_at_utc=meta.get("created_at_utc"), git_commit=meta.get("git_commit"),
+            git_dirty=meta.get("git_dirty"), market_manifest_sha256=meta.get("market_manifest_sha256"),
+            config_sha256=meta.get("config", {}).get("sha256"), start_date=_date(meta["start"]),
+            end_date=_date(meta["end"]), versions=",".join(meta.get("versions", [])), days=int(meta["days"]),
+            runtime_seconds=_dec(meta.get("runtime_seconds")), holdout_unlocked_at=meta.get("holdout_unlocked_at"),
+            is_official=run_id == official,
+            run_dir=paths.backtest_run_dir(run_id).relative_to(paths.root).as_posix()))
+        rows = []
+        for r in backtests.read_csv(backtests.run_file(paths, run_id, "daily_scores")):
+            dims = {d: _dim_parts(r[d]) for d in schema.BACKTEST_DIMS}
+            rows.append({"run_id": run_id, "base_date": _date(r["date"]), "version": r["version"],
+                         **{d: v[0] for d, v in dims.items()}, **{f"{d}_possible": v[1] for d, v in dims.items()},
+                         "total": int(r["total"]) if r["total"] else None, "total_min": int(r["total_min"]),
+                         "total_max": int(r["total_max"]), "stage": r["stage"],
+                         "pending_dimensions": r["pending_dimensions"] or None,
+                         "clear_deterioration": r["clear_deterioration"], "alert": r["alert"],
+                         "flags": r["flags"] or None})
+        if rows:
+            conn.execute(schema.backtest_daily_scores.insert(), rows)
+        rows = [{"run_id": run_id, "base_date": _date(r["base_date"]), "window_start": _date(r["window_start"]),
+                 "window_end": _date(r["window_end"]),
+                 **{k: _dec(r[k]) for k in ("spx_drawdown_from_base", "qqq_drawdown_from_base",
+                                            "spx_peak_to_trough_drawdown", "qqq_peak_to_trough_drawdown")},
+                 "is_event": r["is_event"] == "是", "event_date": _date(r.get("event_date")),
+                 "is_near_event": r["is_near_event"] == "是", "period": r["period"],
+                 "crosses_period": r["crosses_period"] == "是"}
+                for r in backtests.read_csv(backtests.run_file(paths, run_id, "outcomes"))]
+        if rows:
+            conn.execute(schema.backtest_outcomes.insert(), rows)
+        rows = [{"run_id": run_id, "symbol": r["symbol"], "level": _dec(Decimal(r["level"]) / 100),
+                 "high_date": _date(r["high_date"]), "high_close": _dec(r["high_close"]),
+                 "low_date": _date(r["low_date"]), "low_close": _dec(r["low_close"]),
+                 "drawdown_pct": _dec(r["drawdown_pct"]),
+                 "trading_days": int(r["trading_days"]) if r["trading_days"] else None,
+                 "grade": r["grade"] or None, "status": r["status"], "confirm_date": _date(r["confirm_date"]),
+                 "recovery_date": _date(r["recovery_date"]), "recovery_note": r["recovery_note"] or None,
+                 "period": r["period"], "before_start": r["before_start"] == "是",
+                 "crosses_boundary": r["crosses_boundary"] == "是", "counted": r["counted"] == "是"}
+                for r in backtests.read_csv(backtests.run_file(paths, run_id, "episodes"))]
+        if rows:
+            conn.execute(schema.pullback_episodes.insert(), rows)
+
+
 def rebuild(paths: StoragePaths, url: str | None = None) -> str:
     """清空并重建数据库（rebuild-db）：Alembic 迁移到最新结构后，由文件写入全部内容。返回连接地址。"""
     url = url or default_url(paths)
@@ -342,6 +402,7 @@ def rebuild(paths: StoragePaths, url: str | None = None) -> str:
                 _insert_run(conn, paths, run_dir)
             _insert_files(conn, paths)
             _insert_reference(conn)
+            _insert_backtests(conn, paths)
     finally:
         engine.dispose()
     return url

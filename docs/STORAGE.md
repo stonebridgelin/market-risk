@@ -103,6 +103,27 @@ market-risk/
 - Windows 下不使用符号链接，用 `official.json` 指针文件代替。
 - SPEC 第7节的 `output/history.csv` 已取消，其功能由数据库 `runs`、`totals` 表和 `reports/` 覆盖。
 
+### 2.3 逐日历史回测的运行目录（阶段6，2026-09-27）
+
+```
+results/MARKET/risk_scoring/backtests/
+├── official.json                  # 正式回测指针（run_id、set_at_utc、set_by）
+├── .gitignore                     # 由 backtest official 生成并提交：只放行正式回测的运行目录
+└── run_<UTC>_<commit7>/           # 一次回测一个目录（不为每个交易日建目录，不覆盖）
+    ├── meta.json                  # 代码 commit、数据集 manifest sha256、回测配置 sha256、规则版本、区间划分、耗时、保留期解锁时间
+    ├── README.md                  # 文件说明（含 daily_metrics 的精度与舍入方式）
+    ├── daily_scores.csv           # 每个基准日 × 版本：五维分数、总分或范围、阶段、待补维度、明确恶化证据链、预警、flags（提交 git）
+    ├── daily_metrics.csv          # 每个基准日：评分实际使用的原始数值与派生值（6 位小数，ROUND_HALF_UP）
+    ├── outcomes.csv               # 结果标签（隔离）
+    ├── pullback_episodes.csv      # 回调事件（隔离，多层级）
+    └── episode_windows.csv        # 回调窗口：高点前20至低点后20个交易日的分数与价格进度（隔离）
+```
+
+- 只提交正式回测的运行目录；其他运行目录保留在本地、不提交。meta.json 的代码 commit 与数据集 sha256 足以复现任何一次运行。
+- 标签文件（outcomes、pullback_episodes、episode_windows）使用基准日之后的数据，评分代码不得读取（有传递依赖测试）。
+- 保留期屏蔽原则：任何字段，只要其取值需要用到保留期的数据，未解锁时一律屏蔽（SPEC 阶段6）。
+- 数据库（迁移 0006）：`backtest_runs`、`backtest_daily_scores`、`backtest_outcomes`（隔离，保留单日 `outcomes` 表）、`pullback_episodes`，rebuild-db 由回测运行目录重建。
+
 ### 2.1 正式记录 `official.json`（2026-09-26 确认）
 
 - 内容：`run_id`、`set_at_utc`、`set_by`（`auto` / `manual` / `import-legacy`）、`reviewed`（true/false）、`reviewed_at_utc`。

@@ -183,6 +183,86 @@ data_decisions = Table(
     Column("evidence_source", Text),
 )
 
+# ---- 逐日历史回测（迁移 0006）：由 results/MARKET/risk_scoring/backtests/<run_id>/ 重建 ----
+BACKTEST_DIMS = ("price", "breadth", "vix", "rates", "credit")
+
+backtest_runs = Table(
+    "backtest_runs", metadata,
+    Column("run_id", String(64), primary_key=True),
+    Column("created_at_utc", String(40)),
+    Column("git_commit", String(40)),
+    Column("git_dirty", Boolean),
+    Column("market_manifest_sha256", String(64)),
+    Column("config_sha256", String(64)),
+    Column("start_date", Date, nullable=False),
+    Column("end_date", Date, nullable=False),
+    Column("versions", String(32), nullable=False),
+    Column("days", Integer, nullable=False),
+    Column("runtime_seconds", DECIMAL),
+    Column("holdout_unlocked_at", String(40)),
+    Column("is_official", Boolean, nullable=False),
+    Column("run_dir", String(300), nullable=False),
+)
+
+backtest_daily_scores = Table(
+    "backtest_daily_scores", metadata,
+    Column("run_id", String(64), ForeignKey("backtest_runs.run_id"), primary_key=True),
+    Column("base_date", Date, primary_key=True),
+    Column("version", String(16), primary_key=True),
+    *[Column(d, Integer) for d in BACKTEST_DIMS],
+    *[Column(f"{d}_possible", String(16)) for d in BACKTEST_DIMS],
+    Column("total", Integer),
+    Column("total_min", Integer, nullable=False),
+    Column("total_max", Integer, nullable=False),
+    Column("stage", String(16)),
+    Column("pending_dimensions", Text),
+    Column("clear_deterioration", String(8)),
+    Column("alert", String(8)),
+    Column("flags", Text),
+)
+
+# 隔离的标签表：评分代码不得读取
+backtest_outcomes = Table(
+    "backtest_outcomes", metadata,
+    Column("run_id", String(64), ForeignKey("backtest_runs.run_id"), primary_key=True),
+    Column("base_date", Date, primary_key=True),
+    Column("window_start", Date, nullable=False),
+    Column("window_end", Date, nullable=False),
+    Column("spx_drawdown_from_base", DECIMAL),
+    Column("qqq_drawdown_from_base", DECIMAL),
+    Column("spx_peak_to_trough_drawdown", DECIMAL),
+    Column("qqq_peak_to_trough_drawdown", DECIMAL),
+    Column("is_event", Boolean, nullable=False),
+    Column("event_date", Date),
+    Column("is_near_event", Boolean, nullable=False),
+    Column("period", String(16)),
+    Column("crosses_period", Boolean, nullable=False),
+)
+
+pullback_episodes = Table(
+    "pullback_episodes", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("run_id", String(64), ForeignKey("backtest_runs.run_id"), nullable=False),
+    Column("symbol", String(8), nullable=False),
+    Column("level", DECIMAL, nullable=False),
+    Column("high_date", Date, nullable=False),
+    Column("high_close", DECIMAL, nullable=False),
+    Column("low_date", Date),
+    Column("low_close", DECIMAL),
+    Column("drawdown_pct", DECIMAL),
+    Column("trading_days", Integer),
+    Column("grade", String(16)),
+    Column("status", String(32), nullable=False),
+    Column("confirm_date", Date),
+    Column("recovery_date", Date),
+    Column("recovery_note", Text),
+    Column("period", String(16), nullable=False),
+    Column("before_start", Boolean, nullable=False),
+    Column("crosses_boundary", Boolean, nullable=False),
+    Column("counted", Boolean, nullable=False),
+)
+
 TABLES = (runs, officials, dimension_scores, totals, metrics, near_threshold, outcomes, materials, reviews,
-          symbols, market_holidays, data_decisions)
+          symbols, market_holidays, data_decisions, backtest_runs, backtest_daily_scores, backtest_outcomes,
+          pullback_episodes)
 REFERENCE_TABLES = (symbols, market_holidays, data_decisions)

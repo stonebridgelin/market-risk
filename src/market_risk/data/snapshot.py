@@ -95,12 +95,26 @@ def check_contiguous(symbol: str, closes: Mapping[dt.date, float], base_date: dt
         )
 
 
+def etf_problem(symbol: str, closes: Mapping[dt.date, float] | None, base_date: dt.date) -> str | None:
+    """评分 ETF 的收盘价是否可用：缺基准日或回看窗口内缺交易日时返回原因。"""
+    if not closes:
+        return f"缺少 {symbol} 的收盘价"
+    try:
+        check_contiguous(symbol, closes, base_date)
+    except DataIntegrityError as exc:
+        return str(exc)
+    return None
+
+
 def build_snapshot(
     raw: RawInputs,
     scored_symbols: tuple[str, ...] = ("SPY", "QQQ", "RSP"),
     ratio_symbols: tuple[str, str] = ("HYG", "LQD"),
     holidays: MarketHolidays | None = None,
+    allow_missing_etfs: bool = False,
 ) -> MarketSnapshot:
+    """allow_missing_etfs：评分 ETF 当日或回看窗口内缺数据时不报错，改为记录在 missing_etfs 中，
+    该 ETF 不进入 etfs 与三环节（价格维度由准备层记待补）。数据集是否覆盖基准日由调用方先检查。"""
     base = raw.base_date
     notes = _Notes(list(raw.notes))
 
@@ -135,11 +149,16 @@ def build_snapshot(
 
     # ---- 3. ETF ----
     etfs: dict[str, EtfSnapshot] = {}
+    missing: dict[str, str] = {}
     for symbol in scored_symbols:
-        if symbol not in closes:
-            raise DataIntegrityError(f"缺少 {symbol} 的收盘价")
+        problem = etf_problem(symbol, closes.get(symbol), base)
+        if problem is not None:
+            if not allow_missing_etfs:
+                raise DataIntegrityError(problem)
+            missing[symbol] = problem
+            notes.add(f"【数据源可能有问题】{problem}；价格维度记待补")
+            continue
         c = closes[symbol]
-        check_contiguous(symbol, c, base)
         mas = {p: simple_moving_average(c, base, p) for p in MA_PERIODS}
         etfs[symbol] = EtfSnapshot(
             symbol=symbol,
@@ -148,7 +167,7 @@ def build_snapshot(
             closes=tuple(sorted(c.items())),
         )
     three_segment: dict[bool, tuple[ThreeSegmentResult, ...]] = {True: (), False: ()}
-    for symbol in scored_symbols:
+    for symbol in (s for s in scored_symbols if s not in missing):
         both = three_segment_both(symbol, closes[symbol], base)
         for flag in (True, False):
             three_segment[flag] = (*three_segment[flag], both[flag])
@@ -156,8 +175,10 @@ def build_snapshot(
     if any(a.completed != b.completed for a, b in pairs):
         notes.add("三环节结果依赖口径：d1 是否包含 T−20 会改变结果（SPEC 5.6 第1条）")
 
-    spy = closes[scored_symbols[0]]
-    spy_window_max = max(p2(spy[d]) for d in refs.window_days)
+    spy_window_max: float | None = None
+    if scored_symbols[0] not in missing:
+        spy = closes[scored_symbols[0]]
+        spy_window_max = max(p2(spy[d]) for d in refs.window_days)
 
     hyg_lqd: float | None = None
     a, b = ratio_symbols
@@ -289,6 +310,7 @@ def build_snapshot(
         three_segment=three_segment,
         data_notes=tuple(notes.items),
         mode=raw.mode,
+        missing_etfs=tuple(sorted(missing.items())),
     )
     assert_no_lookahead(snapshot)
     return snapshot

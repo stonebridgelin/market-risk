@@ -1,7 +1,25 @@
 -- 由 `market-risk db export-sql` 自动生成，不得手工修改。
--- 表结构：Alembic 版本 0005（migrations/versions/），数据库：mysql。
+-- 表结构：Alembic 版本 0006（migrations/versions/），数据库：mysql。
 -- 具体数据不在此导出，见 db/sql/README.md。
 -- 建库时使用 utf8mb4 字符集（CREATE DATABASE ... CHARACTER SET utf8mb4）。
+
+CREATE TABLE backtest_runs (
+	run_id VARCHAR(64) NOT NULL,
+	created_at_utc VARCHAR(40),
+	git_commit VARCHAR(40),
+	git_dirty BOOL,
+	market_manifest_sha256 VARCHAR(64),
+	config_sha256 VARCHAR(64),
+	start_date DATE NOT NULL,
+	end_date DATE NOT NULL,
+	versions VARCHAR(32) NOT NULL,
+	days INTEGER NOT NULL,
+	runtime_seconds NUMERIC(20, 8),
+	holdout_unlocked_at VARCHAR(40),
+	is_official BOOL NOT NULL,
+	run_dir VARCHAR(300) NOT NULL,
+	PRIMARY KEY (run_id)
+);
 
 CREATE TABLE data_decisions (
 	date DATE NOT NULL,
@@ -104,6 +122,50 @@ CREATE TABLE symbols (
 	UNIQUE (tv_symbol)
 );
 
+CREATE TABLE backtest_daily_scores (
+	run_id VARCHAR(64) NOT NULL,
+	base_date DATE NOT NULL,
+	version VARCHAR(16) NOT NULL,
+	price INTEGER,
+	breadth INTEGER,
+	vix INTEGER,
+	rates INTEGER,
+	credit INTEGER,
+	price_possible VARCHAR(16),
+	breadth_possible VARCHAR(16),
+	vix_possible VARCHAR(16),
+	rates_possible VARCHAR(16),
+	credit_possible VARCHAR(16),
+	total INTEGER,
+	total_min INTEGER NOT NULL,
+	total_max INTEGER NOT NULL,
+	stage VARCHAR(16),
+	pending_dimensions TEXT,
+	clear_deterioration VARCHAR(8),
+	alert VARCHAR(8),
+	flags TEXT,
+	PRIMARY KEY (run_id, base_date, version),
+	FOREIGN KEY(run_id) REFERENCES backtest_runs (run_id)
+);
+
+CREATE TABLE backtest_outcomes (
+	run_id VARCHAR(64) NOT NULL,
+	base_date DATE NOT NULL,
+	window_start DATE NOT NULL,
+	window_end DATE NOT NULL,
+	spx_drawdown_from_base NUMERIC(20, 8),
+	qqq_drawdown_from_base NUMERIC(20, 8),
+	spx_peak_to_trough_drawdown NUMERIC(20, 8),
+	qqq_peak_to_trough_drawdown NUMERIC(20, 8),
+	is_event BOOL NOT NULL,
+	event_date DATE,
+	is_near_event BOOL NOT NULL,
+	period VARCHAR(16),
+	crosses_period BOOL NOT NULL,
+	PRIMARY KEY (run_id, base_date),
+	FOREIGN KEY(run_id) REFERENCES backtest_runs (run_id)
+);
+
 CREATE TABLE dimension_scores (
 	id INTEGER NOT NULL AUTO_INCREMENT,
 	run_key VARCHAR(200) NOT NULL,
@@ -152,6 +214,30 @@ CREATE TABLE officials (
 	FOREIGN KEY(run_key) REFERENCES runs (run_key)
 );
 
+CREATE TABLE pullback_episodes (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	run_id VARCHAR(64) NOT NULL,
+	symbol VARCHAR(8) NOT NULL,
+	level NUMERIC(20, 8) NOT NULL,
+	high_date DATE NOT NULL,
+	high_close NUMERIC(20, 8) NOT NULL,
+	low_date DATE,
+	low_close NUMERIC(20, 8),
+	drawdown_pct NUMERIC(20, 8),
+	trading_days INTEGER,
+	grade VARCHAR(16),
+	status VARCHAR(32) NOT NULL,
+	confirm_date DATE,
+	recovery_date DATE,
+	recovery_note TEXT,
+	period VARCHAR(16) NOT NULL,
+	before_start BOOL NOT NULL,
+	crosses_boundary BOOL NOT NULL,
+	counted BOOL NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(run_id) REFERENCES backtest_runs (run_id)
+);
+
 CREATE TABLE totals (
 	run_key VARCHAR(200) NOT NULL,
 	version VARCHAR(16) NOT NULL,
@@ -168,4 +254,4 @@ CREATE TABLE totals (
 );
 
 CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL, PRIMARY KEY (version_num));
-INSERT INTO alembic_version (version_num) VALUES ('0005');
+INSERT INTO alembic_version (version_num) VALUES ('0006');

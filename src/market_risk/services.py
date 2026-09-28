@@ -805,26 +805,26 @@ class OutcomeResult:
 CloseLoader = Callable[[str, dt.date, dt.date], Mapping[dt.date, float]]
 
 
-def _default_close_loader(ctx: Context, refresh: bool) -> CloseLoader:  # pragma: no cover - 联网
-    from market_risk.data.cache import cached_series
-    from market_risk.data.prices import close_series_from_frame, yfinance_download
+def _default_close_loader(ctx: Context, refresh: bool) -> CloseLoader:
+    """结果标签的收盘价从数据集 data/market/ 读取（SPX = Yahoo ^GSPC，QQQ 含已批准的人工修正）；不联网。"""
+    from market_risk.data.market import MarketDataError, read_series_file
 
-    def load(yahoo: str, start: dt.date, end: dt.date) -> Mapping[dt.date, float]:
-        key = yahoo.replace("^", "")
-
-        def _dl() -> dict:
-            return close_series_from_frame(yfinance_download(yahoo, start, end + dt.timedelta(days=1)), yahoo)
-
-        series, _ = cached_series(ctx.paths, "yahoo", f"{key}_outcome", start, end, f"yfinance {yahoo}", _dl,
-                                  refresh, ctx.settings.max_retries, ctx.settings.backoff_seconds)
-        return {d: v for d, v in series.items() if v is not None}
+    def load(name: str, start: dt.date, end: dt.date) -> Mapping[dt.date, float]:
+        path = ctx.paths.market_daily_file(name)
+        if not path.exists():
+            raise MarketDataError(f"数据集缺少 {name}，请先运行 market-risk data build")
+        rows = read_series_file(path)[1]
+        return {d: r["value"] for d, r in rows.items() if start <= d <= end and r["value"] is not None}
 
     return load
 
 
 def outcome_compute(ctx: Context, base: dt.date, refresh: bool = False, loader: CloseLoader | None = None,
                     today: dt.date | None = None) -> OutcomeResult:
-    """结果窗口结束后，用标普500指数与 QQQ 的收盘价计算风险事件标签（SOP 9.3）。"""
+    """结果窗口结束后，用标普500指数与 QQQ 的收盘价计算风险事件标签（SOP 9.3）。
+
+    收盘价读取数据集的 SPX、QQQ（refresh 参数保留兼容，不再联网）；计算为 Decimal，取整前判定事件与接近事件。
+    """
     from market_risk.data.cache import today_new_york
     from market_risk.outcomes import OutcomeError, compute_outcome, outcome_window, record_outcome, window_finished
 
@@ -834,8 +834,8 @@ def outcome_compute(ctx: Context, base: dt.date, refresh: bool = False, loader: 
         raise ServiceError(f"{base} 的结果窗口到 {end} 才结束，现在不得计算标签")
     load = loader or _default_close_loader(ctx, refresh)
     try:
-        outcome = compute_outcome(base, load("^GSPC", base, end), load("QQQ", base, end), today)
-    except OutcomeError as exc:
+        outcome = compute_outcome(base, load("SPX", base, end), load("QQQ", base, end), today)
+    except (OutcomeError, ValueError) as exc:
         raise ServiceError(str(exc)) from exc
     diffs = record_outcome(ctx.paths.outcomes_csv, outcome)
     _rebuild_db(ctx)
@@ -941,3 +941,232 @@ def db_verify_mysql(ctx: Context, url: str | None = None) -> Any | None:
         return mysql_verify.verify(ctx.paths, url, ctx.paths.db_sql_dir)
     except mysql_verify.VerifyError as exc:
         raise ServiceError(f"MySQL 兼容性验证失败：{exc}") from exc
+
+
+# ---------------------------------------------------------------------------
+# 阶段6：逐日历史回测
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class BacktestRunReport:
+    run_id: str
+    run_dir: Path
+    start: dt.date
+    end: dt.date
+    days: int
+    runtime_seconds: float
+    counts: dict[str, int]              # 各文件行数
+
+
+def _corrections_used(ctx: Context) -> list[tuple[str, dt.date]]:
+    """数据集中已应用的人工修正（标的, 日期），用于"使用人工修正值"标记。"""
+    from market_risk.data.market import read_manifest
+
+    out = []
+    for name, entry in read_manifest(ctx.paths).get("series", {}).items():
+        out += [(name, dt.date.fromisoformat(c["date"])) for c in entry.get("corrections", [])]
+    return sorted(out)
+
+
+def backtest_run(ctx: Context, start: dt.date | None = None, end: dt.date | None = None,
+                 versions: Collection[str] = ("v2-M", "v3-R1"), unlock_holdout: bool = False,
+                 git: Any = None, now: dt.datetime | None = None,
+                 progress: Callable[[int, int], None] | None = None) -> BacktestRunReport:
+    """逐日计算评分与指标，再计算结果标签与回调事件标签，写入新的回测运行目录（不覆盖）。"""
+    from market_risk.backtest import output
+    from market_risk.backtest.engine import VERSIONS, price_decimal, run_backtest
+    from market_risk.backtest.labels import build_episodes, episode_windows, outcome_rows
+    from market_risk.backtest.settings import load_backtest_config
+    from market_risk.data.market import MarketDataError, load_market_series, manifest_sha256
+    from market_risk.storage import backtests, runs
+    from market_risk.storage.paths import make_run_id, unique_run_id
+
+    bad = set(versions) - set(VERSIONS)
+    if bad or not versions:
+        raise ServiceError(f"版本只能是 {'、'.join(VERSIONS)}")
+    cfg = load_backtest_config()
+    try:
+        series = load_market_series(ctx.paths, ctx.settings)
+        for name in ("SPX", "QQQ"):
+            if name not in series.rows:
+                series.rows[name] = load_market_series_extra(ctx, name)  # type: ignore[index]
+    except MarketDataError as exc:
+        raise ServiceError(str(exc)) from exc
+    git = git or runs.git_info(ctx.paths.root)
+    created = now or dt.datetime.now(dt.UTC)
+    existing = backtests.list_runs(ctx.paths)
+    run_id = unique_run_id(make_run_id(created, git.commit or runs.UNKNOWN_COMMIT), existing)
+
+    result = run_backtest(series, ctx.paths, ctx.settings, cfg, start, end, tuple(versions),
+                          _corrections_used(ctx), progress)
+    t_labels = dt.datetime.now(dt.UTC)
+    bases = [d.date for d in result.days]
+    spx = dict(price_decimal(series, "SPX"))
+    qqq = dict(price_decimal(series, "QQQ"))
+    outcomes = outcome_rows(bases, spx, qqq, cfg, unlock_holdout)
+    scores = output.score_index(result.days)
+    episodes, windows = [], []
+    for sym, closes in (("SPX", sorted(spx.items())), ("QQQ", sorted(qqq.items()))):
+        days = [d for d, _ in closes]
+        for ep in build_episodes(sym, closes, cfg, unlock_holdout):
+            episodes.append(ep)
+            if ep.period != "保留期" or unlock_holdout:
+                windows += episode_windows(ep, days, scores, result.versions, cfg, unlock_holdout, dict(closes))
+
+    run_dir = ctx.paths.backtest_run_dir(run_id)
+    run_dir.mkdir(parents=True, exist_ok=False)
+    backtests.write_csv(backtests.run_file(ctx.paths, run_id, "daily_scores"), backtests.DAILY_SCORE_FIELDS,
+                        output.daily_score_rows(result.days))
+    fields, metric_rows = output.daily_metric_rows(result.days)
+    backtests.write_csv(backtests.run_file(ctx.paths, run_id, "daily_metrics"), fields, metric_rows)
+    backtests.write_csv(backtests.run_file(ctx.paths, run_id, "outcomes"), backtests.OUTCOME_FIELDS,
+                        [output.outcome_row(o) for o in outcomes])
+    backtests.write_csv(backtests.run_file(ctx.paths, run_id, "episodes"), backtests.EPISODE_FIELDS,
+                        [output.episode_row(e) for e in episodes])
+    backtests.write_csv(backtests.run_file(ctx.paths, run_id, "windows"), backtests.WINDOW_FIELDS,
+                        [output.window_row(w) for w in windows])
+    runtime = result.runtime_seconds + (dt.datetime.now(dt.UTC) - t_labels).total_seconds()
+    meta = {
+        "run_id": run_id, "created_at_utc": created.astimezone(dt.UTC).isoformat(timespec="seconds"),
+        "git_commit": git.commit, "git_dirty": git.dirty,
+        "market_manifest_sha256": manifest_sha256(ctx.paths),
+        "rule_versions": list(result.versions), "versions": list(result.versions),
+        "start": result.start, "end": result.end, "days": len(result.days),
+        "start_reason": ("S5FI、S5TW 都有数值从 2008-08-04 起，且基准日的 T−5 须有广度读数："
+                         "第一个满足的基准日为 2008-08-11"),
+        "periods": {"development": list(cfg.development), "validation": list(cfg.validation),
+                    "holdout_start": cfg.holdout_start},
+        "config": {"path": "config/backtest.yaml", "config_version": cfg.config_version, "sha256": cfg.sha256},
+        "runtime_seconds": round(runtime, 1),
+        "holdout_unlocked": unlock_holdout,
+        "holdout_unlocked_at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds") if unlock_holdout else None,
+        "corrections_used": [{"symbol": s, "date": d} for s, d in _corrections_used(ctx)],
+        "counts": {"daily_scores": sum(len(d.results) for d in result.days), "daily_metrics": len(result.days),
+                   "outcomes": len(outcomes), "pullback_episodes": len(episodes), "episode_windows": len(windows)},
+    }
+    backtests.write_meta(ctx.paths, run_id, meta)
+    (run_dir / "README.md").write_text(output.readme_text(meta), encoding="utf-8")
+    return BacktestRunReport(run_id, run_dir, result.start, result.end, len(result.days), runtime, meta["counts"])
+
+
+def load_market_series_extra(ctx: Context, name: str) -> dict[dt.date, dict[str, Any]]:
+    from market_risk.data.market import MarketDataError, read_series_file
+
+    path = ctx.paths.market_daily_file(name)
+    if not path.exists():
+        raise MarketDataError(f"数据集缺少 {name}，请先运行 market-risk data build")
+    return read_series_file(path)[1]
+
+
+def backtest_set_official(ctx: Context, run_id: str, now: dt.datetime | None = None) -> dict[str, Any]:
+    """设置正式回测指针，并重写 backtests/.gitignore（只放行正式回测的运行目录）。"""
+    from market_risk.storage import backtests
+
+    try:
+        pointer = backtests.set_official(ctx.paths, run_id, now=now)
+    except FileNotFoundError as exc:
+        raise ServiceError(str(exc)) from exc
+    _rebuild_db(ctx)
+    return pointer
+
+
+@dataclass(frozen=True)
+class BacktestReport:
+    run_id: str
+    text: str
+    path: Path
+
+
+def backtest_report(ctx: Context, run_id: str | None = None) -> BacktestReport:
+    """由正式回测（或指定运行）生成 reports/backtest_baseline.md（只用开发期与验证期）。"""
+    from market_risk.backtest.report import render_baseline
+    from market_risk.backtest.settings import load_backtest_config
+    from market_risk.storage import backtests
+
+    run_id = run_id or (backtests.read_official(ctx.paths) or {}).get("run_id")
+    if not run_id:
+        raise ServiceError("尚未设置正式回测；请用 --run 指定运行编号，或先运行 backtest official")
+    if run_id not in backtests.list_runs(ctx.paths):
+        raise ServiceError(f"回测运行目录不存在：{run_id}")
+    meta = backtests.read_meta(ctx.paths, run_id)
+    text = render_baseline(meta, load_backtest_config(),
+                           backtests.read_csv(backtests.run_file(ctx.paths, run_id, "daily_scores")),
+                           backtests.read_csv(backtests.run_file(ctx.paths, run_id, "episodes")))
+    _write_report(ctx.paths.backtest_baseline_md, text)
+    return BacktestReport(run_id, text, ctx.paths.backtest_baseline_md)
+
+
+def zigzag_check(ctx: Context, symbol: str, level: str, start: dt.date, end: dt.date) -> list[Any]:
+    """只输出由收盘价计算的价格波段（不涉及分数、预警状态或结果标签，允许包含保留期）。"""
+    from decimal import Decimal, InvalidOperation
+
+    from market_risk.backtest.settings import load_backtest_config
+    from market_risk.backtest.zigzag_check import price_swings
+
+    symbol = symbol.upper()
+    cfg = load_backtest_config()
+    if symbol not in cfg.grades:
+        raise ServiceError(f"标的只能是 {'、'.join(sorted(cfg.grades))}")
+    try:
+        lv = Decimal(level)
+    except InvalidOperation as exc:
+        raise ServiceError(f"层级格式错误：{level}（如 0.05）") from exc
+    if not (0 < lv < 1):
+        raise ServiceError("层级应在 0 与 1 之间，如 0.05")
+    if not ctx.paths.market_daily_file(symbol).exists():
+        raise ServiceError(f"数据集缺少 {symbol}，请先运行 market-risk data build")
+    return price_swings(ctx.paths, symbol, lv, cfg.grades[symbol], start, end)
+
+
+@dataclass(frozen=True)
+class IndexImpactReport:
+    impacts: tuple[Any, ...]            # backtest.labels.LabelImpact
+    text: str
+    path: Path
+
+
+def index_dispute_label_impact(ctx: Context, tolerance: str = "0.02") -> IndexImpactReport:
+    """指数争议日（回测区间内 SPX、NDX 与 TradingView 两位小数差值绝对值>0.02 点）对结果标签与回调事件的实质影响。
+
+    分别用 Yahoo（数据集）与 TradingView 的指数值计算，比较是否有差异；只报告，不修正。
+    """
+    from decimal import Decimal
+
+    from market_risk.backtest.engine import price_decimal
+    from market_risk.backtest.labels import label_impact
+    from market_risk.backtest.settings import load_backtest_config
+    from market_risk.data import tradingview
+    from market_risk.data.market import load_market_series
+    from market_risk.outcomes import published
+
+    cfg = load_backtest_config()
+    series = load_market_series(ctx.paths, ctx.settings)
+    for name in ("SPX", "QQQ", "NDX"):
+        if name not in series.rows:
+            series.rows[name] = load_market_series_extra(ctx, name)  # type: ignore[index]
+    spx, qqq = dict(price_decimal(series, "SPX")), dict(price_decimal(series, "QQQ"))
+    tol = Decimal(tolerance)
+    impacts = []
+    for name in ("SPX", "NDX"):
+        yahoo = dict(price_decimal(series, name))
+        tv = {d: published(v) for d, v in tradingview.read_processed(ctx.paths, name).items()}
+        for d in sorted(set(yahoo) & set(tv)):
+            if d >= cfg.start and abs(tv[d] - yahoo[d]) > tol:
+                imp = label_impact(name, d, tv[d], spx, qqq, cfg)
+                impacts.append(imp if name == "SPX" else
+                               type(imp)(name, d, yahoo[d], tv[d], 0, (), ()))
+    lines = ["# 指数争议日的标签实质影响检验", "",
+             f"回测区间（{cfg.start} 起）内 SPX、NDX 与 TradingView 两位小数差值绝对值 >{tolerance} 点的日期，"
+             "分别用 Yahoo（数据集）与 TradingView 的指数值计算受影响的结果标签（结果窗口包含该日的基准日）"
+             "与回调事件（全部层级），比较是否有差异。NDX 不参与结果标签与回调事件，无影响。只报告，不修正。", "",
+             "| 指数 | 日期 | Yahoo | TradingView | 受影响基准日数 | 结果标签差异 | 回调事件差异 | 结论 |",
+             "|---|---|---|---|---|---|---|---|"]
+    for i in impacts:
+        lines.append(f"| {i.symbol} | {i.date} | {i.value_a} | {i.value_b} | {i.outcome_bases} | "
+                     f"{'；'.join(i.outcome_diffs) or '无'} | {'；'.join(i.episode_diffs) or '无'} | "
+                     f"{'有实质影响' if i.material else '无实质影响'} |")
+    text = "\n".join(lines) + "\n"
+    path = ctx.paths.reports_dir / "index_dispute_label_impact.md"
+    _write_report(path, text)
+    return IndexImpactReport(tuple(impacts), text, path)

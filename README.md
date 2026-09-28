@@ -207,6 +207,30 @@ uv run market-risk rebuild-db
 uv run market-risk db export-sql
 ```
 
+### 4.9 逐日历史回测（阶段6）
+
+```bash
+uv run market-risk backtest run
+```
+
+```bash
+uv run market-risk backtest official --run <run_id>
+```
+
+```bash
+uv run market-risk backtest report
+```
+
+```bash
+uv run market-risk backtest zigzag-check --symbol SPX --level 0.05 --from 2025-08-01 --to 2026-09-25
+```
+
+- `backtest run`：从 2008-08-11 起逐日计算两个版本的评分与指标，并生成结果标签与多层级回调事件，写入 `results/MARKET/risk_scoring/backtests/<run_id>/`（`--from`、`--to`、`--versions`；`--unlock-holdout` 才写出保留期的标签）。
+- `backtest official`：设置正式回测指针并重写 backtests/.gitignore（只提交正式回测的运行目录）。
+- `backtest report`：生成 `reports/backtest_baseline.md`（只用开发期与验证期，不计算评估指标）。
+- `backtest zigzag-check`：只输出由收盘价计算的价格波段，用于核对 ZigZag；`backtest index-impact`：指数争议日对标签的实质影响检验。
+- 测试：`uv run pytest` 的临时目录固定为项目内的 `.pytest_tmp/`（Windows 路径长度与权限问题），已在 .gitignore 中排除。
+
 ```bash
 uv run --extra mysql market-risk db verify-mysql
 ```

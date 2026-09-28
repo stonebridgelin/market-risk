@@ -217,6 +217,27 @@ class StoragePaths:
     def run_dir(self, subject: str, framework: str, base_date: dt.date, run_id: str) -> Path:
         return self.results_date_dir(subject, framework, base_date) / _check_run_id(run_id)
 
+    # ---- 逐日历史回测（阶段6）：一次回测一个运行目录；只提交正式回测的运行目录 ----
+    @property
+    def backtests_root(self) -> Path:
+        return self.root / "results" / MARKET / RISK_SCORING / "backtests"
+
+    def backtest_run_dir(self, run_id: str) -> Path:
+        return self.backtests_root / _check_run_id(run_id)
+
+    @property
+    def backtest_official(self) -> Path:
+        return self.backtests_root / "official.json"
+
+    @property
+    def backtest_gitignore(self) -> Path:
+        """由程序生成：只放行正式回测的运行目录。"""
+        return self.backtests_root / ".gitignore"
+
+    @property
+    def backtest_baseline_md(self) -> Path:
+        return self.reports_dir / "backtest_baseline.md"
+
     def run_inputs_dir(
         self, subject: str, framework: str, base_date: dt.date, run_id: str
     ) -> Path:
@@ -283,6 +304,15 @@ RUN_FILES = {
     "summary": "summary.md",
     "metrics": "metrics.json",       # 扁平的数值指标（数据库 metrics 表）
     "legacy": "legacy.json",         # import-legacy：Excel 中该样本的原始单元格
+}
+BACKTEST_FILES = {
+    "meta": "meta.json",
+    "readme": "README.md",
+    "daily_scores": "daily_scores.csv",
+    "daily_metrics": "daily_metrics.csv",
+    "outcomes": "outcomes.csv",                  # 隔离的标签文件
+    "episodes": "pullback_episodes.csv",         # 隔离的标签文件
+    "windows": "episode_windows.csv",            # 隔离的标签文件
 }
 INPUT_FILES = {
     "daily_data": "daily_data.csv",

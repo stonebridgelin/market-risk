@@ -158,11 +158,13 @@ def _breadth_source_text(snap: MarketSnapshot) -> str:
 def prompt_context(ctx: ReportContext, rules: Mapping[str, str]) -> dict[str, Any]:
     snap, refs = ctx.snapshot, ctx.snapshot.refs
     base = refs.base_date
+    # 评分 ETF 缺数据时（snapshot.missing_etfs）以"缺失"占位，模板不变
+    missing = dict(snap.missing_etfs)
     etfs = [
         {"symbol": s, "close": fixed2(exact(e.close)), "ma5": fixed2(exact(e.ma5)),
          "ma20": fixed2(exact(e.ma20)), "ma50": fixed2(exact(e.ma50)), "ma200": fixed2(exact(e.ma200))}
         for s, e in snap.etfs.items()
-    ]
+    ] + [{"symbol": s, **dict.fromkeys(("close", "ma5", "ma20", "ma50", "ma200"), "缺失")} for s in missing]
     flag = ctx.d1_includes_t_minus_20
     traces = []
     for res in snap.three_segment[flag]:
@@ -181,7 +183,8 @@ def prompt_context(ctx: ReportContext, rules: Mapping[str, str]) -> dict[str, An
     daily_closes = []
     for d in mcal.stock_trading_days(refs.three_segment_query_start, base):
         daily_closes.append({"date": d, **{s: fixed2(e_closes.get(d)) for s, e_closes in
-                                           ((s, dict(snap.etfs[s].closes)) for s in snap.etfs)}})
+                                           ((s, dict(snap.etfs[s].closes)) for s in snap.etfs)},
+                             **dict.fromkeys(missing, "缺失")})
     b, b5 = snap.breadth, snap.breadth_t5
     breadth = {
         "f": fixed2(b.s5fi) if b else "缺失",
@@ -362,7 +365,8 @@ def write_run_outputs(
     write_inputs(run_dir, ctx, reference_symbols)
     write_json(run_dir / RUN_FILES["dates"], snap.refs)
     write_json(run_dir / RUN_FILES["snapshot"], snapshot_json(snap))
-    write_json(run_dir / RUN_FILES["metrics"], metrics_from_snapshot_json(snapshot_json(snap)))
+    completed = {r.symbol: r.completed for r in snap.three_segment[ctx.d1_includes_t_minus_20]}
+    write_json(run_dir / RUN_FILES["metrics"], metrics_from_snapshot_json(snapshot_json(snap), completed))
     write_json(run_dir / RUN_FILES["scores"], {
         "d1_includes_t_minus_20": ctx.d1_includes_t_minus_20,
         "results": list(ctx.results),

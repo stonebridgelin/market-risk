@@ -468,8 +468,13 @@ def load_market_series(paths: StoragePaths, settings: Settings) -> MarketSeries:
 
 def coverage_error(paths: StoragePaths, settings: Settings, base: dt.date,
                    series: MarketSeries | None = None) -> str | None:
-    """数据集是否覆盖基准日（以 ETF 收盘价为准）；未覆盖时返回说明。"""
-    for sym in (*settings.scored_symbols, *settings.reference_symbols):
+    """数据集是否已更新到基准日（以评分 ETF 收盘价为准）；未覆盖时返回说明（提示先运行 fetch）。
+
+    基准日晚于全部评分 ETF 的最新日期 → 未覆盖；已覆盖但某只 ETF 当日或回看窗口内缺数据，
+    不在此报错，由快照记为 missing_etfs、价格维度记待补（阶段6，2026-09-27 确认）。
+    """
+    lasts = []
+    for sym in settings.scored_symbols:
         if series is not None:
             rows: Mapping[dt.date, Row] | None = series.rows.get(sym)
         else:
@@ -477,9 +482,11 @@ def coverage_error(paths: StoragePaths, settings: Settings, base: dt.date,
             rows = read_series_file(path)[1] if path.exists() else None
         if rows is None:
             return f"数据集缺少 {sym}"
-        if base not in rows:
-            last = max(rows) if rows else None
-            return f"数据集的 {sym} 未覆盖基准日 {base}（截止 {last}）"
+        if rows:
+            lasts.append(max(rows))
+    latest = max(lasts, default=None)
+    if latest is None or base > latest:
+        return f"数据集未覆盖基准日 {base}（评分 ETF 最新日期 {latest}）"
     return None
 
 

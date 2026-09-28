@@ -29,9 +29,10 @@ outcome_app = typer.Typer(help="风险事件标签（结果窗口结束后）")
 audit_app = typer.Typer(help="数据审计（休市日历、债市休市日 OAS）")
 data_app = typer.Typer(help="市场数据集 data/market/（评分输入）")
 db_app = typer.Typer(help="数据库：SQL 导出、MySQL 兼容性验证")
+backtest_app = typer.Typer(help="阶段6 逐日历史回测（docs/STORAGE.md 2.3）")
 for sub, name in ((tv_app, "tv"), (official_app, "official"), (material_app, "material"),
                   (breadth_app, "breadth"), (outcome_app, "outcome"), (audit_app, "audit"),
-                  (data_app, "data"), (db_app, "db")):
+                  (data_app, "data"), (db_app, "db"), (backtest_app, "backtest")):
     app.add_typer(sub, name=name)
 
 MATERIAL_TYPES_HELP = ("tiger_ai_background", "chatgpt_response", "claude_review", "notes", "screenshot", "other")
@@ -144,7 +145,7 @@ def format_snapshot_summary(snap: MarketSnapshot) -> str:
         lines.append(f"{s:<5} {e.close:8.2f} {e.ma5:8.2f} {e.ma10:8.2f} {e.ma20:8.2f} "
                      f"{e.ma30:8.2f} {e.ma50:8.2f} {e.ma200:8.2f}")
     lines += [
-        f"SPY 窗口最高收盘 {snap.spy_window_max_close:.2f}   HYG/LQD {f(snap.hyg_lqd, 4)}",
+        f"SPY 窗口最高收盘 {f(snap.spy_window_max_close)}   HYG/LQD {f(snap.hyg_lqd, 4)}",
         f"VIX {f(snap.vix)}（T−5 {f(snap.vix_t5)}）",
         f"10年期 y={f(snap.y)}  H={f(snap.h)}（{', '.join(map(str, snap.h_dates))}）  T−20 y={f(snap.y_t20)}",
         "",
@@ -539,3 +540,60 @@ def db_verify_mysql() -> None:
     typer.echo(format_verify(report))
     if not report.ok:
         raise typer.Exit(code=1)
+
+
+@backtest_app.command("run")
+def backtest_run(
+    date_from: Annotated[str | None, typer.Option("--from", help="起始日（默认为配置的回测起点 2008-08-11）")] = None,
+    date_to: Annotated[str | None, typer.Option("--to", help="终止日（默认为评分用价格序列的最新日期）")] = None,
+    versions: Annotated[str, typer.Option("--versions", help="v2-M、v3-R1，逗号分隔")] = "v2-M,v3-R1",
+    unlock_holdout: Annotated[bool, typer.Option("--unlock-holdout", help="写出保留期的标签（记录解锁时间）")] = False,
+) -> None:
+    """逐日计算两个版本的评分与指标，并生成结果标签与回调事件标签，写入新的回测运行目录。"""
+    def progress(n: int, total: int) -> None:
+        typer.echo(f"  已计算 {n}/{total} 个交易日", err=True)
+
+    report = _call(services.backtest_run, _ctx(), _opt_date(date_from), _opt_date(date_to),
+                   tuple(v.strip() for v in versions.split(",") if v.strip()), unlock_holdout, progress=progress)
+    typer.echo(f"运行目录：{report.run_dir}")
+    typer.echo(f"区间：{report.start} 至 {report.end}（{report.days} 个交易日）；耗时 {report.runtime_seconds:.1f} 秒")
+    typer.echo("行数：" + "，".join(f"{k} {v}" for k, v in report.counts.items()))
+
+
+@backtest_app.command("official")
+def backtest_official(run: Annotated[str, typer.Option("--run", help="回测运行编号")]) -> None:
+    """设置正式回测指针（backtests/official.json），并重写 backtests/.gitignore（只提交正式回测的运行目录）。"""
+    pointer = _call(services.backtest_set_official, _ctx(), run)
+    typer.echo(f"正式回测：{pointer['run_id']}（{pointer['set_at_utc']}）")
+
+
+@backtest_app.command("report")
+def backtest_report(run: Annotated[str | None, typer.Option("--run", help="默认为正式回测")] = None) -> None:
+    """生成 reports/backtest_baseline.md（只用开发期与验证期；不计算评估指标）。"""
+    report = _call(services.backtest_report, _ctx(), run)
+    typer.echo(f"已写入 {report.path}（运行 {report.run_id}）")
+
+
+@backtest_app.command("zigzag-check")
+def backtest_zigzag_check(
+    symbol: Annotated[str, typer.Option("--symbol", help="SPX 或 QQQ")],
+    level: Annotated[str, typer.Option("--level", help="层级，如 0.05")],
+    date_from: Annotated[str, typer.Option("--from", help="起始日")],
+    date_to: Annotated[str, typer.Option("--to", help="终止日")],
+) -> None:
+    """只输出由收盘价计算的价格波段（高点、低点、跌幅、分级、状态）；不涉及分数、预警状态或结果标签。"""
+    rows = _call(services.zigzag_check, _ctx(), symbol, level, _parse_date(date_from), _parse_date(date_to))
+    typer.echo(f"{symbol.upper()} ZigZag 层级 {level}（收盘价；全部历史上识别，"
+               f"列出与 {date_from} 至 {date_to} 有交集的回调）")
+    typer.echo(_table(["高点日", "高点收盘", "低点日", "低点收盘", "跌幅", "分级", "状态"],
+                      [[str(r.high_date), f"{r.high_close:.2f}", str(r.low_date), f"{r.low_close:.2f}",
+                        f"{r.drawdown_pct:.2f}%", r.grade, r.status] for r in rows]))
+    typer.echo("说明：使用收盘价；图表波段线若使用日内最高价与最低价，日期与点位可能略有差异。")
+
+
+@backtest_app.command("index-impact")
+def backtest_index_impact() -> None:
+    """指数争议日（SPX、NDX）对结果标签与回调事件的实质影响检验，写 reports/index_dispute_label_impact.md。"""
+    report = _call(services.index_dispute_label_impact, _ctx())
+    typer.echo(report.text)
+    typer.echo(f"已写入 {report.path}")

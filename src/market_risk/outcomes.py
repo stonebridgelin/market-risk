@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import csv
 import datetime as dt
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 from market_risk import calendar as mcal
@@ -20,6 +21,10 @@ QQQ_THRESHOLD = -7.0
 # 辅助字段（SOP 9.3，仅作参考，不改变 is_event 的定义）
 SPX_NEAR = -4.0
 QQQ_NEAR = -6.0
+# Decimal 计算（2026-09-27）：收盘价按公布的两位小数读取（ROUND_HALF_UP），跌幅为精确 Decimal，
+# 事件与接近事件在取整前判定；输出的跌幅保留4位小数（ROUND_HALF_UP）
+PRICE_Q = Decimal("0.01")
+OUT_Q = Decimal("0.0001")
 FIELDS = ["subject", "base_date", "window_start", "window_end", "spx_drawdown_from_base",
           "qqq_drawdown_from_base", "is_event", "event_date", "spx_peak_to_trough_drawdown",
           "qqq_peak_to_trough_drawdown", "near_event", "source", "entered_at"]
@@ -44,15 +49,81 @@ class Outcome:
     entered_at: str
     spx_peak_to_trough_drawdown: float | None = None   # 参考：峰谷回撤，峰值起点包含基准日收盘价
     qqq_peak_to_trough_drawdown: float | None = None
+    exact_near_event: bool | None = None              # 程序计算时在取整前判定；手工录入为 None
 
     @property
     def near_event(self) -> bool:
         """辅助：未构成风险事件，但标普500最低收盘价跌幅 ≥4% 或 QQQ ≥6%（仅作参考）。"""
+        if self.exact_near_event is not None:
+            return self.exact_near_event
         return is_near_event(self.spx_drawdown_from_base, self.qqq_drawdown_from_base, self.is_event)
 
 
 def is_near_event(spx_min: float, qqq_min: float, is_event: bool) -> bool:
     return not is_event and (spx_min <= SPX_NEAR or qqq_min <= QQQ_NEAR)
+
+
+def published(v: float | Decimal) -> Decimal:
+    """收盘价按公布的两位小数读取（ROUND_HALF_UP）。"""
+    return (v if isinstance(v, Decimal) else Decimal(repr(float(v)))).quantize(PRICE_Q, ROUND_HALF_UP)
+
+
+def out4(v: Decimal) -> float:
+    return float(v.quantize(OUT_Q, ROUND_HALF_UP))
+
+
+@dataclass(frozen=True)
+class Label:
+    """一个基准日的结果标签（精确 Decimal，未取整）。单日 outcome compute 与回测共用。"""
+
+    base_date: dt.date
+    window_start: dt.date
+    window_end: dt.date
+    spx_drawdown_from_base: Decimal          # 百分数，≤0 或 >0
+    qqq_drawdown_from_base: Decimal
+    spx_peak_to_trough_drawdown: Decimal
+    qqq_peak_to_trough_drawdown: Decimal
+    is_event: bool
+    event_date: dt.date | None
+    is_near_event: bool
+
+
+def peak_to_trough_exact(closes: Sequence[Decimal]) -> Decimal:
+    """峰谷回撤（精确 Decimal）：closes 第一个元素为基准日收盘价。"""
+    peak, worst = closes[0], Decimal(0)
+    for c in closes:
+        peak = max(peak, c)
+        worst = min(worst, (c / peak - 1) * 100)
+    return worst
+
+
+def compute_label(base: dt.date, spx: Mapping[dt.date, float | Decimal],
+                  qqq: Mapping[dt.date, float | Decimal]) -> Label:
+    """SOP 9.3：基准日之后20个交易日内，标普500跌幅 ≤−5% 或 QQQ ≤−7%（基准日口径、只用收盘价）为风险事件。
+
+    调用方负责确认结果窗口已结束；缺收盘价时报错（OutcomeError）。
+    """
+    start, end = outcome_window(base)
+    days = mcal.stock_trading_days(start, end)
+    for name, series in (("标普500", spx), ("QQQ", qqq)):
+        if base not in series:
+            raise OutcomeError(f"{name} 缺少基准日 {base} 的收盘价")
+        missing = [d for d in days if d not in series]
+        if missing:
+            raise OutcomeError(f"{name} 结果窗口缺少收盘价：{missing[:5]}")
+    s = {d: published(spx[d]) for d in (base, *days)}
+    q = {d: published(qqq[d]) for d in (base, *days)}
+    spx_dd = [(d, (s[d] / s[base] - 1) * 100) for d in days]
+    qqq_dd = [(d, (q[d] / q[base] - 1) * 100) for d in days]
+    spx_t, qqq_t = Decimal(str(SPX_THRESHOLD)), Decimal(str(QQQ_THRESHOLD))
+    breach = [d for (d, a), (_, b) in zip(spx_dd, qqq_dd, strict=True) if a <= spx_t or b <= qqq_t]
+    spx_min, qqq_min = min(v for _, v in spx_dd), min(v for _, v in qqq_dd)
+    is_event = bool(breach)
+    near = not is_event and (spx_min <= Decimal(str(SPX_NEAR)) or qqq_min <= Decimal(str(QQQ_NEAR)))
+    return Label(base, start, end, spx_min, qqq_min,
+                 peak_to_trough_exact([s[base], *(s[d] for d in days)]),
+                 peak_to_trough_exact([q[base], *(q[d] for d in days)]),
+                 is_event, breach[0] if breach else None, near)
 
 
 def peak_to_trough_drawdown(closes: list[float]) -> float:
@@ -87,27 +158,13 @@ def compute_outcome(
     start, end = outcome_window(base)
     if not window_finished(base, today_new_york):
         raise OutcomeError(f"{base} 的结果窗口到 {end} 才结束，现在不得计算标签")
-    days = mcal.stock_trading_days(start, end)
-    for name, series in (("标普500", spx), ("QQQ", qqq)):
-        if base not in series:
-            raise OutcomeError(f"{name} 缺少基准日 {base} 的收盘价")
-        missing = [d for d in days if d not in series]
-        if missing:
-            raise OutcomeError(f"{name} 结果窗口缺少收盘价：{missing[:5]}")
-
-    def drawdowns(series: Mapping[dt.date, float]) -> list[tuple[dt.date, float]]:
-        return [(d, (series[d] / series[base] - 1) * 100) for d in days]
-
-    spx_dd, qqq_dd = drawdowns(spx), drawdowns(qqq)
-    breach = [d for (d, a), (_, b) in zip(spx_dd, qqq_dd, strict=True)
-              if a <= SPX_THRESHOLD or b <= QQQ_THRESHOLD]
+    lab = compute_label(base, spx, qqq)
     return Outcome(
-        subject, base, start, end,
-        round(min(v for _, v in spx_dd), 4), round(min(v for _, v in qqq_dd), 4),
-        bool(breach), breach[0] if breach else None, "computed",
+        subject, base, start, end, out4(lab.spx_drawdown_from_base), out4(lab.qqq_drawdown_from_base),
+        lab.is_event, lab.event_date, "computed",
         (now_utc or dt.datetime.now(dt.UTC)).astimezone(dt.UTC).isoformat(timespec="seconds"),
-        round(peak_to_trough_drawdown([spx[base], *(spx[d] for d in days)]), 4),
-        round(peak_to_trough_drawdown([qqq[base], *(qqq[d] for d in days)]), 4),
+        out4(lab.spx_peak_to_trough_drawdown), out4(lab.qqq_peak_to_trough_drawdown),
+        exact_near_event=lab.is_near_event,
     )
 
 
@@ -136,7 +193,9 @@ def read_outcomes(path: Path) -> list[Outcome]:
                     dt.date.fromisoformat(r["event_date"]) if r.get("event_date") else None,
                     r["source"], r["entered_at"],
                     float(r["spx_peak_to_trough_drawdown"]) if r.get("spx_peak_to_trough_drawdown") else None,
-                    float(r["qqq_peak_to_trough_drawdown"]) if r.get("qqq_peak_to_trough_drawdown") else None)
+                    float(r["qqq_peak_to_trough_drawdown"]) if r.get("qqq_peak_to_trough_drawdown") else None,
+                    # 文件中的 near_event 是写入时（程序计算为取整前）判定的结果，读回时保留，不再用取整后的数值重算
+                    (r["near_event"] == "是") if r.get("near_event") else None)
             for r in rows
         ]
 

@@ -93,7 +93,7 @@ def test_outcome_compute_with_injected_loader(ctx):
     days = [base, *mcal.stock_trading_days(D(2025, 11, 3), D(2025, 12, 1))]
 
     def loader(symbol, start, end):
-        drop = 95.59 if symbol == "^GSPC" else 93.1
+        drop = 95.59 if symbol == "SPX" else 93.1
         return {d: (100.0 if i == 0 else (drop if i == 10 else 99.0)) for i, d in enumerate(days)}
 
     with pytest.raises(services.ServiceError, match="才结束"):

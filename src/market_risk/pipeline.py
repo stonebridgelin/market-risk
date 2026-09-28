@@ -14,7 +14,7 @@ from market_risk.data.snapshot import RawInputs, build_snapshot
 from market_risk.models import MarketSnapshot, NearThresholdItem, ScoreResult
 from market_risk.near_threshold import near_threshold_items
 from market_risk.report import ReportContext, write_run_outputs
-from market_risk.scoring import v2m, v3r1
+from market_risk.scoring import v2m
 from market_risk.storage.paths import MARKET, RISK_SCORING, RUN_FILES, StoragePaths
 from market_risk.storage.runs import (
     STATUS_COMPLETE,
@@ -45,7 +45,9 @@ class RunOutcome:
 def score_snapshot(
     snapshot: MarketSnapshot, settings: Settings
 ) -> tuple[tuple[ScoreResult, ...], tuple[NearThresholdItem, ...]]:
-    results = (v2m.score(snapshot), v3r1.score(snapshot))
+    from market_risk.prepare import score_versions
+
+    results = score_versions(snapshot)       # ETF 数据齐全时即 v2m.score、v3r1.score
     near = tuple(near_threshold_items(snapshot, settings.near_threshold))
     return results, near
 
@@ -95,7 +97,8 @@ def run_scoring(
                             "结果对应的版本不完全等于 git_commit"]
     try:
         snapshot = build_snapshot(
-            raw, settings.scored_symbols, tuple(settings.reference_symbols[:2]), holidays  # type: ignore[arg-type]
+            raw, settings.scored_symbols, tuple(settings.reference_symbols[:2]), holidays,  # type: ignore[arg-type]
+            allow_missing_etfs=True,
         )
         results, near = score_snapshot(snapshot, settings)
         status = run_status(results)
@@ -115,7 +118,10 @@ def run_scoring(
     official_set, note = maybe_auto_official(paths, MARKET, RISK_SCORING, base, run_id, status, git, now)
     summary = run_dir / RUN_FILES["summary"]
     summary.write_text(summary.read_text(encoding="utf-8") + f"\n正式记录：{note}\n", encoding="utf-8")
+    from market_risk.prepare import missing_etf_message
+
+    warning = missing_etf_message(snapshot)
     return RunOutcome(
         run_id, run_dir, status, snapshot, results, near, official_set, note,
-        required_breadth_messages(snapshot, results),
+        [*([warning] if warning else []), *required_breadth_messages(snapshot, results)],
     )

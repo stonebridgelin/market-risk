@@ -150,8 +150,12 @@ def test_scoring_never_imports_two_sided_price_audit():
 SCORING_PATH_MODULES = (
     "market_risk.scoring.v2m", "market_risk.scoring.v3r1", "market_risk.indicators", "market_risk.calendar",
     "market_risk.pipeline", "market_risk.data.snapshot", "market_risk.data.market",
+    "market_risk.prepare", "market_risk.metrics", "market_risk.backtest.engine",
 )
-AUDIT_MODULES = ("market_risk.data.price_review", "market_risk.data.price_review_inputs", "market_risk.price_impact")
+# 使用未来数据的模块：双侧审计、影响检验，以及结果标签与回调事件标签（阶段6）
+AUDIT_MODULES = ("market_risk.data.price_review", "market_risk.data.price_review_inputs", "market_risk.price_impact",
+                 "market_risk.outcomes", "market_risk.backtest.labels", "market_risk.backtest.zigzag",
+                 "market_risk.backtest.report")
 
 
 def test_scoring_path_does_not_load_audit_modules_transitively():

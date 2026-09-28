@@ -1,0 +1,133 @@
+"""回测标签：区间归属、跨越边界、保留期屏蔽、回调窗口四列（补充1）、结果标签屏蔽。构造数据，不读真实目录。"""
+
+from __future__ import annotations
+
+import dataclasses
+import datetime as dt
+from decimal import Decimal as D
+
+from market_risk import calendar as mcal
+from market_risk.backtest.labels import (
+    HOLDOUT_NOTE,
+    MASKED,
+    build_episodes,
+    episode_windows,
+    outcome_rows,
+    window_measures,
+)
+from market_risk.backtest.settings import load_backtest_config
+
+CFG = load_backtest_config()
+SPX_ONLY_5 = dataclasses.replace(CFG, levels={"SPX": (D("0.05"),), "QQQ": (D("0.07"),)}, window_sessions=2)
+
+
+def path(start: dt.date, values: list[str]) -> list[tuple[dt.date, D]]:
+    days = mcal.stock_trading_days(start, start + dt.timedelta(days=len(values) * 3))[:len(values)]
+    return list(zip(days, (D(v) for v in values), strict=True))
+
+
+def test_episode_in_development_is_counted():
+    closes = path(dt.date(2012, 3, 1), ["100", "94", "99", "100"])
+    (ep,) = build_episodes("SPX", closes, SPX_ONLY_5)
+    assert (ep.period, ep.status, ep.counted, ep.crosses_boundary) == ("开发期", "已确认", True, False)
+    assert ep.drawdown_pct == D("-6.0000") and ep.grade == "小回调" and ep.trading_days == 1
+
+
+def test_crossing_development_to_validation_not_counted():
+    """高点在开发期、低点确认在验证期：全部字段照常写出，标注跨越区间边界，不计入任一区间统计。"""
+    closes = path(dt.date(2016, 12, 27), ["100", "94", "93", "92", "91", "99"])
+    (ep,) = build_episodes("SPX", closes, SPX_ONLY_5)
+    assert ep.period == "开发期" and ep.crosses_boundary and not ep.counted
+    assert ep.low_close == D("91") and ep.drawdown_pct is not None
+
+
+def test_confirmation_in_holdout_is_masked():
+    """低点在验证期但确认发生在保留期：只写高点，状态"跨入保留期，未解锁"。"""
+    closes = path(dt.date(2022, 12, 23), ["100", "94", "93", "92", "93", "97", "99"])
+    (ep,) = build_episodes("SPX", closes, SPX_ONLY_5)
+    assert ep.status == MASKED and ep.low_date is None and ep.drawdown_pct is None and ep.grade == ""
+    assert ep.period == "验证期" and not ep.counted
+    (unlocked,) = build_episodes("SPX", closes, SPX_ONLY_5, unlock=True)
+    assert unlocked.status == "已确认" and unlocked.low_close == D("92")
+
+
+def test_high_in_holdout_not_written_and_recovery_masked():
+    closes = path(dt.date(2023, 2, 1), ["100", "94", "99", "101"])
+    assert build_episodes("SPX", closes, SPX_ONLY_5) == []
+    early = path(dt.date(2022, 10, 3), ["100", "94", "99"]) + path(dt.date(2023, 1, 3), ["101"])
+    (ep,) = build_episodes("SPX", early, SPX_ONLY_5)
+    assert ep.status == "已确认" and ep.recovery_date is None and ep.recovery_note == HOLDOUT_NOTE
+
+
+def test_before_start_episode_flagged():
+    closes = path(dt.date(2008, 7, 1), ["100", "94", "99"])
+    (ep,) = build_episodes("SPX", closes, SPX_ONLY_5)
+    assert ep.before_start and ep.period == "起点之前" and not ep.counted
+
+
+def test_window_measures_at_high_trough_and_after():
+    """补充1：高点当天比例 0、低点当天 1、低点后随反弹减小；低点之前涨幅为空。"""
+    high, low = D("100"), D("90")
+    assert window_measures(D("100"), high, low, -3) == (D("0.000000"), D("0.000000"), None)
+    assert window_measures(D("95"), high, low, -1) == (D("-5.000000"), D("0.500000"), None)
+    assert window_measures(D("90"), high, low, 0) == (D("-10.000000"), D("1.000000"), D("0.000000"))
+    assert window_measures(D("94.5"), high, low, 2) == (D("-5.500000"), D("0.550000"), D("5.000000"))
+    assert window_measures(D("91"), high, low, 1)[1] == D("0.900000")
+    # 6位小数，ROUND_HALF_UP
+    assert window_measures(D("93.33"), D("100"), D("91"), -1)[1] == D("0.741111")
+
+
+def test_episode_windows_rows_and_blank_columns():
+    closes = path(dt.date(2012, 3, 1), ["100", "101", "96", "94", "99", "100", "100"])
+    days = [d for d, _ in closes]
+    scores = {(d, v): (1, 1, 1, "早期信号") for d in days for v in ("v2-M", "v3-R1")}
+    (ep,) = build_episodes("SPX", closes, SPX_ONLY_5)
+    rows = episode_windows(ep, days, scores, ("v2-M", "v3-R1"), SPX_ONLY_5, closes=dict(closes))
+    by = {r.date: r for r in rows}
+    hi, lo = days[1], days[3]
+    assert by[hi].offset == 0 and by[hi].decline_progress == D("0") and by[hi].offset_from_trough == -2
+    assert by[lo].offset_from_trough == 0 and by[lo].decline_progress == D("1") and by[lo].rebound_from_trough == 0
+    assert by[days[0]].rebound_from_trough is None and by[days[0]].offset == -1
+    assert max(by) == days[5]                                     # 低点后 2 个交易日
+    # 未确认：四列留空
+    tail = path(dt.date(2012, 3, 1), ["100", "101", "96", "94"])
+    (open_ep,) = build_episodes("SPX", tail, SPX_ONLY_5)
+    rows = episode_windows(open_ep, [d for d, _ in tail], scores, ("v2-M",), SPX_ONLY_5, closes=dict(tail))
+    assert rows and all(r.offset_from_trough is None and r.drawdown_from_peak is None and r.decline_progress is None
+                        and r.rebound_from_trough is None for r in rows)
+
+
+def test_masked_episode_windows_stop_at_validation_end():
+    closes = path(dt.date(2022, 12, 23), ["100", "94", "93", "92", "93", "97", "99"])
+    days = [d for d, _ in closes]
+    scores = {(d, "v2-M"): (1, 1, 1, "早期信号") for d in days}
+    (ep,) = build_episodes("SPX", closes, SPX_ONLY_5)
+    rows = episode_windows(ep, days, scores, ("v2-M",), SPX_ONLY_5, closes=dict(closes))
+    assert rows and max(r.date for r in rows) <= dt.date(2022, 12, 30)
+    assert all(r.decline_progress is None for r in rows)
+
+
+def test_outcome_rows_mask_holdout_windows():
+    days = mcal.stock_trading_days(dt.date(2022, 11, 1), dt.date(2023, 2, 28))
+    spx = {d: D("100") for d in days}
+    qqq = {d: D("100") for d in days}
+    bases = [d for d in days if d <= dt.date(2022, 12, 30)]
+    rows = outcome_rows(bases, spx, qqq, CFG)
+    assert rows and max(mcal.shift_trading_days(r.label.base_date, 20) for r in rows) < dt.date(2023, 1, 1)
+    assert all(r.period == "验证期" for r in rows)
+    unlocked = outcome_rows(bases, spx, qqq, CFG, unlock=True)
+    assert len(unlocked) > len(rows)
+
+
+def test_label_impact_detects_changes_and_ignores_ndx():
+    from market_risk.backtest.labels import label_impact
+
+    days = mcal.stock_trading_days(dt.date(2012, 3, 1), dt.date(2012, 5, 31))
+    spx = {d: D("100") for d in days}
+    qqq = {d: D("100") for d in days}
+    day = days[25]
+    same = label_impact("SPX", day, D("100.03"), spx, qqq, SPX_ONLY_5)
+    assert not same.material and same.outcome_bases == 21
+    crash = label_impact("SPX", day, D("90"), spx, qqq, SPX_ONLY_5)
+    assert crash.material and crash.outcome_diffs and crash.episode_diffs
+    assert not label_impact("NDX", day, D("1"), spx, qqq, SPX_ONLY_5).material
