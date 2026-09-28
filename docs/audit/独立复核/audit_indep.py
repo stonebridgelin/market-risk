@@ -1,5 +1,5 @@
 # ruff: noqa
-# 审查用的一次性独立复核脚本（docs/audit/，不属于 market_risk 程序包），不按项目代码规范做类型标注。
+# 长期使用的独立复核脚本（docs/audit/，不属于 market_risk 程序包），不按项目代码规范做类型标注。
 """独立复核：不导入 market_risk 的任何模块，只读 data/market/ 的原始 CSV，按 SOP/SPEC 原文重新计算。
 
 用法：uv run python docs/audit/独立复核/audit_indep.py <项目根目录> <输出目录>
