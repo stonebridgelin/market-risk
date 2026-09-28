@@ -1,0 +1,3 @@
+﻿symbol,level,high_date,low_date,status,reason
+SPX,5,2022-11-30,,跨入保留期，未解锁,跨区间边界，未计入
+QQQ,7,2022-12-01,,跨入保留期，未解锁,跨区间边界，未计入

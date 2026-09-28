@@ -329,6 +329,7 @@ YAML 增加 `corrected_value` 与 `evidence_source`，迁移0005同步参考表�
 - 用 `docs/SOP.md` 附录A的2025年8月至12月数值做一致性测试。
 
 ### 6.5 广度（`breadth.py`）
+- 同一天 TradingView 只有 S5FI、S5TW 中的一项，而手工记录也有数值时，`data build` 报错并要求人工裁定；不得从两个来源各取一项拼接成一日广度读数。
 - 读取顺序（`docs/TRADINGVIEW.md` 第6.1节）：
   1. TradingView 导出数据（`data/processed/tradingview/S5FI.csv`、`S5TW.csv`）；
   2. 手工录入的 `data/manual/breadth.csv`（导出日之后的新日期）。

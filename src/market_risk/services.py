@@ -61,6 +61,16 @@ def _rebuild_db(ctx: Context) -> None:
     db.rebuild(ctx.paths, ctx.db_url)
 
 
+def research_pullback_features(ctx: Context) -> Any:
+    """运行小周期波段前瞻研究；研究依赖只在调用时加载。"""
+    from market_risk.research.analysis import run_analysis
+
+    try:
+        return run_analysis(ctx.paths)
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
 # ---------------------------------------------------------------------------
 # 日期与样本
 # ---------------------------------------------------------------------------

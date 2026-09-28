@@ -155,7 +155,9 @@ SCORING_PATH_MODULES = (
 # 使用未来数据的模块：双侧审计、影响检验，以及结果标签与回调事件标签（阶段6）
 AUDIT_MODULES = ("market_risk.data.price_review", "market_risk.data.price_review_inputs", "market_risk.price_impact",
                  "market_risk.outcomes", "market_risk.backtest.labels", "market_risk.backtest.zigzag",
-                 "market_risk.backtest.report")
+                 "market_risk.backtest.report", "market_risk.research.analysis", "market_risk.research.io",
+                 "market_risk.research.pullback", "market_risk.research.groups", "market_risk.research.features",
+                 "market_risk.research.statistics")
 
 
 def test_scoring_path_does_not_load_audit_modules_transitively():
