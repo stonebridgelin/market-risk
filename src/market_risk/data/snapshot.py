@@ -35,6 +35,7 @@ from market_risk.precision import decimal_value
 
 Series = Mapping[dt.date, float | Decimal | None]
 MA_PERIODS = (5, 10, 20, 30, 50, 200)
+PRICE_LOOKBACK = {"SPY": 199, "QQQ": 49, "RSP": 49}
 
 
 class DataIntegrityError(ValueError):
@@ -83,22 +84,19 @@ def _valued(series: Series) -> dict[dt.date, Decimal]:
     return {d: decimal_value(v) for d, v in series.items() if v is not None and v == v}
 
 
-def check_contiguous(symbol: str, closes: Mapping[dt.date, float], base_date: dt.date) -> None:
-    """收盘价日期必须与 NYSE 交易日一一对应，且包含基准日；否则报错。"""
+def check_contiguous(symbol: str, closes: Mapping[dt.date, Decimal], base_date: dt.date) -> None:
+    """只检查该标的实际评分回看窗口内的 NYSE 交易日是否缺价。"""
     if base_date not in closes:
         raise DataIntegrityError(f"{symbol} 没有基准日 {base_date} 的收盘价")
-    first = min(closes)
+    first = mcal.shift_trading_days(base_date, -PRICE_LOOKBACK[symbol])
     expected = mcal.stock_trading_days(first, base_date)
-    have = sorted(closes)
+    have = sorted(d for d in closes if first <= d <= base_date)
     missing = sorted(set(expected) - set(have))
-    extra = sorted(set(have) - set(expected))
-    if missing or extra:
-        raise DataIntegrityError(
-            f"{symbol} 收盘价日期与 NYSE 交易日不一致：缺 {missing[:5]}，多 {extra[:5]}"
-        )
+    if missing:
+        raise DataIntegrityError(f"{symbol} 评分回看窗口 {first} 至 {base_date} 缺交易日收盘价：{missing[:5]}")
 
 
-def etf_problem(symbol: str, closes: Mapping[dt.date, float] | None, base_date: dt.date) -> str | None:
+def etf_problem(symbol: str, closes: Mapping[dt.date, Decimal] | None, base_date: dt.date) -> str | None:
     """评分 ETF 的收盘价是否可用：缺基准日或回看窗口内缺交易日时返回原因。"""
     if not closes:
         return f"缺少 {symbol} 的收盘价"
@@ -117,12 +115,27 @@ def build_snapshot(
     allow_missing_etfs: bool = False,
 ) -> MarketSnapshot:
     """allow_missing_etfs：评分 ETF 当日或回看窗口内缺数据时不报错，改为记录在 missing_etfs 中，
-    该 ETF 不进入 etfs 与三环节（价格维度由准备层记待补）。数据集是否覆盖基准日由调用方先检查。"""
+    该 ETF 不进入 etfs 与三环节（价格维度由准备层枚举可能值）。数据集是否覆盖基准日由调用方先检查。"""
     base = raw.base_date
     notes = _Notes(list(raw.notes))
 
     # ---- 1. 截断到基准日（含）----
-    closes = {s: _valued(truncate(c, base)) for s, c in raw.closes.items()}
+    closes: dict[str, dict[dt.date, Decimal]] = {}
+    non_trading_prices: list[tuple[str, dt.date]] = []
+    for symbol, raw_series in raw.closes.items():
+        valued = _valued(truncate(raw_series, base))
+        if not valued:
+            closes[symbol] = {}
+            continue
+        stock_days = set(mcal.stock_trading_days(min(valued), base))
+        closes[symbol] = {d: v for d, v in valued.items() if d in stock_days}
+        if symbol in scored_symbols:
+            first_required = mcal.shift_trading_days(base, -PRICE_LOOKBACK[symbol])
+            for d in sorted(set(valued) - stock_days):
+                if first_required <= d <= base:
+                    non_trading_prices.append((symbol, d))
+                    notes.add(f"【数据源可能有问题】{symbol} {d} 为非 NYSE 交易日价格行，已排除；"
+                              "不得代替缺失交易日的收盘价")
     vix_fred = {d: None if v is None else decimal_value(v) for d, v in truncate(raw.vix_fred, base).items()}
     vix_cboe = None if raw.vix_cboe is None else {
         d: None if v is None else decimal_value(v) for d, v in truncate(raw.vix_cboe, base).items()}
@@ -133,7 +146,8 @@ def build_snapshot(
     oas = {d: v for d, v in truncate(raw.oas, base).items() if d not in oas_excluded}
     oas_vintage = None if raw.oas_vintage is None else {
         d: v for d, v in truncate(raw.oas_vintage, base).items() if d not in oas_excluded}
-    breadth = {d: dataclasses.replace(r, s5fi=decimal_value(r.s5fi), s5tw=decimal_value(r.s5tw))
+    breadth = {d: dataclasses.replace(r, s5fi=None if r.s5fi is None else decimal_value(r.s5fi),
+                                      s5tw=None if r.s5tw is None else decimal_value(r.s5tw))
                for d, r in raw.breadth.items() if d <= base}
 
     # ---- 2. 日期参照 ----
@@ -161,10 +175,18 @@ def build_snapshot(
             if not allow_missing_etfs:
                 raise DataIntegrityError(problem)
             missing[symbol] = problem
-            notes.add(f"【数据源可能有问题】{problem}；价格维度记待补")
+            notes.add(f"【数据源可能有问题】{problem}；价格维度按全部可能条件枚举")
             continue
         c = closes[symbol]
-        mas = {p: simple_moving_average(c, base, p) for p in MA_PERIODS}
+        mas = {p: simple_moving_average(c, base, p) for p in MA_PERIODS if p != 200 or symbol == "SPY"}
+        if symbol != "SPY":
+            ma200_start = mcal.shift_trading_days(base, -199)
+            ma200_days = mcal.stock_trading_days(ma200_start, base)
+            if all(d in c for d in ma200_days):
+                mas[200] = simple_moving_average(c, base, 200)
+            else:
+                mas[200] = None
+                notes.add(f"{symbol} MA200 仅作展示：回看窗口内缺价，展示值留空；评分照常进行")
         etfs[symbol] = EtfSnapshot(
             symbol=symbol,
             close=p2(c[base]),
@@ -254,6 +276,14 @@ def build_snapshot(
                       "v2-M 计入，v3-R1 不计入")
         else:
             notes.add(f"OAS {h_obs.date}（债市休市日）{detail}，按规则排除，v2-M 与 v3-R1 都不计入")
+    for d in mcal.valued_observation_dates(oas):
+        if not (span_start <= d < base) or d.weekday() < 5 or (d + dt.timedelta(days=1)).month != d.month:
+            continue
+        decided = oas_decisions.get(d)
+        if decided is not None and decided.decision == "keep":
+            notes.add(f"OAS {d} 为非月末周末观测，按已裁定日期表保留，v2-M 计入")
+        else:
+            notes.add(f"【需人工判断】OAS {d} 为非月末周末观测，v2-M 不计入；请核查该观测来源")
     # 规则无法覆盖：债市日历（财政部数据）覆盖范围以外的工作日观测，无法判断是否为债市休市日
     for d in mcal.valued_observation_dates(oas):
         if span_start <= d < base and d.weekday() < 5 and not (
@@ -316,6 +346,7 @@ def build_snapshot(
         data_notes=tuple(notes.items),
         mode=raw.mode,
         missing_etfs=tuple(sorted(missing.items())),
+        non_trading_prices=tuple(non_trading_prices),
     )
     assert_no_lookahead(snapshot)
     return snapshot

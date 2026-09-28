@@ -122,7 +122,8 @@ results/MARKET/risk_scoring/backtests/
 - 只提交正式回测的运行目录；其他运行目录保留在本地、不提交。meta.json 的代码 commit 与数据集 sha256 足以复现任何一次运行。
 - 标签文件（outcomes、pullback_episodes、episode_windows）使用基准日之后的数据，评分代码不得读取（有传递依赖测试）。
 - 保留期屏蔽原则：任何字段，只要其取值需要用到保留期的数据，未解锁时一律屏蔽（SPEC 阶段6）。
-- 数据库（迁移 0006）：`backtest_runs`、`backtest_daily_scores`、`backtest_outcomes`（隔离，保留单日 `outcomes` 表）、`pullback_episodes`，rebuild-db 由回测运行目录重建。
+- 数据库（迁移 0006、0007）：`backtest_runs`、`backtest_daily_scores`、`backtest_outcomes`（隔离，保留单日 `outcomes` 表）、`pullback_episodes`，rebuild-db 由回测运行目录重建。0007 允许 `backtest_outcomes` 的事件布尔值为空并增加 `data_note`，用于记录窗口缺价、标签留空的基准日。
+- `daily_metrics.csv` 中 QQQ/RSP 的 MA200 仅用于展示；T−199 至 T 缺价时该列留空，不影响按 T−49 至 T 评分。`outcomes.csv` 在窗口日期已结束但基准日或窗口缺价时保留一行，标签字段留空、`data_note` 说明缺价；回测基础报告单独列出开发期和验证期的这类行。
 
 ### 2.1 正式记录 `official.json`（2026-09-26 确认）
 

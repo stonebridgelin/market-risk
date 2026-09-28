@@ -150,27 +150,34 @@ def episode_windows(ep: Episode, days: Sequence[dt.date], scores: Mapping[tuple[
 
 @dataclass(frozen=True)
 class OutcomeRow:
-    label: Label
+    base_date: dt.date
+    window_start: dt.date
+    window_end: dt.date
+    label: Label | None
     period: str
     crosses_period: bool                # 结果窗口跨入下一区间：不计入本区间统计
+    data_note: str = ""
 
 
 def outcome_rows(bases: Sequence[dt.date], spx: Mapping[dt.date, Decimal], qqq: Mapping[dt.date, Decimal],
                  cfg: BacktestConfig, unlock: bool = False) -> list[OutcomeRow]:
-    """结果窗口已完整结束（第20个交易日有收盘价）的基准日；结果窗口结束于保留期的不写出（未解锁时）。"""
-    last = min(max(spx, default=dt.date.min), max(qqq, default=dt.date.min))
+    """结果窗口日期已结束的基准日；缺价仍写一行空标签，未解锁时屏蔽跨入保留期的窗口。"""
+    last = max(max(spx, default=dt.date.min), max(qqq, default=dt.date.min))
     out = []
     for base in bases:
         _, end = outcome_window(base)
         if end > last or (cfg.in_holdout(end) and not unlock):
             continue
-        try:
-            lab = compute_label(base, spx, qqq)
-        except OutcomeError:
-            continue                                    # 数据不齐：不生成标签
         period = cfg.period_of(base)
         period_end = cfg.period_end(period)
-        out.append(OutcomeRow(lab, period, period_end is not None and end > period_end))
+        start, _ = outcome_window(base)
+        try:
+            lab = compute_label(base, spx, qqq)
+            note = ""
+        except OutcomeError as exc:
+            lab = None
+            note = f"数据不齐：缺 {exc}"
+        out.append(OutcomeRow(base, start, end, lab, period, period_end is not None and end > period_end, note))
     return out
 
 
@@ -202,8 +209,8 @@ def label_impact(symbol: str, day: dt.date, value_b: Decimal, spx: Mapping[dt.da
     days = sorted(series)
     i = days.index(day)
     bases = [d for d in days[max(0, i - 20): i + 1] if d >= cfg.start]
-    a = {r.label.base_date: r.label for r in outcome_rows(bases, spx, qqq, cfg, unlock)}
-    b = {r.label.base_date: r.label for r in outcome_rows(bases, alt, qqq, cfg, unlock)}
+    a = {r.base_date: r.label for r in outcome_rows(bases, spx, qqq, cfg, unlock)}
+    b = {r.base_date: r.label for r in outcome_rows(bases, alt, qqq, cfg, unlock)}
     outcome_diffs = []
     for base in sorted(set(a) | set(b)):
         la, lb = a.get(base), b.get(base)

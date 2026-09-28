@@ -15,11 +15,11 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 from market_risk import calendar as mcal
-from market_risk.config import Settings
+from market_risk.config import DataDecision, Settings
 from market_risk.data.market import MarketSeries, raw_inputs_from_series
 from market_risk.data.snapshot import build_snapshot
 from market_risk.models import ScoreResult
-from market_risk.scoring import v2m, v3r1
+from market_risk.prepare import score_versions as prepared_score_versions
 from market_risk.storage.paths import StoragePaths
 
 MA_LOOKBACK_SESSIONS = 199          # MA200：基准日及之前 199 个交易日
@@ -64,8 +64,8 @@ class ImpactResult:
 
 
 def score_versions(raw: object) -> tuple[ScoreResult, ScoreResult]:
-    snap = build_snapshot(raw)  # type: ignore[arg-type]
-    return v2m.score(snap), v3r1.score(snap)
+    snap = build_snapshot(raw, allow_missing_etfs=True)  # type: ignore[arg-type]
+    return prepared_score_versions(snap)
 
 
 def _dims(result: ScoreResult) -> dict[str, tuple[int | None, tuple[int, ...]]]:
@@ -87,6 +87,7 @@ def dispute_impact(
     series: MarketSeries, paths: StoragePaths, settings: Settings, symbol: str, day: dt.date,
     value_a: float, value_b: float, horizon: int = MA_LOOKBACK_SESSIONS,
     scorer: Callable[[object], Sequence[ScoreResult]] = score_versions,
+    decisions: tuple[DataDecision, ...] = (),
 ) -> ImpactResult:
     """series 中该标的该日的收盘价分别替换为 value_a、value_b，比较受影响基准日的评分。"""
     last_available = series.dates[symbol][-1]
@@ -96,8 +97,10 @@ def dispute_impact(
     series_b = series.replace_values(symbol, {day: value_b})
     for base in bases:
         try:
-            a = scorer(raw_inputs_from_series(series_a, paths, settings, base, revision_check=False))
-            b = scorer(raw_inputs_from_series(series_b, paths, settings, base, revision_check=False))
+            a = scorer(raw_inputs_from_series(series_a, paths, settings, base, decisions=decisions,
+                                              revision_check=False))
+            b = scorer(raw_inputs_from_series(series_b, paths, settings, base, decisions=decisions,
+                                              revision_check=False))
         except Exception as exc:  # 个别基准日无法计分时记录原因，不中断其他日期
             res.errors.append(f"{base}：{type(exc).__name__}: {exc}")
             continue

@@ -586,7 +586,8 @@ def price_dispute_impacts(ctx: Context, config: ReviewConfig, inputs: ReviewInpu
         a, b = inputs.yahoo.get(symbol, {}).get(day), inputs.tv.get(symbol, {}).get(day)
         if a is None or b is None:
             continue
-        out.append(dispute_impact(series, ctx.paths, ctx.settings, symbol, day, float(a), float(b)))
+        out.append(dispute_impact(series, ctx.paths, ctx.settings, symbol, day, a, b,
+                                  decisions=load_data_decisions()))
     return tuple(out)
 
 
@@ -999,7 +1000,7 @@ def backtest_run(ctx: Context, start: dt.date | None = None, end: dt.date | None
     run_id = unique_run_id(make_run_id(created, git.commit or runs.UNKNOWN_COMMIT), existing)
 
     result = run_backtest(series, ctx.paths, ctx.settings, cfg, start, end, tuple(versions),
-                          _corrections_used(ctx), progress)
+                          _corrections_used(ctx), progress, load_data_decisions())
     t_labels = dt.datetime.now(dt.UTC)
     bases = [d.date for d in result.days]
     spx = dict(price_decimal(series, "SPX"))
@@ -1092,7 +1093,8 @@ def backtest_report(ctx: Context, run_id: str | None = None) -> BacktestReport:
     meta = backtests.read_meta(ctx.paths, run_id)
     text = render_baseline(meta, load_backtest_config(),
                            backtests.read_csv(backtests.run_file(ctx.paths, run_id, "daily_scores")),
-                           backtests.read_csv(backtests.run_file(ctx.paths, run_id, "episodes")))
+                           backtests.read_csv(backtests.run_file(ctx.paths, run_id, "episodes")),
+                           backtests.read_csv(backtests.run_file(ctx.paths, run_id, "outcomes")))
     _write_report(ctx.paths.backtest_baseline_md, text)
     return BacktestReport(run_id, text, ctx.paths.backtest_baseline_md)
 

@@ -27,7 +27,7 @@ def _pct(n: int, total: int) -> str:
 
 
 def render_baseline(meta: Mapping[str, Any], cfg: BacktestConfig, scores: Sequence[Mapping[str, str]],
-                    episodes: Sequence[Mapping[str, str]]) -> str:
+                    episodes: Sequence[Mapping[str, str]], outcomes: Sequence[Mapping[str, str]] = ()) -> str:
     periods = {DEVELOPMENT: cfg.development, VALIDATION: cfg.validation}
     in_scope = [r for r in scores if cfg.period_of(_d(r["date"])) in periods]
     by_version: dict[str, list[Mapping[str, str]]] = defaultdict(list)
@@ -52,6 +52,12 @@ def render_baseline(meta: Mapping[str, Any], cfg: BacktestConfig, scores: Sequen
             rows = [r for r in by_version[v] if cfg.period_of(_d(r["date"])) == p]
             cells = [_pct(sum(r[k].startswith("待补") for r in rows), len(rows)) for k, _ in DIMS]
             lines.append(f"| {v} | {p} | {len(rows)} | " + " | ".join(cells) + " |")
+    incomplete = [r for r in outcomes if r.get("data_note") and not r.get("is_event")
+                  and r.get("crosses_period") != "是"
+                  and cfg.period_of(_d(r["base_date"])) in periods]
+    lines += ["", "结果窗口数据不齐（标签留空，不计入标签统计）：", "",
+              "| 区间 | 基准日 | 原因 |", "|---|---|---|"]
+    lines += [f"| {r['period']} | {r['base_date']} | {r['data_note']} |" for r in incomplete] or ["| 无 | | |"]
     lines += ["", "flags（有该类标记的天数；一天可有多类）：", "",
               "| 版本 | flag 类型 | 开发期 | 验证期 |", "|---|---|---|---|"]
     for v in versions:

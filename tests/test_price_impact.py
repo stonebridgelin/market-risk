@@ -7,6 +7,7 @@ import datetime as dt
 from test_market import SETTINGS, _sample, dataset_from_raw
 
 from market_risk import calendar as mcal
+from market_risk.config import DataDecision
 from market_risk.data import market
 from market_risk.price_impact import compare_scores, dispute_impact, render_impact, score_versions
 from market_risk.storage.paths import StoragePaths
@@ -52,3 +53,20 @@ def test_replacement_does_not_touch_other_dates_or_files(tmp_path):
     a = score_versions(market.raw_inputs_from_series(series, paths, SETTINGS, base, revision_check=False))
     b = score_versions(market.raw_inputs_from_series(alt, paths, SETTINGS, base, revision_check=False))
     assert compare_scores(base, a, b) == []
+
+
+def test_impact_passes_adjudicated_dates_to_each_single_day_score(tmp_path):
+    """H-02：争议价格影响检验两种来源都继承单日评分的裁定日期表。"""
+    paths, series = _series(tmp_path)
+    day = D(2025, 11, 28)
+    decision = DataDecision(D(2025, 11, 26), SETTINGS.oas_series, "exclude", "测试排除", day)
+    seen = []
+
+    def scorer(raw):
+        seen.append(raw.decisions)
+        return score_versions(raw)
+
+    close = series.rows["SPY"][day]["value"]
+    result = dispute_impact(series, paths, SETTINGS, "SPY", day, close, close,
+                            scorer=scorer, decisions=(decision,))
+    assert result.checked == 1 and seen == [(decision,), (decision,)]

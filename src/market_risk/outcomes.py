@@ -111,7 +111,7 @@ def compute_label(base: dt.date, spx: Mapping[dt.date, float | Decimal],
             raise OutcomeError(f"{name} 缺少基准日 {base} 的收盘价")
         missing = [d for d in days if d not in series]
         if missing:
-            raise OutcomeError(f"{name} 结果窗口缺少收盘价：{missing[:5]}")
+            raise OutcomeError(f"{name} 结果窗口缺少收盘价：{', '.join(str(d) for d in missing[:5])}")
     s = {d: published(spx[d]) for d in (base, *days)}
     q = {d: published(qqq[d]) for d in (base, *days)}
     spx_dd = [(d, (s[d] / s[base] - 1) * 100) for d in days]

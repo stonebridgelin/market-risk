@@ -60,13 +60,14 @@ def _q(v: Decimal | None) -> str | None:
 
 def outcome_row(o: OutcomeRow) -> dict[str, Any]:
     lab = o.label
-    return {"base_date": lab.base_date, "window_start": lab.window_start, "window_end": lab.window_end,
-            "spx_drawdown_from_base": _q(lab.spx_drawdown_from_base),
-            "qqq_drawdown_from_base": _q(lab.qqq_drawdown_from_base),
-            "spx_peak_to_trough_drawdown": _q(lab.spx_peak_to_trough_drawdown),
-            "qqq_peak_to_trough_drawdown": _q(lab.qqq_peak_to_trough_drawdown),
-            "is_event": yes(lab.is_event), "event_date": lab.event_date, "is_near_event": yes(lab.is_near_event),
-            "period": o.period, "crosses_period": yes(o.crosses_period)}
+    return {"base_date": o.base_date, "window_start": o.window_start, "window_end": o.window_end,
+            "spx_drawdown_from_base": _q(lab.spx_drawdown_from_base) if lab else None,
+            "qqq_drawdown_from_base": _q(lab.qqq_drawdown_from_base) if lab else None,
+            "spx_peak_to_trough_drawdown": _q(lab.spx_peak_to_trough_drawdown) if lab else None,
+            "qqq_peak_to_trough_drawdown": _q(lab.qqq_peak_to_trough_drawdown) if lab else None,
+            "is_event": yes(lab.is_event) if lab else None, "event_date": lab.event_date if lab else None,
+            "is_near_event": yes(lab.is_near_event) if lab else None,
+            "period": o.period, "crosses_period": yes(o.crosses_period), "data_note": o.data_note}
 
 
 def level_text(level: Decimal) -> str:
@@ -119,7 +120,8 @@ def readme_text(meta: Mapping[str, Any]) -> str:
         f"| `daily_metrics.csv` | {DAILY_METRICS_NOTE} |",
         "| `outcomes.csv` | 结果标签（隔离）：基准日口径跌幅、峰谷回撤、is_event、is_near_event"
         "（Decimal，取整前判定），"
-        "所属区间与是否跨入下一区间；结果窗口结束于保留期的不写出（未解锁时） |",
+        "所属区间与是否跨入下一区间；窗口缺价时标签留空并写入 data_note；"
+        "结果窗口结束于保留期的不写出（未解锁时） |",
         "| `pullback_episodes.csv` | 回调事件（隔离）：多层级 ZigZag，同一段下跌可出现在多个层级；按高点归属区间；"
         "屏蔽依赖保留期数据的字段 |",
         "| `episode_windows.csv` | 回调窗口（隔离）：高点前20至低点后20个交易日两个版本的总分与阶段；不写保留期的行 |",

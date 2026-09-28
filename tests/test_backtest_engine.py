@@ -14,10 +14,12 @@ import pytest
 from market_risk import calendar as mcal
 from market_risk.backtest.engine import run_backtest
 from market_risk.backtest.settings import load_backtest_config
-from market_risk.config import PROJECT_ROOT, load_settings
-from market_risk.data.market import load_market_series, load_raw_inputs
+from market_risk.config import PROJECT_ROOT, DataDecision, load_settings
+from market_risk.data.market import load_market_series, load_raw_inputs, raw_inputs_from_series
+from market_risk.data.snapshot import build_snapshot
 from market_risk.metrics import format_metric
 from market_risk.pipeline import run_scoring
+from market_risk.prepare import score_versions
 from market_risk.storage.paths import MARKET, RISK_SCORING, StoragePaths
 from market_risk.storage.runs import GitInfo, read_official
 
@@ -107,6 +109,18 @@ def test_samples_match_official_records(series):
             dims = [o[k]["score"] for k in ("price", "breadth", "vix", "rates", "credit")]
             assert [d.score for d in r.dimensions] == dims, (base, version)
             assert (r.total, list(r.total_range), r.stage) == (o["total"], o["total_range"], o["stage"])
+
+
+def test_decision_matches_single_day_preparation(series):
+    """H-02：回测与单日传入相同的裁定日期表，不丢失 OAS 排除裁定。"""
+    base = D(2025, 10, 31)
+    decision = DataDecision(D(2025, 10, 30), SETTINGS.oas_series, "exclude", "测试排除", base)
+    raw = raw_inputs_from_series(series, REAL, SETTINGS, base, decisions=(decision,), revision_check=False)
+    snapshot = build_snapshot(raw, allow_missing_etfs=True)
+    expected = dict(zip(("v2-M", "v3-R1"), score_versions(snapshot), strict=True))
+    (actual,) = run_backtest(series, REAL, SETTINGS, CFG, start=base, end=base, decisions=(decision,)).days
+    assert all(_key(actual.results[version]) == _key(result) for version, result in expected.items())
+    assert any("按已裁定日期表排除" in note and "2025-10-30" in note for note in snapshot.data_notes)
 
 
 @pytest.mark.parametrize("base", [D(2011, 8, 5), D(2020, 3, 16)])

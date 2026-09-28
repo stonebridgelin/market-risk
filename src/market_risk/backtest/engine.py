@@ -1,7 +1,7 @@
 """阶段6 逐日历史回测引擎。
 
 - 一次性加载数据集（market.load_market_series），逐个 NYSE 交易日按与单日评分相同的路径计算：
-  market.raw_inputs_from_series（截断到基准日）→ snapshot.build_snapshot（ETF 缺失时记待补）
+  market.raw_inputs_from_series（截断到基准日）→ snapshot.build_snapshot（记录 ETF 缺价）
   → prepare.score_versions（冻结的 v2m、v3r1）→ metrics.metric_values；不另写任何判定逻辑。
 - 每日 flags：按实际参与计算的日期，记录类型、标的、日期与用途。
 - 评分全部计算完成后，才计算结果标签与回调事件标签（labels、zigzag；隔离数据）。
@@ -17,7 +17,7 @@ from decimal import Decimal
 
 from market_risk import calendar as mcal
 from market_risk.backtest.settings import BacktestConfig
-from market_risk.config import Settings
+from market_risk.config import DataDecision, Settings
 from market_risk.data.market import MarketSeries, raw_inputs_from_series
 from market_risk.data.snapshot import build_snapshot
 from market_risk.metrics import metric_values
@@ -77,6 +77,8 @@ def day_flags(version: str, snap: MarketSnapshot, result: ScoreResult, series: M
         for sd in cfg.source_dependent:
             if sd.symbol in symbols and sd.date in idx and 0 <= i - idx[sd.date] <= k:
                 flags.append(f"结果依赖数据源|{sd.symbol}|{sd.date}|{label}")
+    for sym, day in snap.non_trading_prices:
+        flags.append(f"价格序列含非交易日行|{sym}|{day}|评分回看窗口")
     for which, reading in (("当日广度", snap.breadth), ("T−5 广度", snap.breadth_t5)):
         if reading is None:
             continue
@@ -102,6 +104,7 @@ def run_backtest(
     series: MarketSeries, paths: StoragePaths, settings: Settings, cfg: BacktestConfig,
     start: dt.date | None = None, end: dt.date | None = None, versions: Sequence[str] = VERSIONS,
     corrections: Sequence[tuple[str, dt.date]] = (), progress: Callable[[int, int], None] | None = None,
+    decisions: tuple[DataDecision, ...] = (),
 ) -> BacktestResult:
     """逐日计算 [start, end] 每个 NYSE 交易日的评分与指标（不计算标签）。
 
@@ -117,13 +120,13 @@ def run_backtest(
     wanted = tuple(v for v in VERSIONS if v in versions)
     out: list[DayResult] = []
     for n, base in enumerate(bases, 1):
-        raw = raw_inputs_from_series(series, paths, settings, base, revision_check=False)
+        raw = raw_inputs_from_series(series, paths, settings, base, decisions=decisions, revision_check=False)
         snap = build_snapshot(raw, scored, tuple(settings.reference_symbols[:2]),  # type: ignore[arg-type]
                               allow_missing_etfs=True)
         pair = dict(zip(VERSIONS, score_versions(snap), strict=True))
         results = {v: pair[v] for v in wanted}
         flags = {v: day_flags(v, snap, results[v], series, settings, cfg, idx, corrections) for v in wanted}
-        alt = _alternative_scores(series, paths, settings, cfg, base, flags, wanted)
+        alt = _alternative_scores(series, paths, settings, cfg, base, flags, wanted, decisions)
         completed = {r.symbol: r.completed for r in snap.three_segment[True]}
         metrics = metric_values(_snapshot_dict(snap), completed)
         out.append(DayResult(base, results, flags, metrics, alt))
@@ -133,7 +136,8 @@ def run_backtest(
 
 
 def _alternative_scores(series: MarketSeries, paths: StoragePaths, settings: Settings, cfg: BacktestConfig,
-                        base: dt.date, flags: Mapping[str, tuple[str, ...]], versions: Sequence[str]
+                        base: dt.date, flags: Mapping[str, tuple[str, ...]], versions: Sequence[str],
+                        decisions: tuple[DataDecision, ...] = (),
                         ) -> dict[str, str]:
     """结果依赖数据源：用另一来源的价格重算当日分数并保存（配置为空时不计算）。"""
     if not any(f.startswith("结果依赖数据源") for fs in flags.values() for f in fs):
@@ -141,7 +145,7 @@ def _alternative_scores(series: MarketSeries, paths: StoragePaths, settings: Set
     alt = series
     for sd in cfg.source_dependent:
         alt = alt.replace_values(sd.symbol, {sd.date: sd.alternative})
-    raw = raw_inputs_from_series(alt, paths, settings, base, revision_check=False)
+    raw = raw_inputs_from_series(alt, paths, settings, base, decisions=decisions, revision_check=False)
     snap = build_snapshot(raw, tuple(settings.scored_symbols), tuple(settings.reference_symbols[:2]),  # type: ignore[arg-type]
                           allow_missing_etfs=True)
     pair = dict(zip(VERSIONS, score_versions(snap), strict=True))

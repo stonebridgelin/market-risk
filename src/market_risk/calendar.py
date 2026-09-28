@@ -279,7 +279,7 @@ def v2m_observation_dates(
     bond_cal: BondCalendar,
     keep_dates: Iterable[dt.date] = (),
 ) -> list[dt.date]:
-    """v2-M 计数用的观测：有数值的行，排除债市休市日（以财政部数据缺失为准）的观测；月末周末观测保留。
+    """v2-M 计数用的观测：排除非月末周末与债市休市日；自然月末观测保留。
 
     SPEC 5.6 第10条（2026-09-27 统一规则）：债市休市日的观测一律排除，不论数值是否与前一观测相同；
     例外：债市休市日恰好是自然月末时视为月末观测，v2-M 计入（v3-R1 按债市营业日计数，本来就不计入）。
@@ -288,6 +288,8 @@ def v2m_observation_dates(
     keep = set(keep_dates)
     excluded = {h.date for h in bond_holiday_observations(observations, bond_cal)
                 if not h.is_month_end and h.date not in keep}
+    excluded.update(d for d in valued_observation_dates(observations)
+                    if d.weekday() >= 5 and (d + dt.timedelta(days=1)).month == d.month and d not in keep)
     return [d for d in valued_observation_dates(observations) if d not in excluded]
 
 

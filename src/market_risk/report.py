@@ -12,6 +12,7 @@ import datetime as dt
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,7 @@ from market_risk.data.raw_io import save_raw_inputs
 from market_risk.data.snapshot import RawInputs
 from market_risk.metrics import metrics_from_snapshot_json
 from market_risk.models import MarketSnapshot, NearThresholdItem, ScoreResult
+from market_risk.precision import published_price
 from market_risk.scoring.common import exact, fixed2, show
 from market_risk.storage.paths import INPUT_FILES, RUN_FILES
 from market_risk.storage.runs import to_jsonable, write_json
@@ -68,12 +70,15 @@ def load_rules(sop_path: Path = SOP_PATH) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-def _rolling_ma(closes: Mapping[dt.date, float], day: dt.date, period: int) -> float | None:
-    """截至 day（含）的简单均线；day 无收盘价或数据不足时为 None（逐日表中留空）。"""
-    if day not in closes:
+def _rolling_ma(closes: Mapping[dt.date, float | Decimal | None], day: dt.date, period: int) -> Decimal | None:
+    """逐日表的均线：窗口任一 NYSE 交易日缺价即留空，不跨缺口取较早价格。"""
+    if day not in closes or closes[day] is None:
         return None
-    series = [v for d, v in sorted(closes.items()) if d <= day]
-    return sum(series[-period:]) / period if len(series) >= period else None
+    first = mcal.shift_trading_days(day, -(period - 1))
+    days = mcal.stock_trading_days(first, day)
+    if any(closes.get(d) is None for d in days):
+        return None
+    return sum((published_price(closes[d]) for d in days), Decimal(0)) / period
 
 
 def daily_data_rows(
@@ -163,7 +168,8 @@ def prompt_context(ctx: ReportContext, rules: Mapping[str, str]) -> dict[str, An
     missing = dict(snap.missing_etfs)
     etfs = [
         {"symbol": s, "close": fixed2(exact(e.close)), "ma5": fixed2(exact(e.ma5)),
-         "ma20": fixed2(exact(e.ma20)), "ma50": fixed2(exact(e.ma50)), "ma200": fixed2(exact(e.ma200))}
+         "ma20": fixed2(exact(e.ma20)), "ma50": fixed2(exact(e.ma50)),
+         "ma200": "" if e.ma200 is None else fixed2(exact(e.ma200))}
         for s, e in snap.etfs.items()
     ] + [{"symbol": s, **dict.fromkeys(("close", "ma5", "ma20", "ma50", "ma200"), "缺失")} for s in missing]
     flag = ctx.d1_includes_t_minus_20

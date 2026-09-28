@@ -15,6 +15,8 @@ from market_risk.backtest.labels import (
     outcome_rows,
     window_measures,
 )
+from market_risk.backtest.output import outcome_row
+from market_risk.backtest.report import render_baseline
 from market_risk.backtest.settings import load_backtest_config
 
 CFG = load_backtest_config()
@@ -131,3 +133,24 @@ def test_label_impact_detects_changes_and_ignores_ndx():
     crash = label_impact("SPX", day, D("90"), spx, qqq, SPX_ONLY_5)
     assert crash.material and crash.outcome_diffs and crash.episode_diffs
     assert not label_impact("NDX", day, D("1"), spx, qqq, SPX_ONLY_5).material
+
+
+def test_incomplete_outcome_window_keeps_blank_row() -> None:
+    """H-09：结果窗口已经结束，SPX 缺一天时保留一行，标签全部留空。"""
+    days = mcal.stock_trading_days(dt.date(2012, 3, 1), dt.date(2012, 5, 31))
+    base = days[0]
+    missing = days[8]
+    spx = {d: D("100") for d in days if d != missing}
+    qqq = {d: D("100") for d in days}
+    (row,) = outcome_rows([base], spx, qqq, CFG)
+    serialized = outcome_row(row)
+    assert row.label is None and str(missing) in row.data_note
+    assert row.data_note.startswith("数据不齐：缺 ")
+    assert serialized["base_date"] == base and serialized["window_end"] == days[20]
+    assert all(serialized[k] is None for k in ("spx_drawdown_from_base", "qqq_drawdown_from_base",
+                                                  "spx_peak_to_trough_drawdown", "qqq_peak_to_trough_drawdown",
+                                                  "is_event", "is_near_event", "event_date"))
+    meta = {"run_id": "test", "start": base, "end": days[-1], "days": len(days), "runtime_seconds": 0,
+            "git_commit": "a" * 40, "market_manifest_sha256": "b" * 64}
+    text = render_baseline(meta, CFG, [], [], [{**serialized, "base_date": str(base)}])
+    assert "结果窗口数据不齐" in text and str(base) in text and str(missing) in text

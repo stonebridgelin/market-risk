@@ -142,8 +142,9 @@ def format_snapshot_summary(snap: MarketSnapshot) -> str:
         "标的   收盘     MA5      MA10     MA20     MA30     MA50     MA200",
     ]
     for s, e in snap.etfs.items():
+        ma200 = "" if e.ma200 is None else f"{e.ma200:.2f}"
         lines.append(f"{s:<5} {e.close:8.2f} {e.ma5:8.2f} {e.ma10:8.2f} {e.ma20:8.2f} "
-                     f"{e.ma30:8.2f} {e.ma50:8.2f} {e.ma200:8.2f}")
+                     f"{e.ma30:8.2f} {e.ma50:8.2f} {ma200:>8}")
     lines += [
         f"SPY 窗口最高收盘 {f(snap.spy_window_max_close)}   HYG/LQD {f(snap.hyg_lqd, 4)}",
         f"VIX {f(snap.vix)}（T−5 {f(snap.vix_t5)}）",

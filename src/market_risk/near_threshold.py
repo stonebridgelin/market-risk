@@ -46,8 +46,14 @@ def near_threshold_items(snapshot: MarketSnapshot, cfg: NearThreshold) -> list[N
     # 广度：F、W、L 与 40、50 ±2 个百分点
     if snapshot.breadth is not None:
         f, w = d2(snapshot.breadth.s5fi), d2(snapshot.breadth.s5tw)
-        assert f is not None and w is not None
-        for name, v in (("S5FI（F）", f), ("S5TW（W）", w), ("L=min(F,W)", min(f, w))):
+        values = []
+        if f is not None:
+            values.append(("S5FI（F）", f))
+        if w is not None:
+            values.append(("S5TW（W）", w))
+        if f is not None and w is not None:
+            values.append(("L=min(F,W)", min(f, w)))
+        for name, v in values:
             for level in BREADTH_LEVELS:
                 _add(items, name, v, level, v - level, "个百分点", cfg.breadth_pts)
 

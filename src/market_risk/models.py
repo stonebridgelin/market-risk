@@ -64,7 +64,7 @@ class EtfSnapshot:
     ma20: Decimal | float
     ma30: Decimal | float
     ma50: Decimal | float
-    ma200: Decimal | float
+    ma200: Decimal | float | None  # QQQ/RSP 若展示窗口缺价则留空；SPY 评分必需
     closes: tuple[tuple[dt.date, Decimal | float], ...]  # 截至基准日（含）的逐日收盘价
 
 
@@ -73,8 +73,8 @@ class BreadthReading:
     """手工录入的广度读数（百分数，58.44 表示 58.44%）。"""
 
     date: dt.date
-    s5fi: Decimal | float
-    s5tw: Decimal | float
+    s5fi: Decimal | float | None
+    s5tw: Decimal | float | None
     source: str = "manual"
     note: str = ""
     stale_fields: tuple[str, ...] = ()   # 预留：疑似陈旧值字段；S5FI、S5TW 重复值属偶然，不再触发（SPEC 5.6 第11条）
@@ -204,3 +204,4 @@ class MarketSnapshot:
     mode: str = "backtest"                     # backtest / daily
     # 评分 ETF 当日或回看窗口内缺数据（数据集已覆盖基准日）：(标的, 原因)。价格维度记待补（准备层 prepare.py）
     missing_etfs: tuple[tuple[str, str], ...] = ()
+    non_trading_prices: tuple[tuple[str, dt.date], ...] = ()  # 评分窗口内已排除的非 NYSE 行

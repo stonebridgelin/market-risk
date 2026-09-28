@@ -232,11 +232,12 @@ backtest_outcomes = Table(
     Column("qqq_drawdown_from_base", DECIMAL),
     Column("spx_peak_to_trough_drawdown", DECIMAL),
     Column("qqq_peak_to_trough_drawdown", DECIMAL),
-    Column("is_event", Boolean, nullable=False),
+    Column("is_event", Boolean),
     Column("event_date", Date),
-    Column("is_near_event", Boolean, nullable=False),
+    Column("is_near_event", Boolean),
     Column("period", String(16)),
     Column("crosses_period", Boolean, nullable=False),
+    Column("data_note", Text),
 )
 
 pullback_episodes = Table(

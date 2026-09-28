@@ -1,5 +1,5 @@
 -- 由 `market-risk db export-sql` 自动生成，不得手工修改。
--- 表结构：Alembic 版本 0006（migrations/versions/），数据库：sqlite。
+-- 表结构：Alembic 版本 0007（migrations/versions/），数据库：sqlite。
 -- 具体数据不在此导出，见 db/sql/README.md。
 
 CREATE TABLE backtest_runs (
@@ -156,11 +156,12 @@ CREATE TABLE backtest_outcomes (
 	qqq_drawdown_from_base NUMERIC(20, 8),
 	spx_peak_to_trough_drawdown NUMERIC(20, 8),
 	qqq_peak_to_trough_drawdown NUMERIC(20, 8),
-	is_event BOOLEAN NOT NULL,
+	is_event BOOLEAN,
 	event_date DATE,
-	is_near_event BOOLEAN NOT NULL,
+	is_near_event BOOLEAN,
 	period VARCHAR(16),
 	crosses_period BOOLEAN NOT NULL,
+	data_note TEXT,
 	PRIMARY KEY (run_id, base_date),
 	FOREIGN KEY(run_id) REFERENCES backtest_runs (run_id)
 );
@@ -253,4 +254,4 @@ CREATE TABLE totals (
 );
 
 CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL, PRIMARY KEY (version_num));
-INSERT INTO alembic_version (version_num) VALUES ('0006');
+INSERT INTO alembic_version (version_num) VALUES ('0007');

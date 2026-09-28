@@ -459,12 +459,15 @@ def load_market_series(paths: StoragePaths, settings: Settings) -> MarketSeries:
         rows[VIX_CBOE] = _load(paths, VIX_CBOE)
     fi, tw = rows["S5FI"], rows["S5TW"]
     breadth = {}
-    for d in sorted(set(fi) & set(tw)):
-        a, b = fi[d], tw[d]
-        if a["value"] is None or b["value"] is None:
+    for d in sorted(set(fi) | set(tw)):
+        a, b = fi.get(d), tw.get(d)
+        f = None if a is None else a["value"]
+        w = None if b is None else b["value"]
+        if f is None and w is None:
             continue
-        breadth[d] = BreadthReading(d, a["value"], b["value"], a["source"] or "manual",
-                                    "TradingView 导出" if a["source"] == "tradingview" else "")
+        primary = a if f is not None else b
+        breadth[d] = BreadthReading(d, f, w, primary["source"] or "manual",
+                                    "TradingView 导出" if primary["source"] == "tradingview" else "")
     return MarketSeries(rows, {n: tuple(sorted(r)) for n, r in rows.items()}, read_manifest(paths), breadth)
 
 

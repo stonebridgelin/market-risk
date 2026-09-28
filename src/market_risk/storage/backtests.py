@@ -23,7 +23,7 @@ DAILY_SCORE_FIELDS = ["date", "version", "price", "breadth", "vix", "rates", "cr
                       "alert", "flags", "alt_source_scores"]
 OUTCOME_FIELDS = ["base_date", "window_start", "window_end", "spx_drawdown_from_base", "qqq_drawdown_from_base",
                   "spx_peak_to_trough_drawdown", "qqq_peak_to_trough_drawdown", "is_event", "event_date",
-                  "is_near_event", "period", "crosses_period"]
+                  "is_near_event", "period", "crosses_period", "data_note"]
 EPISODE_FIELDS = ["symbol", "level", "high_date", "high_close", "low_date", "low_close", "drawdown_pct",
                   "trading_days", "grade", "status", "confirm_date", "recovery_date", "recovery_note", "period",
                   "before_start", "crosses_boundary", "counted"]

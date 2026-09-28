@@ -370,9 +370,11 @@ def _insert_backtests(conn: Connection, paths: StoragePaths) -> None:
                  "window_end": _date(r["window_end"]),
                  **{k: _dec(r[k]) for k in ("spx_drawdown_from_base", "qqq_drawdown_from_base",
                                             "spx_peak_to_trough_drawdown", "qqq_peak_to_trough_drawdown")},
-                 "is_event": r["is_event"] == "是", "event_date": _date(r.get("event_date")),
-                 "is_near_event": r["is_near_event"] == "是", "period": r["period"],
-                 "crosses_period": r["crosses_period"] == "是"}
+                 "is_event": (r["is_event"] == "是") if r["is_event"] else None,
+                 "event_date": _date(r.get("event_date")),
+                 "is_near_event": (r["is_near_event"] == "是") if r["is_near_event"] else None,
+                 "period": r["period"], "crosses_period": r["crosses_period"] == "是",
+                 "data_note": r.get("data_note") or None}
                 for r in backtests.read_csv(backtests.run_file(paths, run_id, "outcomes"))]
         if rows:
             conn.execute(schema.backtest_outcomes.insert(), rows)
