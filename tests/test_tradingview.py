@@ -47,6 +47,37 @@ def put(paths: StoragePaths, src: Path | None, export_date: dt.date = EXPORT,
     return target
 
 
+def _import_registered(directory: Path, paths: StoragePaths, symbols: dict[str, SymbolInfo], **kwargs):
+    """现有构造用例明确登记导出时刻；单独测试遗漏时刻的报错。"""
+    day = D.fromisoformat(directory.name) if directory.name[:4].isdigit() else EXPORT
+    kwargs.setdefault("export_time", dt.datetime.combine(day, dt.time(17), NY))
+    return tv.import_directory(directory, paths, symbols, **kwargs)
+
+
+def test_new_import_requires_registered_export_time(paths):
+    target = put(paths, ISO_FILE)
+    with pytest.raises(tv.TradingViewError, match="--export-time"):
+        tv.import_directory(target.parent, paths, SYMBOLS)
+
+
+def test_unknown_time_requires_manual_entry_for_same_day_last_bar(paths):
+    target = put(paths, ISO_FILE, export_date=D(2025, 11, 28))
+    with pytest.raises(tv.TradingViewError, match="导出时刻未记录"):
+        tv.read_file(target, D(2025, 11, 28), SYMBOLS, paths.root)
+
+
+def test_rebuild_uses_registered_time_not_file_mtime(paths):
+    """M-07：重新检出后文件修改时间变化，清洗仍以 manifest 登记时刻判断末根K线。"""
+    target = put(paths, ISO_FILE, export_date=D(2025, 11, 28))
+    early = dt.datetime(2025, 11, 28, 12, tzinfo=NY)
+    _import_registered(target.parent, paths, SYMBOLS, export_time=early)
+    rel = target.relative_to(paths.root).as_posix()
+    assert tv.read_manifest(paths.tv_manifest)[rel]["export_time"] == early.isoformat(timespec="seconds")
+    target.touch()
+    rebuilt = tv.rebuild(paths, SYMBOLS, tv.read_manifest(paths.tv_manifest))
+    assert rebuilt.processed["S5FI"] == 28
+
+
 def issues(report: tv.FileReport, level: str | None = None) -> list[str]:
     return [i.message for i in report.issues if level is None or i.level == level]
 
@@ -142,7 +173,7 @@ def test_unix_time_uses_symbol_timezone():
 def test_import_iso_and_unix(paths):
     put(paths, ISO_FILE)
     put(paths, UNIX_FILE)
-    result = tv.import_directory(paths.tv_raw_dir(EXPORT), paths, SYMBOLS)
+    result = _import_registered(paths.tv_raw_dir(EXPORT), paths, SYMBOLS)
     by_symbol = {r.symbol: r for r in result.reports}
     fi, tw = by_symbol["S5FI"], by_symbol["S5TW"]
     assert (fi.status, tw.status) == (tv.PASSED, tv.PASSED)
@@ -171,14 +202,14 @@ def test_import_iso_and_unix(paths):
 def test_raw_files_are_not_modified(paths):
     target = put(paths, ISO_FILE)
     before = target.read_bytes()
-    tv.import_directory(paths.tv_raw_dir(EXPORT), paths, SYMBOLS)
+    _import_registered(paths.tv_raw_dir(EXPORT), paths, SYMBOLS)
     assert target.read_bytes() == before
 
 
 def test_summary_and_list_are_readable(paths):
     put(paths, ISO_FILE)
     put(paths, UNIX_FILE)
-    result = tv.import_directory(paths.tv_raw_dir(EXPORT), paths, SYMBOLS)
+    result = _import_registered(paths.tv_raw_dir(EXPORT), paths, SYMBOLS)
     text = tv.format_import_summary(result)
     for word in ("标的", "起止日期", "行数", "结果", "主要问题", "S5FI", "2025-10-20 至 2025-11-28",
                  "通过", "结论：2 个文件，通过 2，警告 0，失败 0"):
@@ -207,7 +238,7 @@ def _utc_midnight_file() -> str:
 
 def test_shifted_dates_reported(paths):
     put(paths, None, name=UNIX_FILE.name, text=_utc_midnight_file())
-    result = tv.import_directory(paths.tv_raw_dir(EXPORT), paths, SYMBOLS)
+    result = _import_registered(paths.tv_raw_dir(EXPORT), paths, SYMBOLS)
     rep = result.reports[0]
     assert rep.status == tv.FAILED
     failed = issues(rep, tv.FAILED)
@@ -221,13 +252,13 @@ def test_shifted_dates_reported(paths):
 def test_shift_fixed_by_timezone_setting(paths):
     put(paths, None, name=UNIX_FILE.name, text=_utc_midnight_file())
     fixed = {**SYMBOLS, "INDEX:S5TW": dataclasses.replace(SYMBOLS["INDEX:S5TW"], timezone="UTC")}
-    rep = tv.import_directory(paths.tv_raw_dir(EXPORT), paths, fixed).reports[0]
+    rep = _import_registered(paths.tv_raw_dir(EXPORT), paths, fixed).reports[0]
     assert rep.status == tv.PASSED
 
 
 def test_single_value_mismatch(paths):
     text = ISO_FILE.read_text("utf-8").replace(",40.15,", ",40.25,")
-    rep = tv.import_directory(
+    rep = _import_registered(
         put(paths, None, name=ISO_FILE.name, text=text).parent, paths, SYMBOLS
     ).reports[0]
     assert any("已知读数不符：2025-10-31 程序读到 40.25，已知 40.15" in m for m in issues(rep))
@@ -242,7 +273,7 @@ def test_incomplete_last_bar_excluded(paths):
     export = D(2025, 11, 28)
     d = put(paths, ISO_FILE, export_date=export).parent
     before_close = dt.datetime(2025, 11, 28, 12, 0, tzinfo=NY)
-    rep = tv.import_directory(d, paths, SYMBOLS, export_time=before_close).reports[0]
+    rep = _import_registered(d, paths, SYMBOLS, export_time=before_close).reports[0]
     assert rep.last_date == D(2025, 11, 27) or rep.last_date == D(2025, 11, 26)
     assert D(2025, 11, 28) not in rep.bars
     assert any("不完整" in m and "12:00" in m for m in issues(rep, tv.WARNING))
@@ -254,7 +285,7 @@ def test_last_bar_after_close_kept(paths):
     export = D(2025, 11, 28)
     d = put(paths, ISO_FILE, export_date=export).parent
     after_close = dt.datetime(2025, 11, 28, 17, 0, tzinfo=NY)
-    rep = tv.import_directory(d, paths, SYMBOLS, export_time=after_close).reports[0]
+    rep = _import_registered(d, paths, SYMBOLS, export_time=after_close).reports[0]
     assert D(2025, 11, 28) in rep.bars and rep.status == tv.PASSED
 
 
@@ -265,7 +296,7 @@ def test_last_bar_after_close_kept(paths):
 
 def test_overlapping_exports_must_agree(paths):
     put(paths, ISO_FILE, export_date=D(2026, 9, 26))
-    tv.import_directory(paths.tv_raw_dir(D(2026, 9, 26)), paths, SYMBOLS)
+    _import_registered(paths.tv_raw_dir(D(2026, 9, 26)), paths, SYMBOLS)
     original = paths.tv_processed_file("S5FI").read_text("utf-8")
 
     lines = ISO_FILE.read_text("utf-8").splitlines()
@@ -276,7 +307,7 @@ def test_overlapping_exports_must_agree(paths):
             lines[i] = ",".join(cells)
     changed = "\n".join(lines) + "\n"
     put(paths, None, export_date=D(2026, 9, 27), name=ISO_FILE.name, text=changed)
-    result = tv.import_directory(paths.tv_raw_dir(D(2026, 9, 27)), paths, SYMBOLS)
+    result = _import_registered(paths.tv_raw_dir(D(2026, 9, 27)), paths, SYMBOLS)
     assert result.merge_errors and "2025-11-03" in result.merge_errors[0]
     assert "不自动覆盖" in result.merge_errors[0]
     assert paths.tv_processed_file("S5FI").read_text("utf-8") == original
@@ -285,20 +316,20 @@ def test_overlapping_exports_must_agree(paths):
 def test_overlapping_exports_identical_are_merged(paths):
     put(paths, ISO_FILE, export_date=D(2026, 9, 26))
     put(paths, ISO_FILE, export_date=D(2026, 9, 27))
-    tv.import_directory(paths.tv_raw_dir(D(2026, 9, 26)), paths, SYMBOLS)
-    result = tv.import_directory(paths.tv_raw_dir(D(2026, 9, 27)), paths, SYMBOLS)
+    _import_registered(paths.tv_raw_dir(D(2026, 9, 26)), paths, SYMBOLS)
+    result = _import_registered(paths.tv_raw_dir(D(2026, 9, 27)), paths, SYMBOLS)
     assert result.merge_errors == [] and result.processed["S5FI"] == 29
     assert len(tv.read_manifest(paths.tv_manifest)) == 2
 
 
 def test_modified_raw_file_detected(paths):
     target = put(paths, ISO_FILE)
-    tv.import_directory(target.parent, paths, SYMBOLS)
+    _import_registered(target.parent, paths, SYMBOLS)
     target.write_text(ISO_FILE.read_text("utf-8").replace("44.70", "44.71"), encoding="utf-8")
-    rep = tv.import_directory(target.parent, paths, SYMBOLS).reports[0]
+    rep = _import_registered(target.parent, paths, SYMBOLS).reports[0]
     assert any("sha256 不符" in m for m in issues(rep, tv.FAILED))
     # 保留原哈希：再次导入仍能发现
-    rep = tv.import_directory(target.parent, paths, SYMBOLS).reports[0]
+    rep = _import_registered(target.parent, paths, SYMBOLS).reports[0]
     assert any("sha256 不符" in m for m in issues(rep, tv.FAILED))
 
 
@@ -309,7 +340,7 @@ def test_modified_raw_file_detected(paths):
 
 def _one(paths, name, text, symbols=SYMBOLS):
     put(paths, None, name=name, text=text)
-    return tv.import_directory(paths.tv_raw_dir(EXPORT), paths, symbols).reports[0]
+    return _import_registered(paths.tv_raw_dir(EXPORT), paths, symbols).reports[0]
 
 
 def test_duplicate_dates_failed(paths):
@@ -376,16 +407,16 @@ def test_import_dir_must_be_under_raw(paths, tmp_path):
     outside = tmp_path / "elsewhere"
     outside.mkdir()
     with pytest.raises(tv.TradingViewError, match="原始文件应放在"):
-        tv.import_directory(outside, paths, SYMBOLS)
+        _import_registered(outside, paths, SYMBOLS)
     empty = paths.tv_raw_dir(EXPORT)
     empty.mkdir(parents=True)
     with pytest.raises(tv.TradingViewError, match="没有 CSV"):
-        tv.import_directory(empty, paths, SYMBOLS)
+        _import_registered(empty, paths, SYMBOLS)
     bad_name = paths.tv_raw_root / "latest"
     bad_name.mkdir()
     (bad_name / "INDEX_S5FI, 1D.csv").write_text("time,close\n", encoding="utf-8")
     with pytest.raises(tv.TradingViewError, match="不是导出日期"):
-        tv.import_directory(bad_name, paths, SYMBOLS)
+        _import_registered(bad_name, paths, SYMBOLS)
 
 
 # ---------------------------------------------------------------------------
@@ -402,7 +433,8 @@ def test_cli_tv_import_list_validate(paths, monkeypatch):
     monkeypatch.setattr(services, "load_symbols", lambda: SYMBOLS)
     put(paths, ISO_FILE)
     runner = CliRunner()
-    r = runner.invoke(cli.app, ["tv", "import", "--dir", str(paths.tv_raw_dir(EXPORT))])
+    r = runner.invoke(cli.app, ["tv", "import", "--dir", str(paths.tv_raw_dir(EXPORT)),
+                                "--export-time", "2026-09-26T17:00-04:00"])
     assert r.exit_code == 0, r.output
     assert "TradingView 导入汇总" in r.stdout
     r = runner.invoke(cli.app, ["tv", "list"])
@@ -427,7 +459,7 @@ def test_invalid_rows_excluded_by_decision(paths):
     put(paths, None, name="USI_PCCE, 1D.csv", text=text)
     dec = DataDecision(D(2026, 6, 18), "PCCE", "invalid", "数据源错误：收盘价为 0", D(2026, 9, 27))
     other = DataDecision(D(2026, 6, 17), "PCC", "invalid", "其他标的", D(2026, 9, 27))
-    result = tv.import_directory(paths.tv_raw_dir(EXPORT), paths, SYMBOLS, decisions=[dec, other])
+    result = _import_registered(paths.tv_raw_dir(EXPORT), paths, SYMBOLS, decisions=[dec, other])
     rep = result.reports[0]
     assert rep.status == tv.WARNING                       # 仍缺 NYSE 交易日，但不再失败
     assert D(2026, 6, 18) not in rep.bars and D(2026, 6, 17) in rep.bars

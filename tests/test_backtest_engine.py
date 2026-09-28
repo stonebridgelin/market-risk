@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import json
 import random
@@ -152,6 +153,18 @@ def test_flags_by_actual_usage(series):
     # 基准日已过两个单值阶段；T−5=2010-09-27 仍在 S5TW 的单值阶段内（至 2010-10-01，含当天）
     assert [f for f in late["v2-M"] if f.startswith("广度单值K线阶段")] == [
         "广度单值K线阶段|S5TW|2010-09-27|T−5 广度"]
+
+
+def test_fallback_source_flags(series):
+    """M-04：VIX 与10年期备用来源在回测 flags 中标明日期及用途。"""
+    base = D(2025, 10, 31)
+    vix = {**series.rows["VIXCLS"], base: {**series.rows["VIXCLS"][base], "source": "cboe"}}
+    rates = {**series.rows["UST10Y"], base: {**series.rows["UST10Y"][base], "source": "fred:DGS10"}}
+    changed = dataclasses.replace(series, rows={**series.rows, "VIXCLS": vix, "UST10Y": rates})
+    (result,) = run_backtest(changed, REAL, SETTINGS, CFG, start=base, end=base).days
+    for flags in result.flags.values():
+        assert f"VIX来自Cboe|VIXCLS|{base}|V" in flags
+        assert f"10年期来自DGS10|UST10Y|{base}|20日利率窗口" in flags
 
 
 def test_configured_start_is_earliest_complete_day(series):

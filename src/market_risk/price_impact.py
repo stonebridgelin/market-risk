@@ -58,8 +58,8 @@ class ImpactResult:
 
     @property
     def verdict(self) -> str:
-        if self.errors and not self.checked:
-            return "无法检验"
+        if self.errors:
+            return "无法检验（部分）" if self.checked else "无法检验"
         return "有实质影响" if self.material else "无实质影响"
 
 

@@ -6,7 +6,7 @@
   &field_tdr_date_value={year}&page&_format=csv
 CSV 列：Date（MM/DD/YYYY）、"1 Mo" … "10 Yr" … "30 Yr"，按日期降序。
 
-备用源：FRED DGS10（数值与财政部相同）。主源失败时使用，并在说明中标注。
+备用源：FRED DGS10。仅对主源失败的年份使用，并在逐行来源及说明中标注；差异按历史修订处理。
 """
 
 from __future__ import annotations
@@ -92,30 +92,32 @@ def fetch_ten_year(
     fred_get: Any = None,
     max_retries: int = 3,
     backoff_seconds: float = 1.0,
-) -> tuple[Series, list[SourceInfo], list[str]]:
-    """取得 [start, end] 的 10 年期收益率。返回 (数值, 来源信息, 说明)。
+) -> tuple[Series, list[SourceInfo], list[str], set[dt.date]]:
+    """取得 [start, end] 的 10 年期收益率；仅失败的年份改用 DGS10。
 
-    主源（财政部）任一年份失败时，整段改用 FRED DGS10，并在说明中标注。
+    返回 (数值, 来源信息, 说明, DGS10 日期集合)。
     """
     notes: list[str] = []
     infos: list[SourceInfo] = []
     combined: Series = {}
-    try:
-        for year in range(start.year, end.year + 1):
+    fallback_dates: set[dt.date] = set()
+    for year in range(start.year, end.year + 1):
+        try:
             values, info = fetch_treasury_year(
                 paths, year, end, refresh, http_get, max_retries, backoff_seconds
             )
-            combined.update(values)
-            infos.append(info)
-    except DataFetchError as exc:
-        if not api_key:
-            raise
-        notes.append(f"财政部收益率主源获取失败（{exc}），改用备用源 FRED DGS10")
-        kwargs: dict[str, Any] = {"refresh": refresh, "max_retries": max_retries,
-                                  "backoff_seconds": backoff_seconds}
-        if fred_get is not None:
-            kwargs["http_get"] = fred_get
-        values, info = fred.fetch_series(paths, "DGS10", start, end, api_key, **kwargs)
-        return {d: v for d, v in values.items() if v is not None}, [info], notes
+        except DataFetchError as exc:
+            if not api_key:
+                raise
+            notes.append(f"财政部 {year} 年收益率获取失败（{exc}），该年改用备用源 FRED DGS10")
+            kwargs: dict[str, Any] = {"refresh": refresh, "max_retries": max_retries,
+                                      "backoff_seconds": backoff_seconds}
+            if fred_get is not None:
+                kwargs["http_get"] = fred_get
+            values, info = fred.fetch_series(paths, "DGS10", dt.date(year, 1, 1),
+                                             min(dt.date(year, 12, 31), end), api_key, **kwargs)
+            fallback_dates.update(d for d, v in values.items() if v is not None)
+        combined.update(values)
+        infos.append(info)
     result = {d: v for d, v in combined.items() if start <= d <= end and v is not None}
-    return result, infos, notes
+    return result, infos, notes, fallback_dates

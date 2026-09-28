@@ -37,7 +37,7 @@ STATUS_TEXT = {PASSED: "通过", WARNING: "警告", FAILED: "失败"}
 _LEVEL_ORDER = {"info": 0, WARNING: 1, FAILED: 2}
 
 MANIFEST_FIELDS = [
-    "file_path", "export_date", "tv_symbol", "symbol", "timeframe", "first_date", "last_date",
+    "file_path", "export_date", "export_time", "tv_symbol", "symbol", "timeframe", "first_date", "last_date",
     "rows", "time_format", "sha256", "imported_at", "validation_status", "notes",
 ]
 
@@ -327,7 +327,10 @@ def _check_incomplete_last_bar(
     last = report.last_date
     if last is None or last != report.export_date:
         return
-    when = export_time or dt.datetime.fromtimestamp(path.stat().st_mtime, dt.UTC)
+    if export_time is None:
+        raise TradingViewError(f"{report.file_path} 最后一根K线日期等于导出日期 {last}，"
+                               "导出时刻未记录；请人工登记导出时刻")
+    when = export_time
     local = when.astimezone(NEW_YORK)
     if local.date() == last and local.time() < MARKET_CLOSE:
         del report.bars[last]
@@ -481,11 +484,12 @@ def write_manifest(path: Path, rows: Mapping[str, Mapping[str, str]]) -> None:
             writer.writerow({k: rows[key].get(k, "") for k in MANIFEST_FIELDS})
 
 
-def manifest_row(report: FileReport, imported_at: str) -> dict[str, str]:
+def manifest_row(report: FileReport, imported_at: str, export_time: str) -> dict[str, str]:
     notes = "；".join(i.message for i in report.issues if i.level != "info")
     return {
         "file_path": report.file_path,
         "export_date": report.export_date.isoformat(),
+        "export_time": export_time,
         "tv_symbol": report.tv_symbol,
         "symbol": report.symbol,
         "timeframe": report.timeframe,
@@ -636,12 +640,25 @@ def import_directory(
     new_reports = []
     invalid = invalid_rows(decisions)
     for p in files:
-        rep = read_file(p, export_date, symbols, paths.root, export_time, invalid)
-        old = manifest.get(rep.file_path)
-        row = manifest_row(rep, imported_at)
+        rel = p.relative_to(paths.root).as_posix()
+        old = manifest.get(rel)
+        registered = old.get("export_time") if old else None
+        if registered and registered != "未记录":
+            effective_time = dt.datetime.fromisoformat(registered)
+            time_text = registered
+        elif export_time is not None:
+            effective_time = export_time
+            time_text = export_time.astimezone(NEW_YORK).isoformat(timespec="seconds")
+        elif old is not None:
+            effective_time = None
+            time_text = "未记录"
+        else:
+            raise TradingViewError(f"新导入文件 {rel} 必须用 --export-time 登记带时区的导出时刻")
+        rep = read_file(p, export_date, symbols, paths.root, effective_time, invalid)
+        row = manifest_row(rep, imported_at, time_text)
         if old is not None and old.get("sha256") and old["sha256"] != rep.sha256:
             rep.add(FAILED, "原始文件与上次导入时不同（sha256 不符），原始文件不得修改")
-            row = {**manifest_row(rep, imported_at), "sha256": old["sha256"]}  # 保留原哈希
+            row = {**manifest_row(rep, imported_at, time_text), "sha256": old["sha256"]}  # 保留原哈希
         manifest[rep.file_path] = row
         new_reports.append(rep)
 
@@ -671,11 +688,13 @@ def rebuild(
             p = paths.root / rel
             if not p.exists():
                 continue
+            registered = row.get("export_time") or "未记录"
+            effective_time = None if registered == "未记录" else dt.datetime.fromisoformat(registered)
             rep = read_file(p, dt.date.fromisoformat(row["export_date"]), symbols, paths.root,
-                            export_time, invalid)
+                            effective_time, invalid)
             if row.get("sha256") and row["sha256"] != rep.sha256:
                 rep.add(FAILED, "原始文件与上次导入时不同（sha256 不符），原始文件不得修改")
-            rows_out[rel] = {**manifest_row(rep, row.get("imported_at", "")),
+            rows_out[rel] = {**manifest_row(rep, row.get("imported_at", ""), registered),
                              "sha256": row.get("sha256") or rep.sha256}
         all_reports.append(rep)
     merged, errors = merge_reports(all_reports)

@@ -108,19 +108,21 @@ def collect_online(
             oas, oinfo = fred.fetch_series(paths, settings.oas_series, OAS_START, end, api_key, refresh=refresh,
                                            **retry)
             infos = [oinfo]
-        except cache.DataFetchError:
-            if settings.oas_long_history_source != "tradingview":
-                raise
-            oas, infos = {}, []
-        tv = _tv_oas(paths, settings)
-        if tv is not None:
-            infos.append(local_input(paths, paths.tv_processed_file(settings.oas_series), "tradingview"))
-        out.append(oas_series(settings.oas_series, oas, tv, end, infos))
+        except cache.DataFetchError as exc:
+            out.append(NewSeries(settings.oas_series, "value", {}, "fred",
+                                 fetch_failure=cache.redact_text(str(exc))))
+        else:
+            tv = _tv_oas(paths, settings)
+            if tv is not None:
+                infos.append(local_input(paths, paths.tv_processed_file(settings.oas_series), "tradingview"))
+            out.append(oas_series(settings.oas_series, oas, tv, end, infos))
     if TREASURY_SERIES in want:
-        values, tinfos, tnotes = treasury.fetch_ten_year(paths, TREASURY_START, end, api_key,
-                                                         refresh, **retry)
-        source = "fred:DGS10" if tnotes else "treasury"
-        s = value_series(TREASURY_SERIES, values, source, end, tinfos)
+        values, tinfos, tnotes, fallback = treasury.fetch_ten_year(paths, TREASURY_START, end, api_key,
+                                                                   refresh, **retry)
+        s = value_series(TREASURY_SERIES, values, "treasury", end, tinfos)
+        for day in fallback:
+            if day in s.rows:
+                s.rows[day]["source"] = "fred:DGS10"
         s.primary, s.notes = "treasury", list(tnotes)
         out.append(s)
     conflicts: dict[dt.date, str] = {}
@@ -188,9 +190,18 @@ def collect_offline(
             out.append(oas_series(settings.oas_series, oas, tv, end, oinfos))
     if TREASURY_SERIES in want:
         t, tinfos = _merged_cache(paths, "treasury", "10Y")
-        if t:
-            out.append(value_series(TREASURY_SERIES, {d: v for d, v in t.items() if v is not None}, "treasury",
-                                    end, tinfos))
+        dgs, dinfos = _merged_cache(paths, "fred", "DGS10")
+        treasury_years = {d.year for d, v in t.items() if v is not None}
+        fallback = {d: v for d, v in dgs.items() if d.year not in treasury_years and v is not None}
+        combined = {**fallback, **{d: v for d, v in t.items() if v is not None}}
+        if combined:
+            s = value_series(TREASURY_SERIES, combined, "treasury", end, tinfos + dinfos)
+            for day in fallback:
+                if day in s.rows:
+                    s.rows[day]["source"] = "fred:DGS10"
+            if fallback:
+                s.notes.append("财政部缓存缺少年份时按年份读取 FRED DGS10 缓存")
+            out.append(s)
     conflicts: dict[dt.date, str] = {}
     if want & {"S5FI", "S5TW"}:
         readings, conflicts = load_breadth(paths)

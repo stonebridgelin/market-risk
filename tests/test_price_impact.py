@@ -70,3 +70,19 @@ def test_impact_passes_adjudicated_dates_to_each_single_day_score(tmp_path):
     result = dispute_impact(series, paths, SETTINGS, "SPY", day, close, close,
                             scorer=scorer, decisions=(decision,))
     assert result.checked == 1 and seen == [(decision,), (decision,)]
+
+
+def test_partial_scoring_error_cannot_claim_no_impact(tmp_path):
+    """M-12：即使已有成功基准日，只要后续有错误，结论就是无法检验（部分）。"""
+    paths, series = _series(tmp_path)
+    day = D(2025, 11, 26)
+
+    def scorer(raw):
+        if raw.base_date > day:
+            raise ValueError("构造的单日错误")
+        return score_versions(raw)
+
+    close = series.rows["SPY"][day]["value"]
+    result = dispute_impact(series, paths, SETTINGS, "SPY", day, close, close, horizon=1, scorer=scorer)
+    assert result.checked == 1 and len(result.errors) == 1
+    assert result.verdict == "无法检验（部分）"

@@ -13,7 +13,7 @@ from market_risk import services
 from market_risk.config import load_settings
 from market_risk.data import cache, market
 from market_risk.data.market import NewSeries
-from market_risk.data.market_build import collect_offline
+from market_risk.data.market_build import collect_offline, collect_online
 from market_risk.data.snapshot import build_snapshot
 from market_risk.models import BreadthReading, SourceInfo
 from market_risk.pipeline import score_snapshot
@@ -132,6 +132,69 @@ def test_data_build_reports_revisions(ctx, paths):
     assert market.read_series_file(paths.market_daily_file("SPY"))[1][D(2025, 11, 26)]["value"] == 999.0
 
 
+def test_missing_old_date_is_retained_and_listed(paths):
+    """M-06：新下载缺少的旧日期留在数据集，同时出现在修订报告的独立清单。"""
+    first = NewSeries("SPY", "etf", {D(2025, 1, 2): {"value": 100, "close": 100, "source": "yahoo"},
+                                     D(2025, 1, 3): {"value": 101, "close": 101, "source": "yahoo"}}, "yahoo")
+    market.build_dataset(paths, [first])
+    second = dataclasses.replace(first, rows={D(2025, 1, 3): first.rows[D(2025, 1, 3)]})
+    result = market.build_dataset(paths, [second])
+    assert result.missing_old_dates == [("SPY", D(2025, 1, 2))]
+    assert D(2025, 1, 2) in market.read_series_file(paths.market_daily_file("SPY"))[1]
+    assert "| SPY | 2025-01-02 |" in market.render_revisions(result, "test")
+
+
+def test_oas_fetch_failure_preserves_series_and_records_manifest(paths, monkeypatch):
+    """M-01：OAS 获取失败时其他序列照常更新，OAS 文件与来源不变，manifest 记时刻及脱敏原因。"""
+    from market_risk.data.cache import DataFetchError
+
+    existing = NewSeries(SETTINGS.oas_series, "value",
+                         {D(2025, 1, 2): {"value": 3.2, "source": "fred"}}, "fred")
+    market.build_dataset(paths, [existing])
+    old = paths.market_daily_file(SETTINGS.oas_series).read_bytes()
+
+    def broken(*_args, **_kwargs):
+        raise DataFetchError("HTTP 500 api_key=SECRET")
+
+    monkeypatch.setattr("market_risk.data.market_build.fred.fetch_series", broken)
+    series, _ = collect_online(paths, SETTINGS, D(2025, 1, 3), "SECRET", only=(SETTINGS.oas_series,))
+    assert series[0].fetch_failure == "HTTP 500 api_key=***"
+    extra = NewSeries("SPY", "etf", {D(2025, 1, 3): {"value": 101, "close": 101, "source": "yahoo"}},
+                      "yahoo")
+    stamp = dt.datetime(2026, 9, 27, tzinfo=dt.UTC)
+    result = market.build_dataset(paths, [*series, extra], now=stamp)
+    assert paths.market_daily_file(SETTINGS.oas_series).read_bytes() == old
+    assert "SPY" in result.changed and SETTINGS.oas_series not in result.changed
+    failure = market.read_manifest(paths)["fetch_failures"][SETTINGS.oas_series]
+    assert failure == {"failed_at_utc": "2026-09-27T00:00:00+00:00", "reason": "HTTP 500 api_key=***"}
+    assert "SECRET" not in paths.market_manifest.read_text(encoding="utf-8")
+
+
+def test_offline_build_reads_dgs10_cache_only_for_missing_year(paths):
+    """M-03：离线构建按年份使用财政部与 DGS10 缓存，并保留逐日来源。"""
+    treasury_file = paths.cache_file("treasury", "10Y", D(2025, 1, 1), D(2025, 12, 31))
+    dgs_file = paths.cache_file("fred", "DGS10", D(2024, 1, 1), D(2025, 12, 31))
+    treasury_info = SourceInfo("treasury", "10Y", "test", "2026-01-01", 1, None, None, False, "")
+    dgs_info = SourceInfo("fred", "DGS10", "test", "2026-01-01", 2, None, None, False, "")
+    cache.write_cache(treasury_file, cache.series_to_csv({D(2025, 1, 2): 4.01}), treasury_info)
+    cache.write_cache(dgs_file, cache.series_to_csv({D(2024, 12, 31): 4.02, D(2025, 1, 2): 9.99}), dgs_info)
+    series, _ = collect_offline(paths, SETTINGS, D(2025, 12, 31), only=("UST10Y",))
+    assert len(series) == 1
+    assert series[0].rows[D(2024, 12, 31)] == {"value": 4.02, "source": "fred:DGS10"}
+    assert series[0].rows[D(2025, 1, 2)] == {"value": 4.01, "source": "treasury"}
+
+
+def test_dgs10_difference_is_revision_not_overwrite(paths):
+    """M-03：DGS10 与已存财政部数值不同时只列历史修订。"""
+    day = D(2025, 1, 2)
+    old = NewSeries("UST10Y", "value", {day: {"value": 4.01, "source": "treasury"}}, "treasury")
+    market.build_dataset(paths, [old])
+    fallback = NewSeries("UST10Y", "value", {day: {"value": 4.02, "source": "fred:DGS10"}}, "treasury")
+    result = market.build_dataset(paths, [fallback])
+    assert [(r.date, r.old, r.new) for r in result.revisions] == [(day, 4.01, 4.02)]
+    assert market.read_series_file(paths.market_daily_file("UST10Y"))[1][day]["value"] == 4.01
+
+
 # ---------------------------------------------------------------------------
 # 从数据集组装评分输入
 # ---------------------------------------------------------------------------
@@ -205,12 +268,16 @@ def test_vintage_file_used_and_listed_in_manifest(paths):
     assert other.oas_vintage is None      # 没有该基准日的版本文件：不做版本比对
 
 
-def test_breadth_conflict_notes_window(paths):
+def test_breadth_conflict_notes_only_base_and_t5(paths):
     raw, breadth = _sample()
-    conflicts = {D(2025, 11, 20): "广度 2025-11-20：不一致", D(2025, 9, 1): "广度 2025-09-01：不一致"}
+    conflicts = {D(2025, 11, 28): "广度 2025-11-28：不一致",
+                 D(2025, 11, 20): "广度 2025-11-20：不一致",
+                 D(2025, 11, 25): "广度 2025-11-25：不一致"}
     market.build_dataset(paths, dataset_from_raw(raw, breadth), breadth_conflicts=conflicts)
     loaded = market.load_raw_inputs(paths, SETTINGS, raw.base_date, revision_check=False)
-    assert "广度 2025-11-20：不一致" in loaded.notes and "广度 2025-09-01：不一致" not in loaded.notes
+    assert "广度 2025-11-28：不一致" in loaded.notes
+    assert "广度 2025-11-20：不一致" in loaded.notes
+    assert "广度 2025-11-25：不一致" not in loaded.notes
 
 
 def test_oas_series_fills_from_tradingview_only_before_fred():
@@ -232,10 +299,47 @@ def test_vix_series_fills_missing_fred_from_cboe():
 
 def test_last_completed_trading_day():
     ny = market.NEW_YORK
-    assert market.last_completed_trading_day(dt.datetime(2025, 11, 26, 16, 20, tzinfo=ny)) == D(2025, 11, 26)
-    assert market.last_completed_trading_day(dt.datetime(2025, 11, 26, 16, 5, tzinfo=ny)) == D(2025, 11, 25)
-    assert market.last_completed_trading_day(dt.datetime(2025, 11, 28, 13, 20, tzinfo=ny)) == D(2025, 11, 28)
+    assert market.last_completed_trading_day(dt.datetime(2025, 11, 26, 18, 30, tzinfo=ny)) == D(2025, 11, 26)
+    assert market.last_completed_trading_day(dt.datetime(2025, 11, 26, 18, 29, tzinfo=ny)) == D(2025, 11, 25)
+    assert market.last_completed_trading_day(dt.datetime(2025, 11, 28, 13, 20, tzinfo=ny)) == D(2025, 11, 26)
+    assert market.last_completed_trading_day(dt.datetime(2025, 11, 28, 18, 30, tzinfo=ny)) == D(2025, 11, 28)
     assert market.last_completed_trading_day(dt.datetime(2025, 11, 29, 10, 0, tzinfo=ny)) == D(2025, 11, 28)
+
+
+def test_build_fetch_score_share_eastern_cutoff(ctx):
+    """M-02：三个入口对今天未到美东18:30给出相同错误，与调用端时区无关。"""
+    day = D(2025, 11, 26)
+    pacific = dt.timezone(dt.timedelta(hours=-8))
+    now = dt.datetime(2025, 11, 26, 15, 29, tzinfo=pacific)  # 美东18:29
+    expected = "当日数据需在美东18:30之后写入，请在此之后重试"
+    calls = (lambda: services.data_build(ctx, end=day, collect=lambda _: ([], {}), now=now, decisions=()),
+             lambda: services.fetch_data(ctx, day, mode="daily", now=now),
+             lambda: services.score_date(ctx, day, mode="daily", now=now))
+    for call in calls:
+        with pytest.raises(services.ServiceError, match=expected) as exc:
+            call()
+        assert str(exc.value) == expected
+    assert market.resolve_build_end(day, now + dt.timedelta(minutes=1))[0] == day
+
+
+def test_default_build_and_explicit_non_trading_end(ctx):
+    from market_risk.cli import format_data_build
+
+    ny = market.NEW_YORK
+    before = dt.datetime(2025, 11, 26, 18, 29, tzinfo=ny)
+    report = services.data_build(ctx, collect=lambda _: ([], {}), now=before, decisions=())
+    assert report.end == D(2025, 11, 25) and "当日数据将在美东18:30后写入" in report.cutoff_note
+    assert "当日数据将在美东18:30后写入" in format_data_build(report)
+    weekend = dt.datetime(2025, 11, 29, 10, tzinfo=ny)
+    report = services.data_build(ctx, end=D(2025, 11, 29), collect=lambda _: ([], {}), now=weekend, decisions=())
+    assert report.end == D(2025, 11, 28) and "实际写入的最后一个交易日为 2025-11-28" in report.cutoff_note
+    assert "数据集截止：2025-11-28" in format_data_build(report)
+    with pytest.raises(services.ServiceError, match="未来日期"):
+        services.data_build(ctx, end=D(2025, 12, 1), collect=lambda _: ([], {}), now=weekend)
+    for call in (lambda: services.fetch_data(ctx, D(2025, 11, 29), now=weekend),
+                 lambda: services.score_date(ctx, D(2025, 11, 29), now=weekend)):
+        with pytest.raises(services.ServiceError, match="前一个交易日为 2025-11-28"):
+            call()
 
 
 def test_collect_offline_from_caches(paths):

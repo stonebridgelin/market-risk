@@ -41,7 +41,8 @@ def _import(paths: StoragePaths, files: dict[str, str | Path]):
             shutil.copyfile(src, d / name)
         else:
             (d / name).write_text(src, encoding="utf-8")
-    return tv.import_directory(d, paths, SYMBOLS)
+    return tv.import_directory(d, paths, SYMBOLS,
+                               export_time=dt.datetime(2026, 9, 26, 17, tzinfo=dt.timezone(dt.timedelta(hours=-4))))
 
 
 # ---------------------------------------------------------------------------

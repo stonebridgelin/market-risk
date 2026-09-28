@@ -45,12 +45,11 @@ BREADTH_SERIES = ("S5FI", "S5TW")
 # 修订判定（B1-4）：Yahoo 价格按4位小数比较，成交量按整数；其他来源按两位小数
 ETF_DECIMALS = 4
 VALUE_DECIMALS = 2
-# 数据集只写入已完整收盘的交易日：收盘后留 15 分钟
-CLOSE_BUFFER = dt.timedelta(minutes=15)
+# 与 SOP 第3节分析时点一致：美东 18:30 起才写入当日价格，提前收盘日相同。
+DATA_READY_TIME = dt.time(18, 30)
 
 # scoring 读取窗口（与原先按基准日下载的区间一致）
 DAILY_LOOKBACK_DAYS = 100
-BREADTH_CONFLICT_DAYS = 15
 
 
 class MarketDataError(RuntimeError):
@@ -72,6 +71,7 @@ class NewSeries:
     notes: list[str] = field(default_factory=list)
     frequency: str = "daily"                    # daily / weekly
     revisable: bool = False                     # 整体替换为最新下载（只用于 reference 序列）
+    fetch_failure: str | None = None            # 本次下载失败：保留原序列，仅在 manifest 记录
 
     @property
     def columns(self) -> list[str]:
@@ -100,6 +100,8 @@ class BuildResult:
     accepted: bool
     manifest_path: Any = None
     replaced: dict[str, dict[str, int]] = field(default_factory=dict)   # revisable 序列：修订、新增、删除的条数
+    fetch_failures: dict[str, dict[str, str]] = field(default_factory=dict)
+    missing_old_dates: list[tuple[str, dt.date]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -210,9 +212,12 @@ def build_dataset(
     manifest = read_manifest(paths)
     entries: dict[str, dict[str, Any]] = dict(manifest.get("series", {}))
     revisions: list[Revision] = []
+    missing_old_dates: list[tuple[str, dt.date]] = []
     changed: list[str] = []
     notes: list[str] = []
     stamp = (now or utc_now()).astimezone(dt.UTC).isoformat(timespec="seconds")
+    fetch_failures: dict[str, dict[str, str]] = dict(manifest.get("fetch_failures", {}))
+    current_failures: dict[str, dict[str, str]] = {}
     from market_risk.data.corrections import apply_corrections, restore_originals
 
     # 全部预检后再写文件，裁定无效时不得留下已写入的部分序列。
@@ -229,6 +234,12 @@ def build_dataset(
         incoming.append(NewSeries(name, entries[name]["kind"], {}, "",
                                   frequency=entries[name].get("frequency", "daily")))
     for s in incoming:
+        if s.fetch_failure is not None:
+            fetch_failures[s.name] = {"failed_at_utc": stamp, "reason": s.fetch_failure}
+            current_failures[s.name] = fetch_failures[s.name]
+            notes.append(f"{s.name} 本次未更新：FRED 获取失败（{s.fetch_failure}）")
+            continue
+        fetch_failures.pop(s.name, None)
         path = paths.market_series_file(s.name, s.frequency)
         old = read_series_file(path)[1] if path.exists() else None
         prev = entries.get(s.name, {})
@@ -243,6 +254,8 @@ def build_dataset(
             prepared.append((s, path, prev, merged, [], []))
             continue
         old = restore_originals(old or {}, prev.get("corrections", []))
+        if s.rows:
+            missing_old_dates += [(s.name, d) for d in sorted(set(old) - set(s.rows))]
         merged, revs = merge_rows(s, old, accept_revisions)
         merged, audit = apply_corrections(s.name, s.kind, merged, decisions)
         prepared.append((s, path, prev, merged, revs, audit))
@@ -282,13 +295,17 @@ def build_dataset(
     new_manifest = {
         **manifest,
         "series": dict(sorted(entries.items())),
+        **({"fetch_failures": dict(sorted(fetch_failures.items()))} if fetch_failures else {}),
         "breadth_conflicts": {d.isoformat(): m for d, m in sorted((breadth_conflicts or {}).items())}
         if breadth_conflicts is not None else manifest.get("breadth_conflicts", {}),
     }
+    if not fetch_failures:
+        new_manifest.pop("fetch_failures", None)
     if new_manifest != manifest:
         new_manifest["generated_at_utc"] = stamp
         write_manifest(paths, new_manifest)
-    return BuildResult(entries, revisions, changed, notes, accept_revisions, paths.market_manifest, replaced)
+    return BuildResult(entries, revisions, changed, notes, accept_revisions, paths.market_manifest, replaced,
+                       current_failures, missing_old_dates)
 
 
 def read_manifest(paths: StoragePaths) -> dict[str, Any]:
@@ -322,6 +339,9 @@ def render_revisions(result: BuildResult, generated_at: str) -> str:
     lines += [f"| {r.series} | {r.date} | {r.column} | {r.old} | {r.new} |" for r in result.revisions]
     if not result.revisions:
         lines.append("| 无 | | | | |")
+    lines += ["", "## 新下载缺少的旧日期", "", "旧日期继续保留在数据集中；不自动删除。", "",
+              "| 序列 | 日期 |", "|---|---|"]
+    lines += [f"| {name} | {day} |" for name, day in result.missing_old_dates] or ["| 无 | |"]
     return "\n".join(lines) + "\n"
 
 
@@ -331,17 +351,50 @@ def render_revisions(result: BuildResult, generated_at: str) -> str:
 
 
 def last_completed_trading_day(now: dt.datetime | None = None) -> dt.date:
-    """已完整收盘的最近一个交易日（美东；收盘后留 15 分钟，提前收盘日按 13:00）。"""
+    """最近一个允许写入数据集的交易日（美东 18:30 起；提前收盘日相同）。"""
     local = (now or utc_now()).astimezone(NEW_YORK)
     day = local.date()
     if mcal.is_stock_trading_day(day):
-        close = dt.time(13, 0) if mcal.is_early_close(day) else dt.time(16, 0)
-        if local >= dt.datetime.combine(day, close, NEW_YORK) + CLOSE_BUFFER:
+        if local >= dt.datetime.combine(day, DATA_READY_TIME, NEW_YORK):
             return day
     d = day - dt.timedelta(days=1)
     while not mcal.is_stock_trading_day(d):
         d -= dt.timedelta(days=1)
     return d
+
+
+def resolve_build_end(requested: dt.date | None, now: dt.datetime | None = None) -> tuple[dt.date, str]:
+    """按美东 18:30 确定可写入的截止日；显式未来日或未到时点的当日不得静默改正。"""
+    local = (now or utc_now()).astimezone(NEW_YORK)
+    today = local.date()
+    if requested is None:
+        note = "当日数据将在美东18:30后写入" if (mcal.is_stock_trading_day(today)
+                                                        and local.time() < DATA_READY_TIME) else ""
+        return last_completed_trading_day(now), note
+    if requested > today:
+        raise MarketDataError(f"截止日期 {requested} 是未来日期")
+    if not mcal.is_stock_trading_day(requested):
+        previous = requested - dt.timedelta(days=1)
+        while not mcal.is_stock_trading_day(previous):
+            previous -= dt.timedelta(days=1)
+        return previous, f"{requested} 不是 NYSE 交易日；实际写入的最后一个交易日为 {previous}"
+    if requested == today and local.time() < DATA_READY_TIME:
+        raise MarketDataError("当日数据需在美东18:30之后写入，请在此之后重试")
+    return requested, ""
+
+
+def validate_score_base(base: dt.date, now: dt.datetime | None = None) -> None:
+    """fetch 与 score 共用的基准日检查，不自动改正显式日期。"""
+    local = (now or utc_now()).astimezone(NEW_YORK)
+    if not mcal.is_stock_trading_day(base):
+        previous = base - dt.timedelta(days=1)
+        while not mcal.is_stock_trading_day(previous):
+            previous -= dt.timedelta(days=1)
+        raise MarketDataError(f"{base} 不是股票交易日；前一个交易日为 {previous}，请重新输入")
+    if base > local.date():
+        raise MarketDataError(f"基准日 {base} 是未来日期")
+    if base == local.date() and local.time() < DATA_READY_TIME:
+        raise MarketDataError("当日数据需在美东18:30之后写入，请在此之后重试")
 
 
 def etf_series(name: str, rows: Mapping[dt.date, Mapping[str, float | None]], end: dt.date,
@@ -573,9 +626,10 @@ def raw_inputs_from_series(
         notes.append("FRED API 没有该区间的 OAS（早于三年），不做历史修订比对；不影响计分")
 
     breadth = {d: r for d, r in series.breadth.items() if d <= base}
+    relevant_conflicts = {base, mcal.shift_trading_days(base, -5)}
     for d, msg in sorted(manifest.get("breadth_conflicts", {}).items()):
         day = dt.date.fromisoformat(d)
-        if base - dt.timedelta(days=BREADTH_CONFLICT_DAYS) <= day <= base:
+        if day in relevant_conflicts:
             notes.append(msg)
 
     return RawInputs(

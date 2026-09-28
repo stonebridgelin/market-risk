@@ -112,7 +112,8 @@ def test_tv_services_with_injected_loader(ctx):
     raw_dir.mkdir(parents=True)
     shutil.copyfile(FIX_TV / "iso" / "INDEX_S5FI, 1D.csv", raw_dir / "INDEX_S5FI, 1D.csv")
     symbols = {k: dataclasses.replace(v, inception=None) for k, v in load_symbols().items()}
-    result = services.tv_import(ctx, raw_dir, symbols=symbols)
+    registered = dt.datetime(2026, 9, 26, 17, tzinfo=dt.timezone(dt.timedelta(hours=-4)))
+    result = services.tv_import(ctx, raw_dir, export_time=registered, symbols=symbols)
     assert result.processed == {"S5FI": 29} and as_json(result)
     assert services.tv_list(ctx)[0]["symbol"] == "S5FI"
     assert services.tv_validate(ctx, "S5FI").reports[0].symbol == "S5FI"
@@ -133,7 +134,7 @@ def test_tv_services_with_injected_loader(ctx):
     oas = load_sample_raw("2025-11-28").oas
     lines = ["time,open,high,low,close"] + [f"{d},{v},{v},{v},{v}" for d, v in sorted(oas.items()) if v is not None]
     (raw_dir / "FRED_BAMLH0A0HYM2, 1D.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    services.tv_import(ctx, raw_dir)
+    services.tv_import(ctx, raw_dir, export_time=registered)
     ok = services.tv_compare(ctx, "BAMLH0A0HYM2", loader=lambda info, s, e: oas)
     assert ok.results[0].ok and ok.path.name == "tradingview_compare_BAMLH0A0HYM2.md"
     bad = services.tv_compare(ctx, "BAMLH0A0HYM2", loader=failing)

@@ -213,10 +213,11 @@ def test_treasury_url_and_fetch(paths):
         urls.append(url)
         return TREASURY_CSV
 
-    s, _, notes = treasury.fetch_ten_year(paths, D(2025, 11, 20), D(2025, 11, 28), None,
+    s, _, notes, fallback = treasury.fetch_ten_year(paths, D(2025, 11, 20), D(2025, 11, 28), None,
                                               http_get=http_get)
     assert s == {D(2025, 11, 28): 4.02, D(2025, 11, 26): 4.00}  # 空值不计入
     assert notes == []
+    assert fallback == set()
     assert "daily-treasury-rates.csv/2025/all" in urls[0] and "_format=csv" in urls[0]
 
 
@@ -228,12 +229,13 @@ def test_treasury_falls_back_to_dgs10(paths):
         assert params["series_id"] == "DGS10"
         return _fred_json([("2025-10-10", "4.05"), ("2025-10-13", "."), ("2025-10-14", "4.03")])
 
-    s, infos, notes = treasury.fetch_ten_year(
+    s, infos, notes, fallback = treasury.fetch_ten_year(
         paths, D(2025, 10, 1), D(2025, 10, 14), "KEY", http_get=broken, fred_get=fred_get,
         max_retries=0,
     )
     assert s == {D(2025, 10, 10): 4.05, D(2025, 10, 14): 4.03}
     assert infos[0].key == "DGS10"
+    assert fallback == {D(2025, 10, 10), D(2025, 10, 14)}
     assert any("DGS10" in n for n in notes)
 
 
@@ -244,6 +246,30 @@ def test_treasury_failure_without_fallback_raises(paths):
     with pytest.raises(DataFetchError):
         treasury.fetch_ten_year(paths, D(2025, 10, 1), D(2025, 10, 14), None,
                                 http_get=broken, max_retries=0)
+
+
+def test_treasury_fallback_only_failed_year(paths, monkeypatch):
+    """M-03：一个年份失败不影响其他年份的财政部主源，备用源仅请求失败年份。"""
+    from market_risk.models import SourceInfo
+
+    def year_loader(_paths, year, _end, *_args):
+        if year == 2024:
+            raise DataFetchError("2024 下载失败")
+        return {D(2025, 1, 2): 4.01}, SourceInfo("treasury", "10Y", "", "", 1, None, None, False, "")
+
+    calls = []
+
+    def fred_loader(_paths, symbol, start, end, _key, **_kwargs):
+        calls.append((symbol, start, end))
+        return {D(2024, 12, 31): 4.02}, SourceInfo("fred", "DGS10", "", "", 1, None, None, False, "")
+
+    monkeypatch.setattr(treasury, "fetch_treasury_year", year_loader)
+    monkeypatch.setattr(treasury.fred, "fetch_series", fred_loader)
+    values, infos, notes, fallback = treasury.fetch_ten_year(paths, D(2024, 12, 31), D(2025, 1, 2), "KEY")
+    assert values == {D(2024, 12, 31): 4.02, D(2025, 1, 2): 4.01}
+    assert calls == [("DGS10", D(2024, 1, 1), D(2024, 12, 31))]
+    assert {info.source for info in infos} == {"fred", "treasury"}
+    assert fallback == {D(2024, 12, 31)} and len(notes) == 1
 
 
 @pytest.mark.parametrize("sample", ["2025-08-29", "2025-09-26", "2025-10-31", "2025-11-28"])

@@ -214,12 +214,18 @@ def format_data_build(report: Any) -> str:
             for name, e in r.series.items()]
     lines = [f"数据集截止：{report.end}（{'离线：只用现有缓存' if report.offline else '按需下载'}）",
              _table(["序列", "行数", "起止日期", "来源（行数）", "本次更新"], rows)]
+    if report.cutoff_note:
+        lines.append(f"说明：{report.cutoff_note}")
     lines += [f"说明：{n}" for n in r.notes]
+    if r.fetch_failures:
+        lines.append("【警告】OAS 本次未更新：FRED 获取失败")
     if r.revisions:
         verb = "已按 --accept-revisions 更新" if r.accepted else "未自动覆盖，保留旧值"
         lines.append(f"历史修订 {len(r.revisions)} 处（{verb}），清单：{report.revisions_path}")
     else:
         lines.append("没有历史修订。")
+    if r.missing_old_dates:
+        lines.append(f"新下载缺少的旧日期 {len(r.missing_old_dates)} 处（继续保留），清单：{report.revisions_path}")
     lines.append(f"manifest：{r.manifest_path}")
     return "\n".join(lines)
 
@@ -234,6 +240,8 @@ def data_build(
     """由接口缓存（按需下载）、TradingView 清洗结果和手工录入生成 data/market/ 与 manifest.json。"""
     report = _call(services.data_build, _ctx(), offline, refresh, accept_revisions, _opt_date(end))
     typer.echo(format_data_build(report))
+    if report.result.fetch_failures:
+        typer.echo("【警告】OAS 本次未更新：FRED 获取失败", err=True)
     if report.result.revisions and not accept_revisions:
         raise typer.Exit(code=2)
 
@@ -261,7 +269,7 @@ def tv_import(
     export_date: Annotated[str | None, typer.Option("--export-date", help="导出日期（默认取目录名）")] = None,
     export_time: Annotated[
         str | None,
-        typer.Option("--export-time", help="导出时间（带时区；默认取文件修改时间），用于判断不完整K线"),
+        typer.Option("--export-time", help="首次导入必填：带时区的导出时刻；登记到 manifest 后重建沿用"),
     ] = None,
 ) -> None:
     """导入并校验一个目录下的全部 TradingView 导出文件，打印汇总表。"""

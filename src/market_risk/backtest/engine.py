@@ -86,6 +86,16 @@ def day_flags(version: str, snap: MarketSnapshot, result: ScoreResult, series: M
             if reading.date <= end:
                 flags.append(f"广度单值K线阶段|{sym}|{reading.date}|{which}")
     refs = snap.refs
+    vix_rows = series.rows.get(settings.vix_series, {})
+    for label, day in (("V", base), ("V5", refs.t_minus_5)):
+        if vix_rows.get(day, {}).get("source") == "cboe":
+            flags.append(f"VIX来自Cboe|{settings.vix_series}|{day}|{label}")
+    rate_rows = series.rows.get("UST10Y", {})
+    for day in refs.window_days:
+        if rate_rows.get(day, {}).get("source") == "fred:DGS10":
+            flags.append(f"10年期来自DGS10|UST10Y|{day}|20日利率窗口")
+    if refs.t_minus_20 not in refs.window_days and rate_rows.get(refs.t_minus_20, {}).get("source") == "fred:DGS10":
+        flags.append(f"10年期来自DGS10|UST10Y|{refs.t_minus_20}|T−20")
     points = (("O1", refs.oas_o1), ("O6", refs.oas_o6_v3r1)) if version == "v3-R1" else \
         (("O1", refs.oas_o1_v2m), ("O6", refs.oas_o6_v2m))
     oas_rows = series.rows[settings.oas_series]

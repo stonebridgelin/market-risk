@@ -125,6 +125,7 @@ class DataBuildReport:
     end: dt.date
     offline: bool
     revisions_path: Path | None    # 有修订时写出的清单
+    cutoff_note: str = ""
 
 
 def data_build(ctx: Context, offline: bool = False, refresh: bool = False, accept_revisions: bool = False,
@@ -138,7 +139,10 @@ def data_build(ctx: Context, offline: bool = False, refresh: bool = False, accep
     from market_risk.data import market
     from market_risk.data.cache import DataFetchError
 
-    day = end or market.last_completed_trading_day(now)
+    try:
+        day, cutoff_note = market.resolve_build_end(end, now)
+    except market.MarketDataError as exc:
+        raise ServiceError(str(exc)) from exc
     if collect is None:
         if offline:
             from market_risk.data.market_build import collect_offline
@@ -167,11 +171,11 @@ def data_build(ctx: Context, offline: bool = False, refresh: bool = False, accep
     except (ConfigError, ValueError, market.MarketDataError) as exc:   # 裁定表有误：显示原因，不抛异常栈
         raise ServiceError(f"数据集生成失败（config/data_decisions.yaml 或数据集有误）：{exc}") from exc
     rev_path = None
-    if result.revisions:
+    if result.revisions or result.missing_old_dates:
         stamp = (now or dt.datetime.now(dt.UTC)).isoformat(timespec="seconds")
         _write_report(ctx.paths.market_revisions_md, market.render_revisions(result, stamp))
         rev_path = ctx.paths.market_revisions_md
-    return DataBuildReport(result, day, offline, rev_path)
+    return DataBuildReport(result, day, offline, rev_path, cutoff_note)
 
 
 def load_market_inputs(ctx: Context, base: dt.date, mode: str = "backtest") -> Any:
@@ -207,17 +211,18 @@ def fetch_vintage(ctx: Context, base: dt.date, refresh: bool = False) -> str | N
 
 
 def fetch_data(ctx: Context, base: dt.date, mode: str = "backtest", refresh: bool = False,
-               save_raw: Path | None = None) -> FetchResult:  # pragma: no cover - 联网
+               save_raw: Path | None = None, now: dt.datetime | None = None) -> FetchResult:  # pragma: no cover - 联网
     """fetch = 按需下载并生成数据集（B1-2）+ 正式样本的 ALFRED 基准日版本，再从 data/market/ 截断到基准日生成快照。"""
     from market_risk.data import market
     from market_risk.data.raw_io import save_raw_inputs
     from market_risk.data.snapshot import build_snapshot
 
     _check_mode(mode)
+    resolve_base_date(base, mode, now)
     notes: list[str] = []
     if refresh or market.coverage_error(ctx.paths, ctx.settings, base):
-        report = data_build(ctx, refresh=refresh)
-        if report.revisions_path:
+        report = data_build(ctx, refresh=refresh, now=now)
+        if report.result.revisions:
             notes.append(f"数据集发现 {len(report.result.revisions)} 处历史修订，"
                          f"未自动覆盖（见 {report.revisions_path}）")
     vintage_note = fetch_vintage(ctx, base, refresh)
@@ -260,15 +265,17 @@ def record_breadth_inputs(ctx: Context, base: dt.date, breadth: BreadthInput, no
             raise ServiceError(f"{exc}（如需修改，请用 breadth add --overwrite）") from exc
 
 
-def resolve_base_date(base: dt.date | None, mode: str) -> dt.date:
-    from market_risk.data.cache import today_new_york
+def resolve_base_date(base: dt.date | None, mode: str, now: dt.datetime | None = None) -> dt.date:
+    from market_risk.data.market import NEW_YORK, MarketDataError, validate_score_base
 
     _check_mode(mode)
     if base is None and mode != "daily":
         raise ServiceError("回测模式必须提供基准日")
-    day = base or today_new_york()
-    if not mcal.is_stock_trading_day(day):
-        raise ServiceError(f"{day} 不是股票交易日")
+    day = base or (now or dt.datetime.now(dt.UTC)).astimezone(NEW_YORK).date()
+    try:
+        validate_score_base(day, now)
+    except MarketDataError as exc:
+        raise ServiceError(str(exc)) from exc
     return day
 
 
@@ -281,24 +288,24 @@ def score_raw(ctx: Context, raw: Any, git: Any = None) -> Any:
 
 
 def score_date(ctx: Context, base: dt.date | None, mode: str = "backtest",
-               breadth: BreadthInput | None = None) -> Any:
+               breadth: BreadthInput | None = None, now: dt.datetime | None = None) -> Any:
     """从 data/market/ 读取数据（不直接读接口缓存）、计算两个版本的评分，生成运行目录下的全部输出。
 
     传入的广度读数先写入 data/manual/breadth.csv，再离线更新数据集中的 S5FI、S5TW。
     数据集未覆盖基准日时报错，提示先运行 fetch。返回 pipeline.RunOutcome。
     """
-    day = resolve_base_date(base, mode)
+    day = resolve_base_date(base, mode, now)
     breadth = breadth or BreadthInput()
     record_breadth_inputs(ctx, day, breadth)
     if any(v is not None for v in (breadth.s5fi, breadth.s5tw, breadth.s5fi_t5, breadth.s5tw_t5)):
-        data_build(ctx, offline=True, only=("S5FI", "S5TW"), end=max(day, _last_completed()))
+        data_build(ctx, offline=True, only=("S5FI", "S5TW"), end=max(day, _last_completed(now)), now=now)
     return score_raw(ctx, load_market_inputs(ctx, day, mode))
 
 
-def _last_completed() -> dt.date:
+def _last_completed(now: dt.datetime | None = None) -> dt.date:
     from market_risk.data.market import last_completed_trading_day
 
-    return last_completed_trading_day()
+    return last_completed_trading_day(now)
 
 
 @dataclass(frozen=True)
