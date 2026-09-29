@@ -26,6 +26,7 @@ from market_risk.research.pullback import (
     lead_lag,
     rule_performance,
 )
+from market_risk.research.quality import SINGLE_VALUE_END, single_value_stage
 from market_risk.research.statistics import (
     SEED,
     auc,
@@ -41,8 +42,6 @@ from market_risk.storage.paths import StoragePaths
 RUN_ID = "run_20260928T112013Z_2cc8969"
 THRESHOLDS = (Decimal("0.99"), Decimal("0.995"), Decimal("0.98"))
 SPLIT = dt.date(2011, 12, 31)
-SINGLE_VALUE_END = {"S5FI": dt.date(2010, 8, 31), "S5TW": dt.date(2010, 10, 1),
-                    "NDTW": dt.date(2010, 10, 1)}
 
 
 @dataclass(frozen=True)
@@ -107,14 +106,7 @@ def _small_nonbear(period: DangerPeriod, bear_spans: Sequence[tuple[dt.date, dt.
 
 def _quality_cutoff(engine: FeatureEngine, feature: str, day: dt.date) -> bool:
     """相关源的最早依赖日期仍处单值阶段时，排除该日的敏感性观测。"""
-    for symbol, cutoff in SINGLE_VALUE_END.items():
-        if not feature.startswith(symbol):
-            continue
-        lag = 59 if feature == "S5TW_below_60d_high" else 20 if feature.endswith("_change_20") else 10 \
-            if feature.endswith("_change_10") else 5 if feature.endswith("_change_5") else 0
-        earliest = engine.prior(day, lag) if lag else day
-        return earliest is None or earliest <= cutoff
-    return False
+    return single_value_stage(engine, feature, day)
 
 
 def _value_for_feature(engine: FeatureEngine, observation: Observation, name: str,

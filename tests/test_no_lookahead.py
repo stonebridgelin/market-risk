@@ -157,7 +157,8 @@ AUDIT_MODULES = ("market_risk.data.price_review", "market_risk.data.price_review
                  "market_risk.outcomes", "market_risk.backtest.labels", "market_risk.backtest.zigzag",
                  "market_risk.backtest.report", "market_risk.research.analysis", "market_risk.research.io",
                  "market_risk.research.pullback", "market_risk.research.groups", "market_risk.research.features",
-                 "market_risk.research.statistics")
+                 "market_risk.research.statistics", "market_risk.research.quality",
+                 "market_risk.research.development_audit")
 
 
 def test_scoring_path_does_not_load_audit_modules_transitively():

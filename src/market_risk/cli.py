@@ -593,6 +593,14 @@ def research_pullback_features() -> None:
                f"双指数 {result.combined_count}，特征 {result.feature_count} 项。")
 
 
+@research_app.command("audit-pullback-development")
+def research_audit_pullback_development() -> None:
+    """补充原口径开发期候选日重复映射与逐特征缺值审计。"""
+    result = _call(services.research_audit_pullback_development, _ctx())
+    typer.echo(f"已写入 {result.summary_path} 与 {result.detail_path}；"
+               f"重复映射候选日 {result.duplicate_candidate_dates} 个，特征 {result.feature_count} 项。")
+
+
 @backtest_app.command("zigzag-check")
 def backtest_zigzag_check(
     symbol: Annotated[str, typer.Option("--symbol", help="SPX 或 QQQ")],

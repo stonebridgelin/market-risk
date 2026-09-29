@@ -71,6 +71,16 @@ def research_pullback_features(ctx: Context) -> Any:
         raise ServiceError(str(exc)) from exc
 
 
+def research_audit_pullback_development(ctx: Context) -> Any:
+    """核对原口径开发期观测与缺值，不重算验证期结果。"""
+    from market_risk.research.development_audit import audit_development
+
+    try:
+        return audit_development(ctx.paths)
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
 # ---------------------------------------------------------------------------
 # 日期与样本
 # ---------------------------------------------------------------------------

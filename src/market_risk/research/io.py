@@ -19,20 +19,22 @@ MARKET_SYMBOLS = ("SPX", "SPY", "QQQ", "RSP", "HYG", "LQD", "UST10Y", "BAMLH0A0H
 TV_SYMBOLS = ("ADD", "HIGN", "LOWN", "MMFI", "MMTW", "R2FI", "R2TW", "PCCE", "NDTW", "VIX3M")
 
 
-def _rows(path: Path, date_field: str = "date", ordered: bool = True) -> Iterator[dict[str, str]]:
+def _rows(path: Path, date_field: str = "date", ordered: bool = True,
+          end: dt.date = END) -> Iterator[dict[str, str]]:
     with path.open(encoding="utf-8", newline="") as file:
         for row in csv.DictReader(file):
             day = dt.date.fromisoformat(row[date_field])
-            if day > END:
+            if day > end:
                 if ordered:
                     break
                 continue
             yield row
 
 
-def _values(path: Path, field: str = "value", price: bool = False) -> dict[dt.date, Decimal]:
+def _values(path: Path, field: str = "value", price: bool = False,
+            end: dt.date = END) -> dict[dt.date, Decimal]:
     result = {}
-    for row in _rows(path):
+    for row in _rows(path, end=end):
         value = row.get(field, "")
         if value:
             day = dt.date.fromisoformat(row["date"])
@@ -52,6 +54,25 @@ class ResearchInputs:
     market: dict[str, dict[dt.date, Decimal]]
     tradingview: dict[str, dict[dt.date, Decimal]]
     days: tuple[dt.date, ...]
+
+
+def load_development_feature_inputs(paths: StoragePaths, expected_run_id: str) -> ResearchInputs:
+    """只读开发期评分、指标和序列，供补充审计；不读取验证期行。"""
+    pointer = json.loads(paths.backtest_official.read_text(encoding="utf-8"))
+    if pointer["run_id"] != expected_run_id:
+        raise ValueError(f"正式回测指针为 {pointer['run_id']}，预期 {expected_run_id}")
+    run = paths.backtest_run_dir(expected_run_id)
+    scores = {(dt.date.fromisoformat(row["date"]), row["version"]): row
+              for row in _rows(run / "daily_scores.csv", end=DEVELOPMENT_END)}
+    metrics = {dt.date.fromisoformat(row["date"]): row
+               for row in _rows(run / "daily_metrics.csv", end=DEVELOPMENT_END)}
+    price_symbols = {"SPX", "SPY", "QQQ", "RSP", "HYG", "LQD"}
+    market = {symbol: _values(paths.market_daily_file(symbol), price=symbol in price_symbols,
+                              end=DEVELOPMENT_END) for symbol in MARKET_SYMBOLS}
+    tradingview = {symbol: _values(paths.tv_processed_file(symbol), "close", end=DEVELOPMENT_END)
+                   for symbol in TV_SYMBOLS}
+    days = tuple(sorted({day for day, version in scores if version == "v2-M"}))
+    return ResearchInputs(expected_run_id, scores, metrics, (), (), (), 0, market, tradingview, days)
 
 
 def load_inputs(paths: StoragePaths, expected_run_id: str) -> ResearchInputs:

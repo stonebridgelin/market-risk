@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from market_risk import calendar as market_calendar
-from market_risk.research.analysis import _wilson_rows
+from market_risk.research.analysis import _distribution, _wilson_rows
 from market_risk.research.features import FeatureEngine, high_position_days
 from market_risk.research.groups import Candidate, classify_candidates, observations
 from market_risk.research.io import ResearchInputs, _rows, load_inputs
@@ -282,3 +282,118 @@ def test_future_extremes_leave_populated_formal_features_unchanged() -> None:
     changed = FeatureEngine.create(replace(inputs, market=changed_market, tradingview=changed_tv,
                                            metrics=changed_metrics, scores=changed_scores)).values(day)
     assert changed == original
+
+
+def test_confirmed_drawdown_participants_and_tied_sources_by_hand() -> None:
+    days = _days()[:4]
+    prices = _prices(days)
+    prices["SPX"][days[2]] = Decimal("80")
+    prices["QQQ"][days[2]] = Decimal("100")
+    only_spx = build_danger_periods((Episode("SPX", days[0], days[3], Decimal("100")),), prices, days)[0]
+    # SPX 从首个高点100至区间最低80，跌幅为 -20%；QQQ 虽从200至100，却未参与该时段。
+    assert only_spx.spx_drawdown_pct == Decimal("-20")
+    assert only_spx.qqq_drawdown_pct is None
+    tied = build_danger_periods((Episode("SPX", days[0], days[3], Decimal("100")),
+                                 Episode("QQQ", days[0], days[3], Decimal("200"))), prices, days)[0]
+    # 两个指数同日贡献高点与低点，端点来源均须保留两者。
+    assert (tied.start_symbol, tied.end_symbol) == ("SPX+QQQ", "SPX+QQQ")
+
+
+def test_confirmed_shared_candidate_partial_missing_and_zero_progress_denominator_by_hand(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    days = tuple(dt.date(2010, 1, 1) + dt.timedelta(days=i) for i in range(30))
+    periods = (_period(days[3], days[3]), _period(days[5], days[5]))
+    engine = _FakeEngine(days, {days[0], days[1]})
+    monkeypatch.setattr("market_risk.research.groups.high_position_days", lambda *_: (days[0], days[1]))
+    monkeypatch.setattr(engine, "values", lambda day: {
+        "partial": Decimal("2") if day == days[0] else None, "empty": None})
+    candidates = classify_candidates(engine, periods, days, Decimal("0.99"))
+    observed = observations(engine, periods, candidates, days)
+    # day0 距两段起点分别3、5日；day1 分别2、4日，两日均映射两段。
+    assert [candidate.target_starts for candidate in candidates] == [(days[3], days[5])] * 2
+    assert len(observed) == 2
+    for item in observed:
+        # 两日的 partial 为2与缺失，平均只用有效日，因此为2且有效日数1；empty全缺失。
+        assert item.values == {"partial": Decimal("2"), "empty": None}
+        assert item.effective_days == {"partial": 1, "empty": 0}
+    prices = _prices(days)
+    scores = {(day, "v2-M"): {"total_min": "3", "total_max": "3"} for day in days}
+    performance = rule_performance(periods[0], "v2-M", scores, prices, days)
+    # 高点=最低收盘价=100，进度分母为零，必须留空。
+    assert performance["spx_first_warning_progress"] is None
+
+
+def test_confirmed_auc_distribution_bootstrap_and_tie_corrected_u_by_hand() -> None:
+    # 样本2、3与对照1、2配对：胜3次、并列1次，AUC=(3+0.5)/4=0.875。
+    assert auc([2, 3], [1, 2]) == 0.875
+    assert 2 * auc([2, 3], [1, 2]) - 1 == 0.75
+    # 排序1、2、3、4后，线性插值 P25=1.75，中位=2.5，P75=3.25。
+    assert _distribution([1, 2, 3, 4]) == "n=4；最小=1.0000；P25=1.7500；中位=2.5000；P75=3.2500；最大=4.0000"
+    # 两个样本1、3对照恒2，有放回簇重抽样的分布可到0与1；2000次固定种子分位点均取端点。
+    assert bootstrap_auc([1, 3], [2, 2], seed=20260928, repeats=2000) == (0, 1)
+    # U=3.5、并列修正方差1.5、连续性校正后的 z=1/sqrt(1.5)，双侧p=erfc(z/sqrt(2))。
+    expected = math.erfc((1 / math.sqrt(1.5)) / math.sqrt(2))
+    assert math.isclose(mann_whitney_p([2, 3], [1, 2]), expected)
+
+
+def test_confirmed_wilson_population_and_today_exclusion_by_hand() -> None:
+    days = tuple(dt.date(2010, 1, 1) + dt.timedelta(days=i) for i in range(20))
+    periods = (_period(days[5], days[10]), replace(_period(days[10], days[11]), period="验证期"))
+    candidates = (Candidate(days[0], "样本组", (days[5],), False, True, True),
+                  Candidate(days[5], "起点当天", (), True, True, True),
+                  Candidate(days[8], "危险时段内且20日无新起点", (), True, True, False))
+    scores = {(day, version): {"total_min": "3"} for day in (days[0], days[5], days[8])
+              for version in ("v2-M", "v3-R1")}
+    inputs = ResearchInputs("synthetic", scores, {}, (), (), (), 0, {}, {}, days)
+    rows = _wilson_rows(candidates, inputs, periods, days)
+    # 三个完整窗口且总分>=3的高位日都进分母；只有day0未来5日含开发期起点day5。
+    # day5自身起点不算未来；day8未来虽含验证期起点day10，但开发期分子不计。
+    assert [(row["condition_days"], row["future_start_days"], row["proportion"]) for row in rows] == [
+        (3, 1, 1 / 3), (3, 1, 1 / 3)]
+
+
+def test_confirmed_first_warning_window_incomplete_by_hand() -> None:
+    days = _days()[:3]
+    period = build_danger_periods((Episode("SPX", days[0], days[2], Decimal("100")),), _prices(days), days)[0]
+    scores = {(day, "v2-M"): {"total_min": "3", "total_max": "3"} for day in days}
+    row = rule_performance(period, "v2-M", scores, _prices(days), days)
+    # 第一个评分日就是起点，实际偏移0；起点前20日评分不可得，不能写成-20。
+    assert (row["warning_offset"], row["warning_window_incomplete"], row["already_warning_at_window_start"]) == (
+        0, True, False)
+
+
+def test_confirmed_feature_formulas_inclusive_windows_by_hand() -> None:
+    day = dt.date(2008, 8, 11)
+    window = tuple(market_calendar.stock_trading_days(dt.date(2008, 5, 1), day))[-60:]
+    breadth = {d: Decimal("50") for d in window}
+    breadth[window[-2]] = Decimal("70")
+    breadth[day] = Decimal("60")
+    pcce = {d: Decimal(i) for i, d in enumerate(window[-10:], start=1)}
+    scores = {(day, version): {name: "0" for name in
+                                 ("total_min", "total_max", "price", "breadth", "vix", "rates", "credit")}
+              for version in ("v2-M", "v3-R1")}
+    metrics = {day: {"SPY.ma5": "105", "SPY.ma20": "100", "QQQ.ma5": "95", "QQQ.ma20": "100"}}
+    inputs = ResearchInputs("synthetic", scores, metrics, (), (), (), 0,
+                            {"S5TW": breadth, "UST10Y": {}}, {"PCCE": pcce}, (day,))
+    values = FeatureEngine.create(inputs).values(day)
+    # 60日最高70，今日60，差距-10个百分点；105/100-1=+5%，95/100-1=-5%。
+    # PCCE当日及前9日为1..10，平均5.5。
+    assert values["S5TW_below_60d_high"] == Decimal("-10")
+    assert values["SPY_ma5_vs_ma20_pct"] == Decimal("5")
+    assert values["QQQ_ma5_vs_ma20_pct"] == Decimal("-5")
+    assert values["PCCE_ma10"] == Decimal("5.5")
+
+
+def test_confirmed_tied_bottom_opportunity_excluded_by_hand() -> None:
+    days = _days()[:4]
+    prices = _prices(days)
+    prices["SPX"][days[2]] = Decimal("80")
+    prices["QQQ"][days[2]] = Decimal("160")
+    period = build_danger_periods((Episode("SPX", days[0], days[3], Decimal("100")),
+                                   Episode("QQQ", days[1], days[3], Decimal("200"))), prices, days)[0]
+    row = lead_lag(period, prices, days)
+    # 两指数均在day2见最低收盘，无先见底者；反弹样本为空，分布n=0。
+    assert row is not None
+    assert row["bottom_first"] == "同日"
+    assert row["early_bottom_rebound_pct"] is None
+    assert _distribution([]) == "n=0"
