@@ -169,6 +169,38 @@ def test_scoring_path_does_not_load_audit_modules_transitively():
 
     code = ("import importlib, json, sys\n"
             f"for m in {list(SCORING_PATH_MODULES)!r}: importlib.import_module(m)\n"
-            f"print(json.dumps([m for m in {list(AUDIT_MODULES)!r} if m in sys.modules]))\n")
+            f"print(json.dumps([m for m in {list(AUDIT_MODULES)!r} if m in sys.modules] + "
+            "[m for m in sys.modules if m.startswith('market_risk.wavewarn')]))\n")
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert json.loads(out.stdout) == []
+
+
+def test_wavewarn_live_state_does_not_load_labels_or_loss_transitively():
+    """实时通道、特征与状态机不传递导入事后标签或损失。"""
+    import json
+    import subprocess
+    import sys
+
+    code = ("import importlib, json, sys\n"
+            "for m in ('market_risk.wavewarn.features', 'market_risk.wavewarn.channels', "
+            "'market_risk.wavewarn.state_machine', 'market_risk.wavewarn.diagnostics'): "
+            "importlib.import_module(m)\n"
+            "print(json.dumps([m for m in sys.modules if m.startswith('market_risk.wavewarn.labels_zz') "
+            "or m.startswith('market_risk.wavewarn.loss') or m.startswith('market_risk.wavewarn.ledgers')]))\n")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    assert json.loads(out.stdout) == []
+
+
+def test_wavewarn_and_original_research_do_not_import_each_other_transitively():
+    """两个研究口径各自形成独立依赖图，避免隐式混用标签或 VIX3M 来源。"""
+    import json
+    import subprocess
+    import sys
+
+    for imported, forbidden in (("market_risk.wavewarn.development", "market_risk.research"),
+                                ("market_risk.research.analysis", "market_risk.wavewarn")):
+        code = ("import importlib, json, sys\n"
+                f"importlib.import_module({imported!r})\n"
+                f"print(json.dumps([m for m in sys.modules if m.startswith({forbidden!r})]))\n")
+        out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+        assert json.loads(out.stdout) == []

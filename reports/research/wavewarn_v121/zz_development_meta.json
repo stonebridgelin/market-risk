@@ -1,0 +1,17 @@
+{
+  "label_version": "zz-v121",
+  "date_scope": "development_only",
+  "last_date": "2016-12-30",
+  "asset_events": 224,
+  "merged_events": 131,
+  "thresholds": {
+    "SPX": [
+      "0.04",
+      "0.05"
+    ],
+    "QQQ": [
+      "0.05",
+      "0.065"
+    ]
+  }
+}

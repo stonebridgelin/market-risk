@@ -1,0 +1,9 @@
+{
+  "source_url": "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX3M_History.csv",
+  "scope": "仅开发期",
+  "first_date": "2009-09-18",
+  "last_date": "2016-12-30",
+  "rows": 1835,
+  "sha256": "9e34d54d72c1b2bdd1f43ec7f8cfb7035188d8cf057def77522ed5ab8cca6abc",
+  "fetched_at_utc": "2026-09-29T02:14:38.250090+00:00"
+}
