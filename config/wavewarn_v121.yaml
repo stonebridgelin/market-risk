@@ -9,10 +9,10 @@ business:
   beta: "1"
 
 channel_selection:
-  b_spx:
-  dv_spx:
-  b_qqq:
-  dv_qqq:
+  b_spx: false
+  dv_spx: true
+  b_qqq: true
+  dv_qqq: true
 
 zz:
   spx_decline: "0.04"

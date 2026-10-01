@@ -1,4 +1,4 @@
-"""v1.2.1 已登记业务参数与未确认分侧开关的拒绝路径。"""
+"""v1.2.1 已登记业务参数与分侧开关的配置路径。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from market_risk.wavewarn.config import load_wavewarn_config
 from market_risk.wavewarn.loss import configured_loss_settings
 
 
-def test_confirmed_business_parameters_and_unconfirmed_side_switches() -> None:
+def test_confirmed_business_parameters_and_side_switches() -> None:
     config = load_wavewarn_config(Path(__file__).resolve().parents[1] / "config/wavewarn_v121.yaml")
     # SPX 下跌4%与反弹5%各自从配置读取，不把两道门槛混成同一数值。
     assert config.zz_thresholds()["SPX"] == (Decimal("0.04"), Decimal("0.05"))
@@ -24,12 +24,13 @@ def test_confirmed_business_parameters_and_unconfirmed_side_switches() -> None:
             config.paired_parameters().long_block_length,
             config.paired_parameters().event_padding) == (10, 40, 20)
     business = config.require_business_parameters()
-    # 负责人在看开发期结果前登记 0.5、E2、2:1；主损失仍须等 N 分侧开关确定。
+    # 负责人登记 0.5、E2、2:1 与四侧去留；配置只负责接线，不证明效果。
     assert (business.eta, business.e_version, business.kappa_d, business.beta) == (
         Decimal("0.5"), "E2", Decimal(2), Decimal(1))
     assert configured_loss_settings(config).parameters.gamma == Decimal("0.005")
-    with pytest.raises(ValueError, match="须显式填写四侧开关"):
-        config.require_channel_selection()
+    selection = config.require_channel_selection()
+    assert (selection.b_spx, selection.dv_spx, selection.b_qqq, selection.dv_qqq) == (
+        False, True, True, True)
 
 
 def test_constructed_business_and_channel_values_validate_without_setting_real_config(tmp_path: Path) -> None:
@@ -45,6 +46,10 @@ channel_selection: {b_spx: true, dv_spx: false, b_qqq: false, dv_qqq: true}
     selection = config.require_channel_selection()
     assert (selection.b_spx, selection.dv_spx, selection.b_qqq, selection.dv_qqq) == (
         True, False, False, True)
+    missing = copy.deepcopy(config.raw)
+    missing["channel_selection"]["b_spx"] = None
+    with pytest.raises(ValueError, match="须显式填写四侧开关"):
+        type(config)(missing).require_channel_selection()
     # 临时构造配置补齐固定字段，仅核查参数接线；不代表实际选择。
     real = load_wavewarn_config(Path(__file__).resolve().parents[1] / "config/wavewarn_v121.yaml")
     complete = copy.deepcopy(real.raw)
