@@ -7,15 +7,53 @@ from decimal import Decimal
 
 from market_risk.wavewarn.labels_zz import (
     ZZEvent,
+    build_unknown_labels,
     dangerous_interval,
     find_zz_events,
     merge_zz_events,
     right_censored_unknown,
+    terminal_peak_unknown,
 )
 
 
 def _days(n: int) -> tuple[dt.date, ...]:
     return tuple(dt.date(2010, 1, 4) + dt.timedelta(days=i) for i in range(n))
+
+
+def test_terminal_seeking_peak_marks_candidate_to_period_end_unknown() -> None:
+    days = _days(5)
+    closes = [Decimal(value) for value in ("100", "99", "101", "100", "99")]
+    events = find_zz_events("SPX", days, dict(zip(days, closes, strict=True)), days[-1])
+    # 第2天 101 是候选高点，后两天最多下跌 2/101<4%，期末仍寻峰；
+    # 区间起点为第2、3天，末日无后继价格区间。
+    assert events == ()
+    assert terminal_peak_unknown(events, days, closes) == (days[2], days[3])
+
+
+def test_terminal_event_end_day_has_no_seeking_peak_interval() -> None:
+    days = _days(4)
+    closes = [Decimal(value) for value in ("100", "96", "90", "94.5")]
+    events = find_zz_events("SPX", days, dict(zip(days, closes, strict=True)), days[-1])
+    # 第3天恰达 90×1.05，事件当日结束并重置候选高点；[末日,末日) 为空。
+    assert len(events) == 1 and events[0].end_date == days[-1]
+    assert terminal_peak_unknown(events, days, closes) == ()
+
+
+def test_unknown_labels_are_per_asset_and_keep_reason_and_cutoff() -> None:
+    days = _days(5)
+    spx = [Decimal(value) for value in ("100", "99", "101", "100", "99")]
+    qqq = [Decimal(value) for value in ("100", "95", "94", "93", "94")]
+    qqq_events = find_zz_events("QQQ", days, dict(zip(days, qqq, strict=True)), days[-1])
+    labels = build_unknown_labels({"SPX": (), "QQQ": qqq_events}, days,
+                                  {"SPX": dict(zip(days, spx, strict=True)),
+                                   "QQQ": dict(zip(days, qqq, strict=True))}, days[-1])
+    # SPX 第2天101成为寻峰候选，至末日未跌满4%；QQQ第3天93为暂定低点，
+    # 因94尚未达到93×1.065，只有第3天起点属右截尾后的未定区间。
+    assert labels.label_end == days[-1]
+    assert labels.days_by_asset == {"SPX": frozenset({days[2], days[3]}),
+                                    "QQQ": frozenset({days[3]})}
+    assert labels.reasons_by_asset["SPX"][days[2]] == "尾段（寻峰）"
+    assert labels.reasons_by_asset["QQQ"][days[3]] == "右截尾（寻底）"
 
 
 def test_zz_spx_exact_threshold_and_end_day_no_second_t0() -> None:

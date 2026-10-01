@@ -4,7 +4,7 @@ import datetime as dt
 from decimal import Decimal
 
 from market_risk.wavewarn.execution import execute_asset
-from market_risk.wavewarn.labels_zz import ZZEvent, merge_zz_events
+from market_risk.wavewarn.labels_zz import ZZEvent, build_unknown_labels, merge_zz_events
 from market_risk.wavewarn.ledgers import (
     build_alert_ledger,
     classify_asset_event,
@@ -41,6 +41,18 @@ def test_t0_minus_one_signal_is_not_yet_executed_before_t0() -> None:
     assert result.reduction_executed_before_t0 is False
     assert result.lead_days == 1
     assert result.alert_start == _days()[29]
+
+
+def test_event_round_trips_count_intersecting_alert_segments_minus_one() -> None:
+    days = _days()
+    lights = ["绿"] * len(days)
+    lights[5:7] = ["黄", "黄"]
+    lights[10:12] = ["黄", "黄"]
+    lights[30:32] = ["黄", "红"]
+    row = classify_event(days, lights, days[20], days[30], days[40])
+    # 评价窗裁剪为第0至49天；三段警报与其相交，往返=max(3−1,0)=2。
+    # 灯色变化：前两段各进/出2次；第三段绿→黄→红→绿3次，合计7次。
+    assert (row.alert_round_trips, row.light_switches) == (2, 7)
 
 
 def test_right_censored_event_keeps_timing_but_is_outside_five_class_summary() -> None:
@@ -114,6 +126,31 @@ def test_event_first_alert_release_before_trough_and_future_drawdown() -> None:
     assert details.decline_after_green_percent[5] == (Decimal(90) / Decimal(95) - 1) * 100
     assert details.first_alert_channels == ("P_SPX",)
     assert details.release_reason == "P 退出"
+    assert details.release_system_reason == "P 退出"
+    assert details.release_exited_channels == ("P_SPX",)
+
+
+def test_alert_ledger_separates_terminal_pending_and_excluded_intervals() -> None:
+    days = _days()[:5]
+    spx = [Decimal(value) for value in ("100", "99", "101", "100", "99")]
+    qqq = [Decimal(100)] * 5
+    lights = ["绿", "黄", "黄", "黄", "绿"]
+    params = LossParameters(Decimal(2), Decimal(1), Decimal("0.5"))
+    spx_exec = execute_asset(days, lights, spx, params.eta)
+    qqq_exec = execute_asset(days, lights, qqq, params.eta)
+    labels = build_unknown_labels({"SPX": ()}, days,
+                                  {"SPX": dict(zip(days, spx, strict=True))}, days[-1])
+    losses = {"SPX": asset_price_loss(days, spx, spx_exec, (), params, labels, "SPX"),
+              "QQQ": asset_price_loss(days, qqq, qqq_exec, (), params)}
+    rows = build_alert_ledger(days, lights, [()] * 5, (), losses,
+                              {"SPX": Decimal("0.5"), "QQQ": Decimal("0.5")})
+    # 第1至3天为一段警报；第2、3天 SPX 属寻峰尾段，价格项排除。
+    # 第1天两资产均在可判定危险区间外，故事件外有效日=1、排除=2。
+    assert len(rows) == 1
+    assert (rows[0].outside_danger_days, rows[0].excluded_interval_days,
+            rows[0].tail_pending_days) == (1, 2, 2)
+    assert rows[0].tail_pending is True
+    assert rows[0].no_event_alert is False
 
 
 def test_event_release_after_trough_and_incomplete_future_windows_are_blank() -> None:

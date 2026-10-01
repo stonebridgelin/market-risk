@@ -30,6 +30,8 @@ class EventLedgerRow:
     lead_days: int | None
     alert_start: dt.date | None
     right_censored: bool
+    alert_round_trips: int
+    light_switches: int
 
 
 def alert_segments(days: Sequence[dt.date], lights: Sequence[Light]) -> tuple[tuple[int, int], ...]:
@@ -86,8 +88,13 @@ def classify_event(days: Sequence[dt.date], lights: Sequence[Light], peak_date: 
         category = "中断"
     else:
         category = "漏报"
+    window_start, window_end = max(0, peak - 20), min(len(days) - 1, trough + 20)
+    segment_count = sum(start <= window_end and stop >= window_start for start, stop in segments)
+    round_trips = max(segment_count - 1, 0)
+    light_switches = sum(lights[index] != lights[index - 1]
+                         for index in range(window_start + 1, window_end + 1))
     return EventLedgerRow(peak_date, t0_date, trough_date, category, before, executed,
-                          prior, lead, alert_start, right_censored)
+                          prior, lead, alert_start, right_censored, round_trips, light_switches)
 
 
 def classify_asset_event(days: Sequence[dt.date], lights: Sequence[Light], event: ZZEvent) -> EventLedgerRow:
@@ -135,6 +142,9 @@ class AlertLedgerRow:
     protected_decline: Decimal
     outside_danger_days: int
     net_opportunity_cost: Decimal
+    tail_pending: bool
+    tail_pending_days: int
+    excluded_interval_days: int
 
 
 def build_alert_ledger(days: Sequence[dt.date], lights: Sequence[Light],
@@ -160,8 +170,13 @@ def build_alert_ledger(days: Sequence[dt.date], lights: Sequence[Light],
                 overlapping.append(f"{event.symbol}:{event.peak_date.isoformat()}")
         protected = Decimal(0)
         opportunity = Decimal(0)
-        outside_days = sum(all(rows[index].dangerous is False for rows in asset_losses.values())
-                           for index in range(start, min(stop, len(days) - 2) + 1))
+        interval_indices = range(start, min(stop, len(days) - 2) + 1)
+        outside_days = sum(all(rows[index].dangerous is False and not rows[index].excluded_reason
+                               for rows in asset_losses.values()) for index in interval_indices)
+        excluded_days = sum(any(rows[index].excluded_reason for rows in asset_losses.values())
+                            for index in interval_indices)
+        pending_days = sum(any(rows[index].dangerous is None for rows in asset_losses.values())
+                           for index in interval_indices)
         for symbol, rows in asset_losses.items():
             weight = weights[symbol]
             for index in range(start, min(stop, len(rows) - 1) + 1):
@@ -176,8 +191,8 @@ def build_alert_ledger(days: Sequence[dt.date], lights: Sequence[Light],
         channels = tuple(sorted({name for index in range(start, stop + 1)
                                  for name in active_channels[index]}))
         result.append(AlertLedgerRow(days[start], days[stop], stop - start + 1, channels,
-                                     tuple(overlapping), not overlapping, protected,
-                                     outside_days, opportunity))
+                                     tuple(overlapping), not overlapping and pending_days == 0, protected,
+                                     outside_days, opportunity, pending_days > 0, pending_days, excluded_days))
     return tuple(result)
 
 
@@ -224,7 +239,13 @@ class EventTimingDetails:
     decline_after_green_percent: dict[int, Decimal | None]
     reupgraded_after_green: dict[int, bool | None]
     first_alert_channels: tuple[str, ...]
-    release_reason: str
+    release_system_reason: str
+    release_exited_channels: tuple[str, ...]
+
+    @property
+    def release_reason(self) -> str:
+        """兼容旧构造测试字段；新账本显式区分系统原因与通道退出。"""
+        return self.release_system_reason
 
 
 def event_timing_details(days: Sequence[dt.date], lights: Sequence[Light],
@@ -243,12 +264,12 @@ def event_timing_details(days: Sequence[dt.date], lights: Sequence[Light],
     empty_drops: dict[int, Decimal | None] = {window: None for window in (5, 10, 20)}
     empty_upgrade: dict[int, bool | None] = {window: None for window in (5, 10, 20)}
     if first_segment is None:
-        return EventTimingDetails(None, None, None, None, empty_drops, empty_upgrade, (), "")
+        return EventTimingDetails(None, None, None, None, empty_drops, empty_upgrade, (), "", ())
     start, stop = first_segment
     alert_day = days[start]
     channels = tuple(sorted(set(active_channels[start])))
     if stop + 1 >= len(days):
-        return EventTimingDetails(alert_day, None, None, None, empty_drops, empty_upgrade, channels, "")
+        return EventTimingDetails(alert_day, None, None, None, empty_drops, empty_upgrade, channels, "", ())
     green = stop + 1
     green_close = closes[green]
     rebound = (green_close / event.trough_close - 1) * 100 if green_close is not None else None
@@ -263,5 +284,6 @@ def event_timing_details(days: Sequence[dt.date], lights: Sequence[Light],
         drops[window] = ((min(later) / green_close - 1) * 100
                          if green_close is not None and all(value is not None for value in later) else None)
         upgrades[window] = any(light != "绿" for light in lights[green + 1:green + window + 1])
+    exited = tuple(sorted(set(active_channels[stop]) - set(active_channels[green])))
     return EventTimingDetails(alert_day, days[green], green < trough, rebound,
-                              drops, upgrades, channels, reasons[green])
+                              drops, upgrades, channels, reasons[green], exited)

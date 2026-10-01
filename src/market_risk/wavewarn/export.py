@@ -8,7 +8,13 @@ from pathlib import Path
 
 from market_risk.wavewarn.config import WavewarnConfig
 from market_risk.wavewarn.inputs import DevelopmentInputs
-from market_risk.wavewarn.labels_zz import LABEL_VERSION, ZZEvent, find_zz_events, merge_zz_events
+from market_risk.wavewarn.labels_zz import (
+    LABEL_VERSION,
+    ZZEvent,
+    build_unknown_labels,
+    find_zz_events,
+    merge_zz_events,
+)
 
 
 def _event_row(event: ZZEvent) -> tuple[str, ...]:
@@ -22,10 +28,16 @@ def write_development_labels(inputs: DevelopmentInputs, destination: Path,
     """只使用开发期截断输入；保留各资产 ZZ 与闭区间合并结果。"""
     destination.mkdir(parents=True, exist_ok=True)
     all_events = []
+    by_asset: dict[str, tuple[ZZEvent, ...]] = {}
     thresholds = config.zz_thresholds()
     for symbol in ("SPX", "QQQ"):
-        all_events.extend(find_zz_events(symbol, inputs.days, inputs.series[symbol], config.development_end(),
-                                         thresholds))
+        asset_events = find_zz_events(symbol, inputs.days, inputs.series[symbol], config.development_end(),
+                                      thresholds)
+        all_events.extend(asset_events)
+        by_asset[symbol] = asset_events
+    unknown = build_unknown_labels(by_asset, inputs.days,
+                                   {symbol: inputs.series[symbol] for symbol in by_asset},
+                                   config.development_end())
     events = tuple(sorted(all_events, key=lambda event: (event.peak_date, event.symbol)))
     merged = merge_zz_events(events)
     with (destination / "zz_events_development.csv").open("w", encoding="utf-8", newline="") as file:
@@ -41,8 +53,16 @@ def write_development_labels(inputs: DevelopmentInputs, destination: Path,
                                for event in group.members)
             writer.writerow((group.peak_date.isoformat(), group.t0_date.isoformat(),
                              group.trough_date.isoformat(), group.source, len(group.members), members))
+    with (destination / "zz_unknown_development.csv").open("w", encoding="utf-8", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(("symbol", "date", "reason", "label_end"))
+        rows = [(symbol, day.isoformat(), unknown.reasons_by_asset[symbol][day],
+                 unknown.label_end.isoformat())
+                for symbol, dates in unknown.days_by_asset.items() for day in dates]
+        writer.writerows(sorted(rows, key=lambda row: (row[1], row[0])))
     metadata = {"label_version": LABEL_VERSION, "date_scope": "development_only",
-                "last_date": config.development_end().isoformat(), "asset_events": len(events),
+                "last_date": config.development_end().isoformat(),
+                "unknown_label_cutoff": unknown.label_end.isoformat(), "asset_events": len(events),
                 "merged_events": len(merged),
                 "thresholds": {symbol: [str(value) for value in pair] for symbol, pair in thresholds.items()}}
     (destination / "zz_development_meta.json").write_text(

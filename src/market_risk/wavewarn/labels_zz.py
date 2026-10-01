@@ -36,6 +36,15 @@ class MergedZZEvent:
         return "SPX+QQQ" if len({event.symbol for event in self.members}) == 2 else self.members[0].symbol
 
 
+@dataclass(frozen=True)
+class UnknownLabels:
+    """分资产尾段未定区间起点；保留标签截止日与逐日原因。"""
+
+    label_end: dt.date
+    days_by_asset: Mapping[str, frozenset[dt.date]]
+    reasons_by_asset: Mapping[str, Mapping[dt.date, str]]
+
+
 def find_zz_events(symbol: str, days: Sequence[dt.date], prices: Mapping[dt.date, Decimal | None],
                    end: dt.date, thresholds: Mapping[str, tuple[Decimal, Decimal]] = LEVELS) -> tuple[ZZEvent, ...]:
     """价格缺失时保持寻峰／寻底状态；只用 end 及以前数据。"""
@@ -96,6 +105,49 @@ def right_censored_unknown(event: ZZEvent, days: Sequence[dt.date], end: dt.date
     if not event.right_censored:
         return ()
     return tuple(day for day in days if event.trough_date <= day < end)
+
+
+def terminal_peak_unknown(events: Sequence[ZZEvent], days: Sequence[dt.date],
+                          closes: Sequence[Decimal | None]) -> tuple[dt.date, ...]:
+    """期末仍在寻峰时，当前候选高点至期末的区间危险归属未定。"""
+    if len(days) != len(closes) or tuple(days) != tuple(sorted(set(days))):
+        raise ValueError("尾段标签需要唯一升序且对齐的交易日与价格")
+    if not days or (events and events[-1].right_censored):
+        return ()
+    last_end = events[-1].end_date if events else None
+    candidates = [(day, close) for day, close in zip(days, closes, strict=True)
+                  if close is not None and (last_end is None or day >= last_end)]
+    if not candidates:
+        return ()
+    # 寻峰阶段只在严格创新高时更新；并列高点保留最早一天。
+    peak = max(candidates, key=lambda item: item[1])[0]
+    return tuple(day for day in days if peak <= day < days[-1])
+
+
+def build_unknown_labels(events_by_asset: Mapping[str, Sequence[ZZEvent]], days: Sequence[dt.date],
+                         prices_by_asset: Mapping[str, Mapping[dt.date, Decimal | None]],
+                         label_end: dt.date) -> UnknownLabels:
+    """从两类期末状态生成资产独立的未定集合；不查看标签截止日之后价格。"""
+    scoped = tuple(day for day in days if day <= label_end)
+    if not scoped or scoped[-1] != label_end:
+        raise ValueError("标签截止日须属于价格交易日轴")
+    if set(events_by_asset) != set(prices_by_asset):
+        raise ValueError("未定标签的事件与价格标的须一致")
+    by_asset: dict[str, frozenset[dt.date]] = {}
+    reasons_by_asset: dict[str, dict[dt.date, str]] = {}
+    for symbol, events in events_by_asset.items():
+        reasons: dict[dt.date, str] = {}
+        for event in events:
+            if event.symbol != symbol:
+                raise ValueError("未定标签的事件标的错误")
+            for day in right_censored_unknown(event, scoped, label_end):
+                reasons[day] = "右截尾（寻底）"
+        closes = [prices_by_asset[symbol].get(day) for day in scoped]
+        for day in terminal_peak_unknown(events, scoped, closes):
+            reasons[day] = "尾段（寻峰）"
+        by_asset[symbol] = frozenset(reasons)
+        reasons_by_asset[symbol] = reasons
+    return UnknownLabels(label_end, by_asset, reasons_by_asset)
 
 
 def merge_zz_events(events: Sequence[ZZEvent]) -> tuple[MergedZZEvent, ...]:

@@ -207,6 +207,6 @@ def load_wavewarn_config(path: Path) -> WavewarnConfig:
         raw = yaml.safe_load(file)
     if not isinstance(raw, dict) or raw.get("version") != "v1.2.1":
         raise ValueError("wavewarn v1.2.1 配置格式或版本错误")
-    if raw.get("nl_unknown_policy") != "conservative":
-        raise ValueError("20日新低三值口径须使用 conservative（待负责人确认）")
+    if raw.get("nl_unknown_policy") != "three_valued":
+        raise ValueError("20日新低三值口径须使用 three_valued")
     return WavewarnConfig(raw)

@@ -1,5 +1,6 @@
 """开发期诊断仅按此前特征更新，不凭未来行改变过去状态。"""
 
+import csv
 import datetime as dt
 from dataclasses import replace
 from decimal import Decimal
@@ -7,15 +8,36 @@ from pathlib import Path
 
 import pytest
 
-from market_risk.wavewarn.config import ChannelSelection
+from market_risk.wavewarn.config import CandidateSets, ChannelSelection, load_wavewarn_config
 from market_risk.wavewarn.diagnostics import (
     diagnostic_sequence,
     first_complete_day,
     n_diagnostic_sequence,
+    write_anchor_126_audit,
     write_input_coverage,
 )
 from market_risk.wavewarn.features import AssetFeatures
 from market_risk.wavewarn.inputs import DevelopmentInputs
+
+
+def test_anchor_126_audit_separates_p_and_pr_thresholds(tmp_path: Path) -> None:
+    days = tuple(dt.date(2010, 1, 1) + dt.timedelta(days=index) for index in range(126))
+    spx = {day: Decimal(99) for day in days}
+    qqq = dict(spx)
+    spx[days[0]] = qqq[days[0]] = Decimal(100)
+    spx[days[-1]], qqq[days[-1]] = Decimal("98.5"), Decimal("97.5")
+    inputs = DevelopmentInputs(days, {"SPX": spx, "QQQ": qqq})
+    config = load_wavewarn_config(Path(__file__).resolve().parents[1] / "config/wavewarn_v121.yaml")
+    candidates = CandidateSets((3,), (Decimal("0.01"),), (Decimal("0.10"),))
+    path = tmp_path / "anchor.csv"
+    assert write_anchor_126_audit(inputs, path, config.fixed_parameters(), candidates) == 2
+    with path.open(encoding="utf-8", newline="") as file:
+        rows = list(csv.DictReader(file))
+    # SPX短窗高99：1−98.5/99≈0.005<1%，长窗高100：1.5%≥1%，仅P。
+    # QQQ短窗高99：1−97.5/99≈1.515%<2%，长窗高100：2.5%≥2%，仅PR。
+    assert [(row["symbol"], row["channel"], row["entry_threshold"], row["date"])
+            for row in rows] == [("SPX", "P", "0.01", days[-1].isoformat()),
+                                ("QQQ", "PR", "0.02", days[-1].isoformat())]
 
 
 def _feature(day: dt.date, drawdown: str) -> AssetFeatures:

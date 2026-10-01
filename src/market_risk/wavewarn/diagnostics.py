@@ -21,11 +21,30 @@ from market_risk.wavewarn.channels import (
 )
 from market_risk.wavewarn.config import CandidateSets, ChannelSelection, FixedParameters
 from market_risk.wavewarn.convergence import system_convergence
-from market_risk.wavewarn.features import AssetFeatures, rolling_high, vix_term_ratio
+from market_risk.wavewarn.features import AssetFeatures, anchor_126_audit, rolling_high, vix_term_ratio
 from market_risk.wavewarn.inputs import DevelopmentInputs
 from market_risk.wavewarn.state_machine import ReadyInputs, SystemMemory, step_system
 
 Scenario = Literal["P0", "P1-E1", "P1-E2", "P1-E3", "N-E1", "N-E2", "N-E3"]
+
+
+def write_anchor_126_audit(inputs: DevelopmentInputs, destination: Path,
+                           fixed: FixedParameters, candidates: CandidateSets) -> int:
+    """P 与 PR 分开列出126日锚点会触发、63日锚点不触发的开发期日期。"""
+    count = 0
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with destination.open("w", encoding="utf-8", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(("symbol", "channel", "theta_p", "entry_threshold", "date",
+                         "drawdown_63", "drawdown_126"))
+        for symbol in ("SPX", "QQQ"):
+            for theta in candidates.theta_p:
+                for channel, threshold in (("P", theta), ("PR", 2 * theta)):
+                    for day, short, long in anchor_126_audit(inputs.days, inputs.series[symbol],
+                                                              threshold, fixed):
+                        writer.writerow((symbol, channel, theta, threshold, day, short, long))
+                        count += 1
+    return count
 
 
 @dataclass(frozen=True)

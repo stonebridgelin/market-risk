@@ -58,7 +58,9 @@ def _reference_summary(path: Path) -> dict[tuple[str, str], tuple[Decimal, ...]]
 def test_v12_design_sample_w_a_w_b_each_loss_component_matches_reference() -> None:
     directory = _sample_directory()
     if not directory.is_dir():
-        pytest.skip("外置合成设计样例未提供；设置 MARKET_RISK_DESIGN_SAMPLES 后运行")
+        if os.environ.get("REQUIRE_DESIGN_SAMPLES", "1") == "0":
+            pytest.skip("仅在显式关闭外置样例验收时跳过")
+        pytest.fail(f"缺少外置设计样例目录：{directory}；可设置 MARKET_RISK_DESIGN_SAMPLES")
     for name, expected_hash in HASHES.items():
         file = directory / name
         assert file.is_file(), f"缺少设计样例：{file}"

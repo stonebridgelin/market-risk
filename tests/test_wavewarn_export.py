@@ -11,7 +11,8 @@ from market_risk.wavewarn.inputs import DevelopmentInputs
 
 
 def test_development_labels_use_separate_configured_decline_and_rebound_thresholds(tmp_path: Path) -> None:
-    days = tuple(dt.date(2010, 1, 1) + dt.timedelta(days=index) for index in range(4))
+    # 构造评价期最后四天，使显式标签截止日与输入时间轴末日一致。
+    days = tuple(dt.date(2016, 12, 27) + dt.timedelta(days=index) for index in range(4))
     spx = dict(zip(days, (Decimal(100), Decimal(96), Decimal(90), Decimal("94.5")), strict=True))
     qqq = {day: Decimal(100) for day in days}
     inputs = DevelopmentInputs(days, {"SPX": spx, "QQQ": qqq})

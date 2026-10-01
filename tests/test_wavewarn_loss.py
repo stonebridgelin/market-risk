@@ -4,12 +4,15 @@ import datetime as dt
 from dataclasses import replace
 from decimal import Decimal
 
+import pytest
+
 from market_risk.wavewarn.execution import execute_asset
-from market_risk.wavewarn.labels_zz import ZZEvent
+from market_risk.wavewarn.labels_zz import UnknownLabels, ZZEvent, build_unknown_labels
 from market_risk.wavewarn.loss import (
     LossParameters,
     asset_price_loss,
     daily_main_loss,
+    evaluated_asset_price_loss,
     full_exposure_events,
     noise_drawdown,
     switch_loss,
@@ -26,6 +29,42 @@ def test_noise_floor_exact_two_percent_boundary() -> None:
     assert noise_drawdown(Decimal("100"), Decimal("98.0001")) == 0
     assert noise_drawdown(Decimal("100"), Decimal("98.0000")) == 0
     assert noise_drawdown(Decimal("100"), Decimal("97.9999")) > 0
+
+
+def test_evaluated_loss_requires_asset_unknown_labels_and_zeroes_peak_tail() -> None:
+    days = _days(5)
+    closes = [Decimal(value) for value in ("100", "99", "101", "100", "99")]
+    params = LossParameters(Decimal(2), Decimal(1), Decimal("0.5"))
+    executions = execute_asset(days, ["绿"] * 5, closes, params.eta)
+    labels = build_unknown_labels({"SPX": ()}, days,
+                                  {"SPX": dict(zip(days, closes, strict=True))}, days[-1])
+    # 101 为第2天最高价，其后100、99均未跌满4%；第2、3个价格区间置零。
+    with pytest.raises(ValueError, match="缺少"):
+        evaluated_asset_price_loss(days, closes, executions, (), params, "SPX", None)
+    rows = evaluated_asset_price_loss(days, closes, executions, (), params, "SPX", labels)
+    assert [(row.price_loss, row.excluded_reason) for row in rows[2:]] == [
+        (Decimal(0), "尾段（寻峰）"), (Decimal(0), "尾段（寻峰）")]
+    # 窗口早于标签截止日只截取其内部分；晚于截止日严禁读取未标注区间。
+    assert len(evaluated_asset_price_loss(days[:4], closes[:4], executions[:4], (), params,
+                                          "SPX", labels)) == 3
+    with pytest.raises(ValueError, match="晚于 ZZ 标签截止日"):
+        evaluated_asset_price_loss((*days, days[-1] + dt.timedelta(days=1)),
+                                   (*closes, Decimal(98)),
+                                   (*executions, replace(executions[-1], date=days[-1] + dt.timedelta(days=1))),
+                                   (), params, "SPX", labels)
+
+
+def test_unknown_labels_cannot_omit_right_censored_tail() -> None:
+    days = _days(4)
+    closes = [Decimal(value) for value in ("100", "95", "90", "91")]
+    event = ZZEvent("SPX", days[0], days[1], days[2], None,
+                    Decimal(100), Decimal(90), True)
+    params = LossParameters(Decimal(2), Decimal(1), Decimal("0.5"))
+    executions = execute_asset(days, ["绿"] * 4, closes, params.eta)
+    # 原定义中暂定低点日2至期末前日2必须未知；空集合不得静默覆盖。
+    incomplete = UnknownLabels(days[-1], {"SPX": frozenset()}, {"SPX": {}})
+    with pytest.raises(ValueError, match="缺少原定义的右截尾"):
+        evaluated_asset_price_loss(days, closes, executions, (event,), params, "SPX", incomplete)
 
 
 def test_asset_loss_danger_and_excluded_other_asset_are_separate() -> None:
@@ -66,8 +105,15 @@ def test_switch_count_and_full_exposure_include_missing_price_intervals() -> Non
     # [高点,低点) 包含两段跨缺价区间，但系统实际暴露一直为1，仍触发满暴露罚项。
     assert full_exposure_events([event], days, green) == (event,)
     switched = execute_asset(days, ["绿", "红", "黄", "黄"], closes, params.eta)
-    # 绿→红、红→黄各一次；即使执行日缺价，系统切换仍单独计费。
-    assert switch_loss(switched, params.gamma) == 2 * params.gamma
+    # 绿→红发生在第2天，仍有后续区间，计γ；红→黄发生在窗口末日，
+    # 后面没有可评价的收益区间，按 B2 修订不计费：合计仅1×γ。
+    assert switch_loss(switched, params.gamma) == params.gamma
+    losses = {symbol: asset_price_loss(days, closes, switched, [event], params)
+              for symbol in ("SPX", "QQQ")}
+    detail = daily_main_loss(days, losses, switched,
+                             {"SPX": Decimal("0.5"), "QQQ": Decimal("0.5")}, params)
+    assert detail[-1].switch_cost == 0
+    assert detail[-1].terminal_switch_unbilled is True
 
 
 def test_w_a_excluded_asset_still_charges_switch_and_matches_signed_difference() -> None:

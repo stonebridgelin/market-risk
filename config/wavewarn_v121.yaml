@@ -1,12 +1,12 @@
 version: v1.2.1
 development_end: 2016-12-30
-nl_unknown_policy: conservative  # 待负责人确认；本任务指令的三值口径优先于规格第三节旧表述。
+nl_unknown_policy: three_valued
 
 business:
-  eta:
-  e_version:
-  kappa_d:
-  beta:
+  eta: "0.5"
+  e_version: E2
+  kappa_d: "2"
+  beta: "1"
 
 channel_selection:
   b_spx:

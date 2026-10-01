@@ -1,4 +1,4 @@
-"""v1.2.1 未确认业务参数的拒绝路径，只使用构造配置。"""
+"""v1.2.1 已登记业务参数与未确认分侧开关的拒绝路径。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from market_risk.wavewarn.config import load_wavewarn_config
 from market_risk.wavewarn.loss import configured_loss_settings
 
 
-def test_main_loss_refuses_unconfirmed_business_parameters() -> None:
+def test_confirmed_business_parameters_and_unconfirmed_side_switches() -> None:
     config = load_wavewarn_config(Path(__file__).resolve().parents[1] / "config/wavewarn_v121.yaml")
     # SPX 下跌4%与反弹5%各自从配置读取，不把两道门槛混成同一数值。
     assert config.zz_thresholds()["SPX"] == (Decimal("0.04"), Decimal("0.05"))
@@ -23,10 +23,11 @@ def test_main_loss_refuses_unconfirmed_business_parameters() -> None:
     assert (config.paired_parameters().short_block_length,
             config.paired_parameters().long_block_length,
             config.paired_parameters().event_padding) == (10, 40, 20)
-    with pytest.raises(ValueError, match="待负责人确认"):
-        config.require_business_parameters()
-    with pytest.raises(ValueError, match="待负责人确认"):
-        configured_loss_settings(config)
+    business = config.require_business_parameters()
+    # 负责人在看开发期结果前登记 0.5、E2、2:1；主损失仍须等 N 分侧开关确定。
+    assert (business.eta, business.e_version, business.kappa_d, business.beta) == (
+        Decimal("0.5"), "E2", Decimal(2), Decimal(1))
+    assert configured_loss_settings(config).parameters.gamma == Decimal("0.005")
     with pytest.raises(ValueError, match="须显式填写四侧开关"):
         config.require_channel_selection()
 
@@ -34,12 +35,12 @@ def test_main_loss_refuses_unconfirmed_business_parameters() -> None:
 def test_constructed_business_and_channel_values_validate_without_setting_real_config(tmp_path: Path) -> None:
     file = tmp_path / "wavewarn.yaml"
     file.write_text("""version: v1.2.1
-nl_unknown_policy: conservative
+nl_unknown_policy: three_valued
 business: {eta: '0.5', e_version: E2, kappa_d: '2', beta: '1'}
 channel_selection: {b_spx: true, dv_spx: false, b_qqq: false, dv_qqq: true}
 """, encoding="utf-8")
     config = load_wavewarn_config(file)
-    # 构造值2≥1>0且0≤0.5≤1；四侧开关均显式填写。它们不是项目实际参数选择。
+    # 构造值2≥1>0且0≤0.5≤1；四侧开关仅在临时配置显式填写，不落盘。
     assert config.require_business_parameters().e_version == "E2"
     selection = config.require_channel_selection()
     assert (selection.b_spx, selection.dv_spx, selection.b_qqq, selection.dv_qqq) == (

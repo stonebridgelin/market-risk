@@ -9,7 +9,7 @@ from decimal import Decimal
 
 from market_risk.wavewarn.config import WavewarnConfig
 from market_risk.wavewarn.execution import ExecutionDay
-from market_risk.wavewarn.labels_zz import ZZEvent, dangerous_interval, right_censored_unknown
+from market_risk.wavewarn.labels_zz import UnknownLabels, ZZEvent, dangerous_interval, right_censored_unknown
 
 
 @dataclass(frozen=True)
@@ -79,7 +79,8 @@ def noise_drawdown(reference_high: Decimal, close: Decimal, floor: Decimal = Dec
 
 def asset_price_loss(days: Sequence[dt.date], closes: Sequence[Decimal | None],
                      executions: Sequence[ExecutionDay], events: Sequence[ZZEvent],
-                     params: LossParameters) -> tuple[AssetLossDay, ...]:
+                     params: LossParameters, unknown_labels: UnknownLabels | None = None,
+                     symbol: str | None = None) -> tuple[AssetLossDay, ...]:
     """逐日处理结束日重置、危险区间、跨缺价及三项价格损失。"""
     if len(days) != len(closes) or len(days) != len(executions):
         raise ValueError("日期、收盘价与执行数量不一致")
@@ -95,6 +96,19 @@ def asset_price_loss(days: Sequence[dt.date], closes: Sequence[Decimal | None],
         unknown_dates.update(right_censored_unknown(event, days, days[-1]))
         if event.end_date is not None:
             end_dates.add(event.end_date)
+    unknown_reasons: Mapping[dt.date, str] = {}
+    if unknown_labels is not None:
+        if symbol is None or symbol not in unknown_labels.days_by_asset:
+            raise ValueError("传入未定标签时须指定已有的资产标的")
+        if days[-1] > unknown_labels.label_end:
+            raise ValueError("损失窗口末日晚于 ZZ 标签截止日")
+        declared = unknown_labels.days_by_asset[symbol]
+        if not unknown_dates.issubset(declared):
+            raise ValueError("未定集合缺少原定义的右截尾区间")
+        if not declared.issubset(unknown_labels.reasons_by_asset[symbol]):
+            raise ValueError("未定集合缺少逐日原因")
+        unknown_dates = set(declared)
+        unknown_reasons = unknown_labels.reasons_by_asset[symbol]
     high = closes[0]
     assert high is not None
     record = Decimal(0)
@@ -110,13 +124,17 @@ def asset_price_loss(days: Sequence[dt.date], closes: Sequence[Decimal | None],
                 # 恢复日先衔接回撤纪录，但跨缺价的跌幅不收费。
                 record = max(record, noise_drawdown(high, current, params.noise_floor))
         if current is None or following is None:
+            missing_reason = "跨缺价区间"
+            if day in unknown_dates:
+                missing_reason += "；" + unknown_reasons.get(day, "右截尾（寻底）")
             rows.append(AssetLossDay(day, days[index + 1], executions[index].exposure, None,
                                      None if day in unknown_dates else day in danger_dates,
-                                     Decimal(0), Decimal(0), Decimal(0), Decimal(0), "跨缺价区间"))
+                                     Decimal(0), Decimal(0), Decimal(0), Decimal(0), missing_reason))
             continue
         if day in unknown_dates:
             rows.append(AssetLossDay(day, days[index + 1], executions[index].exposure, None, None,
-                                     Decimal(0), Decimal(0), Decimal(0), Decimal(0), "右截尾后危险归属未知"))
+                                     Decimal(0), Decimal(0), Decimal(0), Decimal(0),
+                                     unknown_reasons.get(day, "右截尾（寻底）")))
             continue
         return_log = (following / current).ln()
         drawdown = noise_drawdown(high, following, params.noise_floor)
@@ -132,6 +150,16 @@ def asset_price_loss(days: Sequence[dt.date], closes: Sequence[Decimal | None],
     return tuple(rows)
 
 
+def evaluated_asset_price_loss(days: Sequence[dt.date], closes: Sequence[Decimal | None],
+                               executions: Sequence[ExecutionDay], events: Sequence[ZZEvent],
+                               params: LossParameters, symbol: str,
+                               unknown_labels: UnknownLabels | None) -> tuple[AssetLossDay, ...]:
+    """正式评价入口必须显式提供两资产按标签截止日生成的未定集合。"""
+    if unknown_labels is None:
+        raise ValueError("正式评价缺少按资产生成的尾段未定集合")
+    return asset_price_loss(days, closes, executions, events, params, unknown_labels, symbol)
+
+
 def weighted_price_loss(assets: Mapping[str, Sequence[AssetLossDay]],
                         weights: Mapping[str, Decimal]) -> Decimal:
     """资产分别计算后按固定权重相加；被排除资产日价格项为零。"""
@@ -142,8 +170,8 @@ def weighted_price_loss(assets: Mapping[str, Sequence[AssetLossDay]],
 
 
 def switch_loss(executions: Sequence[ExecutionDay], gamma: Decimal) -> Decimal:
-    """切换按系统执行状态计，与单一资产是否缺价无关。"""
-    return gamma * sum(row.switched for row in executions)
+    """只计其后区间仍在评价窗口内的执行切换；末日另列不计费。"""
+    return gamma * sum(row.switched for row in executions[:-1])
 
 
 def full_exposure_events(events: Sequence[ZZEvent], days: Sequence[dt.date],
@@ -172,6 +200,7 @@ class MainLossDay:
     opportunity_loss: Decimal
     switch_cost: Decimal
     full_exposure_cost: Decimal
+    terminal_switch_unbilled: bool = False
 
     @property
     def total(self) -> Decimal:
@@ -203,6 +232,8 @@ def daily_main_loss(days: Sequence[dt.date], assets: Mapping[str, Sequence[Asset
         drawdown = sum((weight * row.drawdown_loss for weight, row in price_rows), Decimal(0))
         opportunity = sum((weight * row.opportunity_loss for weight, row in price_rows), Decimal(0))
         result.append(MainLossDay(day, danger, drawdown, opportunity,
-                                  params.gamma if executions[index].switched else Decimal(0),
-                                  mu * penalty_by_date.get(day, 0)))
+                                  params.gamma if index < len(days) - 1 and executions[index].switched
+                                  else Decimal(0),
+                                  mu * penalty_by_date.get(day, 0),
+                                  index == len(days) - 1 and executions[index].switched))
     return tuple(result)

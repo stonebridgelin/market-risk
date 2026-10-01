@@ -1,8 +1,14 @@
 """冻结模型配对检验只在构造损失差上运行。"""
 
 import datetime as dt
+import hashlib
+import json
+import os
 from decimal import Decimal
+from itertools import islice
 from pathlib import Path
+
+import pytest
 
 from market_risk.wavewarn.config import load_wavewarn_config
 from market_risk.wavewarn.paired_test import (
@@ -11,6 +17,25 @@ from market_risk.wavewarn.paired_test import (
     stationary_bootstrap_indices,
     zero_around_event,
 )
+
+
+def test_stationary_bootstrap_s1_s4_first_ten_match_independent_reference() -> None:
+    configured = os.environ.get("MARKET_RISK_DESIGN_SAMPLES")
+    directory = (Path(configured) if configured else Path(__file__).resolve().parents[2]
+                 / "market-risk-design-samples/v1.2.1")
+    path = directory / "stationary_bootstrap_reference.json"
+    if not path.is_file():
+        pytest.fail(f"缺少独立平稳自助索引参考：{path}")
+    expected_hash = "a38a852dcda19c23a01ad10af60bf00f8f92927801c16b05ae5dfb02f4c72ffe"
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == expected_hash
+    reference = json.loads(path.read_text(encoding="utf-8"))
+    assert (reference["numpy_version"], reference["bit_generator"]) == ("2.4.4", "PCG64")
+    assert [case["id"] for case in reference["cases"]] == ["S1", "S2", "S3", "S4"]
+    for case in reference["cases"]:
+        actual = list(islice(stationary_bootstrap_indices(case["n"], case["b"], 10,
+                                                          case["seed"]), 10))
+        # 此表由产品经理独立实现核对；逐条逐索引比较，不能由被测函数回写期望。
+        assert actual == [tuple(row) for row in case["first_10_sequences"]]
 
 
 def test_stationary_bootstrap_one_date_has_deterministic_indices() -> None:

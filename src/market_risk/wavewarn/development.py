@@ -8,6 +8,7 @@ from pathlib import Path
 
 from market_risk.wavewarn.config import load_wavewarn_config
 from market_risk.wavewarn.diagnostics import (
+    write_anchor_126_audit,
     write_convergence_diagnostics,
     write_development_diagnostics,
     write_development_missing_audit,
@@ -44,6 +45,7 @@ def run_development_diagnostics(root: Path) -> DevelopmentSummary:
     qqq_q20 = asset_features(inputs.days, source["QQQ"], source["NDTW"], candidates.q[1], fixed)
     output = root / "reports/research/wavewarn_v121"
     output.mkdir(parents=True, exist_ok=True)
+    write_anchor_126_audit(inputs, output / "anchor_126_audit.csv", fixed, candidates)
     t0, state_count = write_development_diagnostics(inputs, spx_q10, qqq_q10,
                                                     output / "development_state_diagnostics.csv", fixed, candidates)
     _, channel_count = write_independent_channel_diagnostics(inputs, spx_q10, qqq_q10, spx_q20, qqq_q20,
