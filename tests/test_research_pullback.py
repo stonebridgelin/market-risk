@@ -11,10 +11,11 @@ from pathlib import Path
 import pytest
 
 from market_risk import calendar as market_calendar
+from market_risk.research import io as research_io
 from market_risk.research.analysis import _distribution, _wilson_rows
 from market_risk.research.features import FeatureEngine, high_position_days
 from market_risk.research.groups import Candidate, classify_candidates, observations
-from market_risk.research.io import ResearchInputs, _rows, load_inputs
+from market_risk.research.io import ResearchInputs, _rows, load_development_feature_inputs, load_inputs
 from market_risk.research.pullback import DangerPeriod, Episode, build_danger_periods, lead_lag, rule_performance
 from market_risk.research.statistics import auc, bh_adjust, bootstrap_auc, mann_whitney_p, wilson
 from market_risk.storage.paths import StoragePaths
@@ -262,9 +263,17 @@ def test_prestart_not_candidate_and_future_values_do_not_change_features(tmp_pat
     assert list(_rows(path)) == [{"date": "2022-12-30", "value": "1"}]
 
 
-def test_future_extremes_leave_populated_formal_features_unchanged() -> None:
-    inputs = load_inputs(StoragePaths(Path(__file__).resolve().parents[1]),
-                         "run_20260928T112013Z_2cc8969")
+def test_future_extremes_leave_populated_formal_features_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 只读开发期截止日（2016-12-30）以前的评分、指标与序列：读取函数在其后的第一行之前停止。
+    # 研究模块的开发期截止常量是日历年末 2016-12-31（FRED 的 BAMLH0A0HYM2 有一条 2016-12-31 的观测），
+    # 这里把截止日收紧到最后一个交易日 2016-12-30，使任何晚于它的行都不被读取。
+    # 测试意图不变：在正式数据的 2015-10-30 上，把次一交易日的全部输入换成极端值，当日特征不变。
+    monkeypatch.setattr(research_io, "DEVELOPMENT_END", dt.date(2016, 12, 30))
+    inputs = load_development_feature_inputs(StoragePaths(Path(__file__).resolve().parents[1]),
+                                             "run_20260928T112013Z_2cc8969")
+    assert max(inputs.days) <= dt.date(2016, 12, 30)
+    assert all(max(series, default=dt.date.min) <= dt.date(2016, 12, 30)
+               for source in (inputs.market, inputs.tradingview) for series in source.values())
     day = dt.date(2015, 10, 30)
     future = dt.date(2015, 11, 2)
     original = FeatureEngine.create(inputs).values(day)
