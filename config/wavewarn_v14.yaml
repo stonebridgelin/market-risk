@@ -1,0 +1,45 @@
+# 波段预警 v1.4 修订登记的新增项（docs/research/波段预警研究规格_v1.4_修订登记.md，负责人 2026-10-01 确认）。
+# 其余参数全部沿用 base 指向的 v1.2.1 配置；v1.2.1、v1.3 的配置及其校验不改。
+version: v1.4
+base: wavewarn_v121.yaml
+
+# 第四节 候选网格：只有 K 与 θ_P，登记顺序先 K 后 θ_P，共 9 组
+candidates:
+  k: [3, 5, 10]
+  theta_p: ["0.015", "0.02", "0.025"]
+
+# 第二节 趋势层 MR：SPX 收盘价低于其均线时激活（红），不低于时退出，无滞后区
+mr:
+  symbol: SPX
+  window: 200
+
+# 第三节 解除规则 F：只看当日，每天最多降一级
+release_rule: F
+
+# 第四节 可行条件（开发期）
+feasibility:
+  non_green_share_max: "0.60"       # 亮灯上限：非绿占比
+  green_delay_median_max: 8         # 转绿延迟上限（交易日）：类别②事件 g − Tr 的中位数，SPX、QQQ 分别成立
+
+# 第四节 终止规则三级：按顺序取第一个非空的候选范围，在其中取择时得分 T 最小者
+selection_tiers:
+  - conditions: [non_green_share, green_delay_spx, green_delay_qqq]
+    note: ""
+  - conditions: [non_green_share]
+    note: 转绿要求未达标
+  - conditions: []
+    note: 亮灯上限与转绿要求均未达标
+
+# 第六节 描述性对照的中位设定：P1·E2、N′·X2、N·E2
+reference_median:
+  k: 5
+  theta_p: "0.02"
+  q: "0.10"
+
+# 第六节 补充历史（v1.4 纯价格版：MR + P + PR）与两次熊市
+extended_history:
+  start: 1999-03-10
+  end: 2009-09-30
+  bear_markets:
+    - [2000-03-24, 2002-10-09]
+    - [2007-10-09, 2009-03-09]
