@@ -624,6 +624,26 @@ def wavewarn_evaluate_development() -> None:
                f"t0={run.t0}，τ={run.tau}，j₀={run.first_loss_day}。输出目录：{run.output}")
 
 
+@wavewarn_app.command("evaluate-v13-development")
+def wavewarn_evaluate_v13_development() -> None:
+    """运行 v1.3 开发期工程评价；不生成锁定记录或验证期结果。"""
+    run = _call(services.wavewarn_evaluate_v13_development, _ctx())
+    typer.echo(f"已写入 v1.3 开发期工程评价（未锁定）：{run.settings} 个设定；"
+               f"t0={run.t0}，τ={run.tau}，j₀={run.first_loss_day}。")
+    typer.echo(f"选定退出版本：{run.exit_version or '无'}；P1：{run.selected_p1 or '无'}；"
+               f"{'N′（后备）' if run.n_prime_used else 'N'}：{run.selected_n or '无'}。")
+    if run.stopped:
+        typer.echo(f"选择程序停止：{run.stopped}。")
+    typer.echo(f"输出目录：{run.output}")
+
+
+@wavewarn_app.command("extended-history")
+def wavewarn_extended_history() -> None:
+    """运行 v1.3 的补充历史（固定延迟校准与 P0 稳健性）；只作描述，不参与选参。"""
+    run = _call(services.wavewarn_extended_history, _ctx())
+    typer.echo(f"已写入补充历史：t0′={run.t0}，τ′={run.tau}，j₀′={run.first_loss_day}。输出目录：{run.output}")
+
+
 @backtest_app.command("zigzag-check")
 def backtest_zigzag_check(
     symbol: Annotated[str, typer.Option("--symbol", help="SPX 或 QQQ")],

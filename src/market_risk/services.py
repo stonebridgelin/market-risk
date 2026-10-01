@@ -111,6 +111,26 @@ def wavewarn_evaluate_development(ctx: Context) -> Any:
         raise ServiceError(str(exc)) from exc
 
 
+def wavewarn_evaluate_v13_development(ctx: Context) -> Any:
+    """运行 v1.3 开发期工程评价（择时得分、可行条件、选择程序）；不锁定，不运行验证期。"""
+    from market_risk.wavewarn.evaluation_v13_run import run_v13_development
+
+    try:
+        return run_v13_development(ctx.paths.root)
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def wavewarn_extended_history(ctx: Context) -> Any:
+    """运行 v1.3 的补充历史（固定延迟校准与 P0 稳健性，2009-09-30 及以前）；只作描述。"""
+    from market_risk.wavewarn.extended_history_run import run_extended_history
+
+    try:
+        return run_extended_history(ctx.paths.root)
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
 # ---------------------------------------------------------------------------
 # 日期与样本
 # ---------------------------------------------------------------------------

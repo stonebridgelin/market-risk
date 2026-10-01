@@ -18,9 +18,10 @@ from market_risk.wavewarn.channels import (
 )
 from market_risk.wavewarn.config import ChannelSelection, FixedParameters
 from market_risk.wavewarn.features import AssetFeatures, rolling_high, vix_term_ratio
-from market_risk.wavewarn.state_machine import ReadyInputs, SystemMemory, step_system
+from market_risk.wavewarn.state_machine import ExitVersion, ReadyInputs, SystemMemory, step_system
 
-Scenario = Literal["P0", "P1-E1", "P1-E2", "P1-E3", "N-E1", "N-E2", "N-E3"]
+Scenario = Literal["P0", "P1-E1", "P1-E2", "P1-E3", "P1-X1", "P1-X2",
+                   "N-E1", "N-E2", "N-E3", "N-X1", "N-X2"]
 
 
 @dataclass(frozen=True)
@@ -106,7 +107,7 @@ def diagnostic_sequence(days: Sequence[dt.date], spx: Sequence[AssetFeatures], q
     states = {name: "armed" for name in predicates}
     memory = SystemMemory()
     result = [DiagnosticRow(t0, scenario, k, theta_p, "绿", "完整", (), "t0 初始快照")]
-    version: Literal["P0", "E1", "E2", "E3"] = "P0" if scenario == "P0" else scenario[-2:]
+    version: ExitVersion = "P0" if scenario == "P0" else scenario[-2:]  # type: ignore[assignment]
     for index in range(start + 1, len(days)):
         channel_rows: dict[str, tuple[Literal["黄", "红"], ChannelDay]] = {}
         for name, series in predicates.items():
@@ -150,7 +151,7 @@ def n_diagnostic_sequence(days: Sequence[dt.date], spx: Sequence[AssetFeatures],
                           qqq: Sequence[AssetFeatures], ratios: Sequence[Decimal | None],
                           t0: dt.date, theta_p: Decimal, k: int,
                           selection: ChannelSelection,
-                          e_version: Literal["E1", "E2", "E3"],
+                          e_version: Literal["E1", "E2", "E3", "X1", "X2"],
                           fixed: FixedParameters | None = None) -> tuple[DiagnosticRow, ...]:
     """仅在四侧 B/DV 开关显式为布尔值后，组合 N 的完整通道与灯色。"""
     if not (len(days) == len(spx) == len(qqq) == len(ratios)):

@@ -221,7 +221,7 @@ def calibration_tables(days: Sequence[dt.date], closes: Mapping[str, Mapping[dt.
                              actual_rows, actual_summary)
 
 
-def _event_section(event_rows: Sequence[Row]) -> list[str]:
+def event_section(event_rows: Sequence[Row]) -> list[str]:
     lines = ["## 事件结束日与下跌幅度", "",
              "| 资产 | 指标 | n | 最小 | P25 | 中位 | P75 | 最大 |", "|---|---|---:|---:|---:|---:|---:|---:|"]
     for symbol in ("SPX", "QQQ"):
@@ -232,7 +232,7 @@ def _event_section(event_rows: Sequence[Row]) -> list[str]:
     return lines
 
 
-def _fixed_section(fixed_summary: Sequence[Row]) -> list[str]:
+def fixed_section(fixed_summary: Sequence[Row]) -> list[str]:
     lines = ["", "## 固定延迟参照", "", "Tr+m 为执行日，m 仅取 0/1/2/3/5/8/10/15 个交易日。"
              "先以同资产下一事件 T0 判③，再以开发期末判后续窗口不足。"
              "这不是候选规则，不改变任何登记。"
@@ -275,5 +275,5 @@ def report_lines(tau_e: dt.date, included: Mapping[str, int], tables: Calibratio
              f"统一 τ_E：{tau_e}。SPX 纳入 {included['SPX']} 件；QQQ 纳入 {included['QQQ']} 件。", "",
              "R 与事件下跌幅度均为比例（1=100%）。类别③在保守分布中仅作正无穷排序，"
              "不是实际 R；线性分位数插值涉及③时记“超限”。后续窗口不足不进入分布。", ""]
-    return [*lines, *_event_section(tables.event_rows), *_fixed_section(tables.fixed_summary),
+    return [*lines, *event_section(tables.event_rows), *fixed_section(tables.fixed_summary),
             *_actual_section(tables.actual_summary)]

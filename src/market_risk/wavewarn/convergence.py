@@ -9,7 +9,14 @@ from typing import Literal
 
 from market_risk.wavewarn.channels import ChannelDay, ChannelPredicate, ChannelStatus, update_channel
 from market_risk.wavewarn.config import FixedParameters
-from market_risk.wavewarn.state_machine import Level, ReadyInputs, SystemMemory, step_system
+from market_risk.wavewarn.state_machine import (
+    ExitVersion,
+    Level,
+    ReadyInputs,
+    SystemMemory,
+    is_price_channel,
+    step_system,
+)
 
 
 @dataclass(frozen=True)
@@ -63,7 +70,7 @@ def _quiet_count(start: int, names: Sequence[str],
 
 def system_convergence(days: Sequence[dt.date], channel_inputs: Mapping[str, tuple[Level, Sequence[ChannelPredicate]]],
                        ready_inputs: Sequence[ReadyInputs], t0: dt.date, k: int,
-                       e_version: Literal["P0", "E1", "E2", "E3"],
+                       e_version: ExitVersion,
                        fixed: FixedParameters | None = None) -> SystemConvergence:
     """全部通道收敛五个交易日后，以三种系统灯色快照检查收敛。"""
     if len(ready_inputs) != len(days):
@@ -86,9 +93,11 @@ def system_convergence(days: Sequence[dt.date], channel_inputs: Mapping[str, tup
     all_names = list(channel_rows)
     quiet_red = _quiet_count(local_start, red_names, channel_rows)
     quiet_all = _quiet_count(local_start, all_names, channel_rows)
+    quiet_nonprice = _quiet_count(local_start, [name for name in all_names if not is_price_channel(name)],
+                                  channel_rows)
     traces: dict[Literal["绿", "黄", "红"], tuple[str, ...]] = {}
     for initial in ("绿", "黄", "红"):
-        memory = SystemMemory(initial, quiet_red, quiet_all)
+        memory = SystemMemory(initial, quiet_red, quiet_all, quiet_nonprice)
         lights = [initial]
         for index in range(start + 1, len(days)):
             local = index - t0_index

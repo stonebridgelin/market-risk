@@ -56,6 +56,7 @@ class Candidate:
     theta_p: Decimal
     q: Decimal | None
     order: int
+    exit_version: Literal["E2", "X1", "X2"] = "E2"      # P0 不使用；v1.2.1 只有 E2，v1.3 另有 X1、X2
 
     @property
     def key(self) -> str:
@@ -311,7 +312,7 @@ def _validate_development_config(config: WavewarnConfig) -> ChannelSelection:
     return selection
 
 
-def _candidate_states(candidate: Candidate, config: WavewarnConfig, inputs: DevelopmentInputs,
+def candidate_states(candidate: Candidate, config: WavewarnConfig, inputs: DevelopmentInputs,
                       features: Mapping[Decimal, tuple[Sequence[AssetFeatures], Sequence[AssetFeatures]]],
                       ratios: Sequence[Decimal | None], t0: dt.date,
                       selection: ChannelSelection) -> CandidateStates:
@@ -319,19 +320,18 @@ def _candidate_states(candidate: Candidate, config: WavewarnConfig, inputs: Deve
     fixed = config.fixed_parameters()
     sets = config.candidate_sets()
     spx, qqq = features[candidate.q if candidate.q is not None else sets.q[0]]
+    version = "P0" if candidate.model == "P0" else candidate.exit_version
     if candidate.model in ("P0", "P1"):
-        scenario = "P0" if candidate.model == "P0" else "P1-E2"
+        scenario = "P0" if candidate.model == "P0" else f"P1-{version}"
         channels = _price_channels(spx, qqq, candidate.theta_p, candidate.k)
         state_rows = diagnostic_sequence(inputs.days, spx, qqq, t0, scenario,  # type: ignore[arg-type]
                                          candidate.theta_p, candidate.k, fixed)
-        version = "P0" if candidate.model == "P0" else "E2"
     else:
-        scenario = "N-E2"
+        scenario = f"N-{version}"
         selected = selection if candidate.model == "N" else ChannelSelection(False, False, False, False)
         channels = n_channel_inputs(spx, qqq, ratios, candidate.theta_p, candidate.k, selected, fixed)
-        state_rows = n_diagnostic_sequence(inputs.days, spx, qqq, ratios, t0,
-                                           candidate.theta_p, candidate.k, selected, "E2", fixed)
-        version = "E2"
+        state_rows = n_diagnostic_sequence(inputs.days, spx, qqq, ratios, t0, candidate.theta_p,
+                                           candidate.k, selected, version, fixed)  # type: ignore[arg-type]
     ready = ready_inputs(inputs.days, spx, qqq, scenario, fixed)  # type: ignore[arg-type]
     converged = system_convergence(inputs.days, channels, ready, t0, candidate.k,  # type: ignore[arg-type]
                                    version, fixed)  # type: ignore[arg-type]
@@ -341,7 +341,13 @@ def _candidate_states(candidate: Candidate, config: WavewarnConfig, inputs: Deve
 
 
 def prepare_from_inputs(config: WavewarnConfig, inputs: DevelopmentInputs) -> PreparedEvaluation:
-    """开发期序列已在边界截断；τ 与 j₀ 取全部 45 组（含去 B/DV 分解）的系统收敛日最大值。"""
+    """v1.2.1：τ 与 j₀ 取全部 45 组（含去 B/DV 分解）的系统收敛日最大值；退出版本只有 E2。"""
+    return prepare_grid(config, inputs, candidate_grid(config))
+
+
+def prepare_grid(config: WavewarnConfig, inputs: DevelopmentInputs,
+                 grid: Sequence[Candidate]) -> PreparedEvaluation:
+    """开发期序列已在边界截断；τ 与 j₀ 取 grid 中全部设定的系统收敛日最大值。"""
     selection = _validate_development_config(config)
     fixed = config.fixed_parameters()
     sets = config.candidate_sets()
@@ -353,8 +359,8 @@ def prepare_from_inputs(config: WavewarnConfig, inputs: DevelopmentInputs) -> Pr
                             inputs.series["VIX"], inputs.series["VIX3M"], fixed)
     ratios = tuple(vix_term_ratio(inputs.series["VIX"].get(day), inputs.series["VIX3M"].get(day))
                    for day in inputs.days)
-    rows = tuple(_candidate_states(candidate, config, inputs, features, ratios, t0, selection)
-                 for candidate in candidate_grid(config))
+    rows = tuple(candidate_states(candidate, config, inputs, features, ratios, t0, selection)
+                 for candidate in grid)
     tau = loss_start(inputs.days, t0, [item.convergence_date for item in rows], fixed)
     first_loss_day = first_loss_interval(inputs.days, tau, [item.convergence_date for item in rows])
     return PreparedEvaluation(config, inputs, t0, tau, first_loss_day, rows)
@@ -393,8 +399,10 @@ def axis_loss(prepared: PreparedEvaluation, executions: Mapping[str, Sequence[Ex
         closes = tuple(prepared.inputs.series[symbol].get(day) for day in axis)
         asset_losses[symbol] = evaluated_asset_price_loss(
             axis, closes, executions[symbol], events[symbol], settings.parameters, symbol, unknown)
+        # 低点在日期轴之后的事件（只出现在补充历史的窗口右端）危险区间未走完，与右截尾一样不判定。
         complete = [event for event in events[symbol]
-                    if event.peak_date >= prepared.first_loss_day and not event.right_censored]
+                    if event.peak_date >= prepared.first_loss_day and not event.right_censored
+                    and event.trough_date <= axis[-1]]
         own = full_exposure_events(complete, axis, executions[symbol])
         triggered.extend(own)
         miss[symbol] = {}
