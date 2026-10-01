@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
@@ -65,13 +66,13 @@ class V14Result:
         return setting_key(self.candidate)
 
 
-def exit_metrics(prepared: PreparedEvaluation, states: CandidateStates,
-                 events: Mapping[str, Sequence[ZZEvent]]) -> tuple[dict[str, AssetRebound], dict[str, GreenDelay]]:
-    """纳入门槛同 v1.3：高点 P 不早于统一 τ 的已确认事件。R 与转绿延迟来自同一批逐事件结果。"""
+def exit_metrics(prepared: PreparedEvaluation, states: CandidateStates, events: Mapping[str, Sequence[ZZEvent]],
+                 floor: dt.date) -> tuple[dict[str, AssetRebound], dict[str, GreenDelay]]:
+    """纳入高点 P 不早于 floor 的已确认事件（开发期 floor=τ，同 v1.3）。R 与转绿延迟来自同一批逐事件结果。"""
     rebounds: dict[str, AssetRebound] = {}
     delays: dict[str, GreenDelay] = {}
     for symbol in SYMBOLS:
-        costs = n_exit_costs(prepared, states, symbol, events[symbol], prepared.tau)
+        costs = n_exit_costs(prepared, states, symbol, events[symbol], floor)
         rebounds[symbol] = asset_rebound(symbol, costs)
         delays[symbol] = green_delay(symbol, prepared.inputs.days, costs)
     return rebounds, delays
@@ -81,7 +82,7 @@ def v14_result(prepared: PreparedEvaluation, states: CandidateStates, evaluated:
                events: Mapping[str, Sequence[ZZEvent]], eta: Decimal, green_loss: Decimal, red_loss: Decimal,
                limits: V14Limits) -> V14Result:
     timing = timing_result(evaluated, eta, green_loss, red_loss)
-    rebounds, delays = exit_metrics(prepared, states, events)
+    rebounds, delays = exit_metrics(prepared, states, events, prepared.tau)
     return V14Result(states.candidate, model_summary(states, evaluated), timing, rebounds, delays,
                      condition_flags(timing.non_green_share, delays, limits))
 
