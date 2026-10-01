@@ -1,0 +1,11 @@
+{
+  "name": "B",
+  "worktree": "C:\\Users\\stone\\PycharmProjects\\market-risk-wt\\B",
+  "base_tag": "v1.4-asrun",
+  "base_commit": "a0a8ec041f5923d3483c77471691e87ebbf2ac89",
+  "patches": [],
+  "code_tree": "5239b960d5af979db279c0565ed35306370c832b",
+  "changed_files": [],
+  "python": "C:\\Users\\stone\\PycharmProjects\\market-risk\\.venv\\Scripts\\python.exe",
+  "ndtw_sha256": "691CEBFC92F368E2C5CC8A80E1A79BB0820EE84641BC13FDF4B1A6C7335DB4C3"
+}

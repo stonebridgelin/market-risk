@@ -1,0 +1,18 @@
+{
+  "name": "B_fBW",
+  "worktree": "C:\\Users\\stone\\PycharmProjects\\market-risk-wt\\B_fBW",
+  "base_tag": "v1.4-asrun",
+  "base_commit": "a0a8ec041f5923d3483c77471691e87ebbf2ac89",
+  "patches": [
+    {
+      "file": "patches/f_BW.patch",
+      "sha256": "0A9479418504AEF3776EF5D770D93D139403A90B3AFFEA3FE0C7B65186A8CFE9"
+    }
+  ],
+  "code_tree": "c88614a503c73f33f94da3e08b54ecbe4747716d",
+  "changed_files": [
+    "src/market_risk/wavewarn/channels.py"
+  ],
+  "python": "C:\\Users\\stone\\PycharmProjects\\market-risk\\.venv\\Scripts\\python.exe",
+  "ndtw_sha256": "691CEBFC92F368E2C5CC8A80E1A79BB0820EE84641BC13FDF4B1A6C7335DB4C3"
+}

@@ -1,4 +1,4 @@
-# 单项与合并归因：从标签 v1.4-asrun 出发构造一个版本并运行。
+﻿# 单项与合并归因：从标签 v1.4-asrun 出发构造一个版本并运行。
 # 用法（在主仓库根目录）：
 #   powershell -File docs\audit\attribution\build_version.ps1 -Name B
 #   powershell -File docs\audit\attribution\build_version.ps1 -Name B_fBW -Patches f_BW.patch
@@ -22,19 +22,19 @@ if (Test-Path $wt) { throw "工作目录已存在：$wt" }
 
 # 1. 从标签检出独立工作目录（不做换行转换，补丁按提交内容逐字节套用）
 & $Git -c core.autocrlf=false worktree add --detach $wt $Base | Out-Null
-& $Git -C $wt config --worktree core.autocrlf false 2>$null
+$Patches = @($Patches | ForEach-Object { $_ -split "," } | Where-Object { $_ })   # -File 调用时逗号分隔的列表是一个字符串
 $applied = @()
 foreach ($patch in $Patches) {
     $file = Join-Path $main "patches\$patch"
-    & $Git -C $wt apply $file
+    & $Git -C $wt -c core.autocrlf=false apply $file
     if ($LASTEXITCODE -ne 0) { throw "补丁未能套用：$patch" }
     $applied += [ordered]@{ file = "patches/$patch"; sha256 = (Get-FileHash $file -Algorithm SHA256).Hash }
 }
 
 # 2. 代码树哈希（套用补丁之后、运行之前的完整工作树）
-& $Git -C $wt add -A
-$tree = (& $Git -C $wt write-tree).Trim()
-$changed = @(& $Git -C $wt diff --cached --name-only $Base)
+& $Git -C $wt -c core.autocrlf=false add -A
+$tree = (& $Git -C $wt -c core.autocrlf=false write-tree).Trim()
+$changed = @(& $Git -C $wt -c core.autocrlf=false -c core.quotepath=false diff --cached --name-only $Base)
 
 # 3. 未入库的输入：NDTW 由原始导出文件整理而成，不在 git 中；各版本用主仓库的同一份文件
 $ndtw = "data\processed\tradingview\NDTW.csv"
