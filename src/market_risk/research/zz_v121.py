@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import csv
 import datetime as dt
 from collections import Counter
 from dataclasses import dataclass, replace
@@ -12,7 +11,7 @@ from pathlib import Path
 from market_risk.research.analysis import RUN_ID, _candidate_rows, _feature_stats, _observation_rows, _write_csv
 from market_risk.research.features import FeatureEngine
 from market_risk.research.groups import Observation, classify_candidates, observations
-from market_risk.research.io import ResearchInputs, load_development_feature_inputs
+from market_risk.research.io import ResearchInputs, _label_rows, load_development_feature_inputs
 from market_risk.research.pullback import START, DangerPeriod, Episode, build_danger_periods
 from market_risk.research.quality import feature_quality
 from market_risk.research.statistics import auc, direction
@@ -47,29 +46,23 @@ class ZZStudyResult:
 def _read_episodes(path: Path) -> tuple[Episode, ...]:
     """只读已生成的开发期 ZZ 研究标签，不导入 wavewarn 代码。"""
     result = []
-    with path.open(encoding="utf-8-sig", newline="") as file:
-        for row in csv.DictReader(file):
-            peak = dt.date.fromisoformat(row["peak_date"])
-            trough = dt.date.fromisoformat(row["trough_date"])
-            if peak > ZZ_LABEL_END or trough > ZZ_LABEL_END:
-                raise ValueError("ZZ 研究标签越过开发期截止日")
-            if trough >= START:
-                result.append(Episode(row["symbol"], peak, trough, Decimal(row["peak_close"])))
+    for row in _label_rows(path, ("peak_date", "t0_date", "trough_date", "end_date"), ZZ_LABEL_END):
+        peak = dt.date.fromisoformat(row["peak_date"])
+        trough = dt.date.fromisoformat(row["trough_date"])
+        if trough >= START:
+            result.append(Episode(row["symbol"], peak, trough, Decimal(row["peak_close"])))
     return tuple(result)
 
 
 def _read_unknown(path: Path) -> frozenset[dt.date]:
     """两资产任一危险归属未定即从候选比较中排除。"""
     days: set[dt.date] = set()
-    with path.open(encoding="utf-8-sig", newline="") as file:
-        for row in csv.DictReader(file):
-            if row.get("label_end") != ZZ_LABEL_END.isoformat():
-                raise ValueError("尾段未定清单的 ZZ 标签截止日与开发期不一致")
-            day = dt.date.fromisoformat(row["date"])
-            if day > ZZ_LABEL_END:
-                raise ValueError("尾段未定清单越过开发期截止日")
-            if day >= START:
-                days.add(day)
+    for row in _label_rows(path, ("date", "label_end"), ZZ_LABEL_END):
+        if row.get("label_end") != ZZ_LABEL_END.isoformat():
+            raise ValueError("尾段未定清单的 ZZ 标签截止日与开发期不一致")
+        day = dt.date.fromisoformat(row["date"])
+        if day >= START:
+            days.add(day)
     return frozenset(days)
 
 

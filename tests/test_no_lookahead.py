@@ -198,6 +198,8 @@ def test_wavewarn_and_original_research_do_not_import_each_other_transitively():
     import sys
 
     for imported, forbidden in (("market_risk.wavewarn.development", "market_risk.research"),
+                                ("market_risk.wavewarn.evaluation_run", "market_risk.research"),
+                                ("market_risk.wavewarn.calibration", "market_risk.research"),
                                 ("market_risk.research.analysis", "market_risk.wavewarn"),
                                 ("market_risk.research.zz_v121", "market_risk.wavewarn")):
         code = ("import importlib, json, sys\n"

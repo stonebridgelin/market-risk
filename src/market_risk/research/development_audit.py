@@ -32,15 +32,16 @@ class DevelopmentAuditResult:
 
 
 def _read_dev_csv(path: Path, field: str) -> list[dict[str, str]]:
+    """分组派生文件不假设排序；全部日期列必须留在开发期。"""
+    date_fields = ("dates", "period_start", "top_first") if field == "dates" else ("date", "target_starts")
+    rows = []
     with path.open(encoding="utf-8-sig", newline="") as file:
-        rows = list(csv.DictReader(file))
-    for row in rows:
-        if field == "dates":
-            dates = (dt.date.fromisoformat(value) for value in row[field].split("|") if value)
-        else:
-            dates = (dt.date.fromisoformat(row[field]),)
-        if any(day > DEVELOPMENT_END for day in dates):
-            raise ValueError(f"开发期补充审计拒绝读取验证期观测：{path.name}")
+        for row in csv.DictReader(file):
+            for name in date_fields:
+                for value in row.get(name, "").split("|"):
+                    if value and dt.date.fromisoformat(value) > DEVELOPMENT_END:
+                        raise ValueError(f"开发期补充审计拒绝读取验证期观测：{path.name} / {name}")
+            rows.append(row)
     return rows
 
 

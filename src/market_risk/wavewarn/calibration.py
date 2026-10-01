@@ -272,6 +272,3 @@ def run_exit_calibration(root: Path) -> Path:
     report.write_text("\n".join(lines), encoding="utf-8")
     return report
 
-
-if __name__ == "__main__":
-    print(run_exit_calibration(Path.cwd()))

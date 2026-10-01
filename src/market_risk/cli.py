@@ -31,10 +31,11 @@ data_app = typer.Typer(help="市场数据集 data/market/（评分输入）")
 db_app = typer.Typer(help="数据库：SQL 导出、MySQL 兼容性验证")
 backtest_app = typer.Typer(help="阶段6 逐日历史回测（docs/STORAGE.md 2.3）")
 research_app = typer.Typer(help="独立研究与评估（不参与评分）")
+wavewarn_app = typer.Typer(help="v1.2.1 波段预警研究（仅开发期工程评价）")
 for sub, name in ((tv_app, "tv"), (official_app, "official"), (material_app, "material"),
                   (breadth_app, "breadth"), (outcome_app, "outcome"), (audit_app, "audit"),
                   (data_app, "data"), (db_app, "db"), (backtest_app, "backtest"),
-                  (research_app, "research")):
+                  (research_app, "research"), (wavewarn_app, "wavewarn")):
     app.add_typer(sub, name=name)
 
 MATERIAL_TYPES_HELP = ("tiger_ai_background", "chatgpt_response", "claude_review", "notes", "screenshot", "other")
@@ -606,6 +607,21 @@ def research_zz_v121_sides() -> None:
     """运行 ZZ v1.2.1 开发期 B、DV 分侧前瞻研究。"""
     result = _call(services.research_zz_v121_sides, _ctx())
     typer.echo(f"已写入 {result.report_path}；ZZ 危险时段 {result.danger_periods} 个。")
+
+
+@wavewarn_app.command("calibrate-exit-development")
+def wavewarn_calibrate_exit_development() -> None:
+    """生成开发期 E 退出代价校准；不用于选择参数。"""
+    path = _call(services.wavewarn_calibrate_exit_development, _ctx())
+    typer.echo(f"已写入 {path}")
+
+
+@wavewarn_app.command("evaluate-development")
+def wavewarn_evaluate_development() -> None:
+    """运行开发期 E2 工程评价；不生成锁定记录或验证期结果。"""
+    prepared, summaries = _call(services.wavewarn_evaluate_development, _ctx())
+    typer.echo(f"已写入开发期工程评价：{len(summaries)} 个设定；"
+               f"t0={prepared.t0}，τ={prepared.tau}，j₀={prepared.first_loss_day}。")
 
 
 @backtest_app.command("zigzag-check")

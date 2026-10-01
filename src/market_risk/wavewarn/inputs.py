@@ -4,20 +4,13 @@ from __future__ import annotations
 
 import csv
 import datetime as dt
-from collections.abc import Mapping
-from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 
 from market_risk.calendar import stock_trading_days
 from market_risk.precision import published_price
 from market_risk.wavewarn.data import DEVELOPMENT_END
-
-
-@dataclass(frozen=True)
-class DevelopmentInputs:
-    days: tuple[dt.date, ...]
-    series: Mapping[str, Mapping[dt.date, Decimal]]
+from market_risk.wavewarn.input_model import DevelopmentInputs
 
 
 def development_series(path: Path, field: str, end: dt.date = DEVELOPMENT_END,

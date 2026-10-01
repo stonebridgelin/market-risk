@@ -256,15 +256,14 @@ def write_independent_channel_diagnostics(inputs: DevelopmentInputs,
     return t0, count
 
 
-def n_diagnostic_sequence(days: Sequence[dt.date], spx: Sequence[AssetFeatures],
-                          qqq: Sequence[AssetFeatures], ratios: Sequence[Decimal | None],
-                          t0: dt.date, theta_p: Decimal, k: int,
-                          selection: ChannelSelection,
-                          e_version: Literal["E1", "E2", "E3"],
-                          fixed: FixedParameters | None = None) -> tuple[DiagnosticRow, ...]:
-    """仅在四侧 B/DV 开关显式为布尔值后，组合 N 的完整通道与灯色。"""
-    if not (len(days) == len(spx) == len(qqq) == len(ratios)):
-        raise ValueError("N 诊断输入时间轴不一致")
+def n_channel_inputs(spx: Sequence[AssetFeatures], qqq: Sequence[AssetFeatures],
+                     ratios: Sequence[Decimal | None], theta_p: Decimal, k: int,
+                     selection: ChannelSelection,
+                     fixed: FixedParameters | None = None
+                     ) -> dict[str, tuple[Literal["黄", "红"], tuple[ChannelPredicate, ...]]]:
+    """N 状态与收敛检查共用同一套通道谓词。"""
+    if not (len(spx) == len(qqq) == len(ratios)):
+        raise ValueError("N 通道输入时间轴不一致")
     if any(type(getattr(selection, name)) is not bool for name in ("b_spx", "dv_spx", "b_qqq", "dv_qqq")):
         raise ValueError("N 的 B、DV 四侧开关须显式填写")
     predicates: dict[str, tuple[Literal["黄", "红"], tuple[ChannelPredicate, ...]]] = {}
@@ -277,6 +276,19 @@ def n_diagnostic_sequence(days: Sequence[dt.date], spx: Sequence[AssetFeatures],
         if getattr(selection, f"dv_{symbol.lower()}"):
             predicates[f"DV_{symbol}"] = ("黄", breadth_predicates(features, "DV", fixed))
     predicates["V"] = ("红", volatility_predicates(ratios, fixed))
+    return predicates
+
+
+def n_diagnostic_sequence(days: Sequence[dt.date], spx: Sequence[AssetFeatures],
+                          qqq: Sequence[AssetFeatures], ratios: Sequence[Decimal | None],
+                          t0: dt.date, theta_p: Decimal, k: int,
+                          selection: ChannelSelection,
+                          e_version: Literal["E1", "E2", "E3"],
+                          fixed: FixedParameters | None = None) -> tuple[DiagnosticRow, ...]:
+    """仅在四侧 B/DV 开关显式为布尔值后，组合 N 的完整通道与灯色。"""
+    if not (len(days) == len(spx) == len(qqq) == len(ratios)):
+        raise ValueError("N 诊断输入时间轴不一致")
+    predicates = n_channel_inputs(spx, qqq, ratios, theta_p, k, selection, fixed)
     start = days.index(t0)
     states = {name: "armed" for name in predicates}
     memory = SystemMemory()

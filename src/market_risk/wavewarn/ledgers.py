@@ -158,14 +158,15 @@ def build_alert_ledger(days: Sequence[dt.date], lights: Sequence[Light],
         raise ValueError("资产损失与权重不一致")
     if any(len(rows) != len(days) - 1 for rows in asset_losses.values()):
         raise ValueError("资产损失须按完整区间时间轴排列")
-    positions = {day: index for index, day in enumerate(days)}
     result = []
     for start, stop in alert_segments(days, lights):
         overlapping = []
         for event in events:
-            if event.peak_date not in positions or event.trough_date not in positions:
+            if event.trough_date < days[0] or event.peak_date > days[-1]:
                 continue
-            peak, trough = positions[event.peak_date], positions[event.trough_date]
+            # 损失起点可落在已开始的危险事件内；其 [P−20,Tr+5] 窗口裁剪到评价轴。
+            peak = next((index for index, day in enumerate(days) if day >= event.peak_date), len(days) - 1)
+            trough = next((index for index, day in enumerate(days) if day >= event.trough_date), len(days) - 1)
             if start <= min(len(days) - 1, trough + 5) and stop >= max(0, peak - 20):
                 overlapping.append(f"{event.symbol}:{event.peak_date.isoformat()}")
         protected = Decimal(0)

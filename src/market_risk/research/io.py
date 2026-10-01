@@ -19,15 +19,29 @@ MARKET_SYMBOLS = ("SPX", "SPY", "QQQ", "RSP", "HYG", "LQD", "UST10Y", "BAMLH0A0H
 TV_SYMBOLS = ("ADD", "HIGN", "LOWN", "MMFI", "MMTW", "R2FI", "R2TW", "PCCE", "NDTW", "VIX3M")
 
 
-def _rows(path: Path, date_field: str = "date", ordered: bool = True,
-          end: dt.date = END) -> Iterator[dict[str, str]]:
+def _rows(path: Path, date_field: str = "date", end: dt.date = END) -> Iterator[dict[str, str]]:
+    """日序列按日期非递减；遇到首个截止日之后的行立即停止。"""
+    previous: dt.date | None = None
     with path.open(encoding="utf-8", newline="") as file:
         for row in csv.DictReader(file):
             day = dt.date.fromisoformat(row[date_field])
             if day > end:
-                if ordered:
-                    break
-                continue
+                break
+            if previous is not None and day < previous:
+                raise ValueError(f"截止日前研究序列日期乱序：{path}")
+            previous = day
+            yield row
+
+
+def _label_rows(path: Path, date_fields: tuple[str, ...],
+                end: dt.date = END) -> Iterator[dict[str, str]]:
+    """分组标签不假设全局排序；所有日期列逐行不得越过截止日。"""
+    with path.open(encoding="utf-8-sig", newline="") as file:
+        for row in csv.DictReader(file):
+            for field in date_fields:
+                value = row.get(field, "")
+                if value and dt.date.fromisoformat(value) > end:
+                    raise ValueError(f"标签文件含保留期日期：{path.name} / {field} / {value}")
             yield row
 
 
@@ -85,7 +99,7 @@ def load_inputs(paths: StoragePaths, expected_run_id: str) -> ResearchInputs:
               for row in _rows(run / "daily_scores.csv")}
     metrics = {dt.date.fromisoformat(row["date"]): row for row in _rows(run / "daily_metrics.csv")}
     window_count = 0
-    for row in _rows(run / "episode_windows.csv", ordered=False):
+    for row in _label_rows(run / "episode_windows.csv", ("high_date", "date")):
         day = dt.date.fromisoformat(row["date"])
         for version, prefix in (("v2-M", "v2m"), ("v3-R1", "v3r1")):
             score = scores.get((day, version))
@@ -96,7 +110,8 @@ def load_inputs(paths: StoragePaths, expected_run_id: str) -> ResearchInputs:
     episodes = []
     bear_spans = []
     excluded_episodes = []
-    for row in _rows(run / "pullback_episodes.csv", "high_date", ordered=False):
+    for row in _label_rows(run / "pullback_episodes.csv",
+                           ("high_date", "low_date", "confirm_date", "recovery_date")):
         if row["symbol"] == "SPX" and row["level"] == "20":
             if row["low_date"] and row["status"] == "已确认":
                 low = dt.date.fromisoformat(row["low_date"])
