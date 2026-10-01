@@ -103,10 +103,10 @@ def wavewarn_calibrate_exit_development(ctx: Context) -> Path:
 
 def wavewarn_evaluate_development(ctx: Context) -> Any:
     """运行 v1.2.1 开发期 E2 工程评价；研究依赖只在调用时加载。"""
-    from market_risk.wavewarn.evaluation_run import prepare_and_write
+    from market_risk.wavewarn.evaluation_run import run_development_evaluation
 
     try:
-        return prepare_and_write(ctx.paths.root)
+        return run_development_evaluation(ctx.paths.root)
     except ValueError as exc:
         raise ServiceError(str(exc)) from exc
 

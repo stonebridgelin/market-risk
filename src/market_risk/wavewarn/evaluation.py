@@ -1,38 +1,46 @@
-"""v1.2.1 开发期评价编排；只用 E2 计算候选模型主损失。"""
+"""v1.2.1 评价编排（纯计算）；主损失只用 E2。不读写文件，不导入读写模块。"""
 
 from __future__ import annotations
 
 import datetime as dt
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Literal
 
 from market_risk.wavewarn.channels import price_predicates
 from market_risk.wavewarn.config import ChannelSelection, WavewarnConfig
 from market_risk.wavewarn.convergence import loss_start, system_convergence
-from market_risk.wavewarn.diagnostics import (
-    DiagnosticRow,
-    _ready_inputs,
-    diagnostic_sequence,
-    first_complete_day,
-    n_channel_inputs,
-    n_diagnostic_sequence,
-)
-from market_risk.wavewarn.execution import ExecutionDay, execute_asset
+from market_risk.wavewarn.execution import ExecutionDay, execute_asset, exposure
 from market_risk.wavewarn.features import AssetFeatures, asset_features, vix_term_ratio
 from market_risk.wavewarn.input_model import DevelopmentInputs
 from market_risk.wavewarn.labels_zz import UnknownLabels, ZZEvent, build_unknown_labels, find_zz_events
 from market_risk.wavewarn.loss import (
     AssetLossDay,
+    LossSettings,
     MainLossDay,
     configured_loss_settings,
     daily_main_loss,
     evaluated_asset_price_loss,
     full_exposure_events,
 )
+from market_risk.wavewarn.state_machine import Light
+from market_risk.wavewarn.state_sequences import (
+    DiagnosticRow,
+    diagnostic_sequence,
+    first_complete_day,
+    n_channel_inputs,
+    n_diagnostic_sequence,
+    ready_inputs,
+)
 
 Model = Literal["P0", "P1", "N", "N去B/DV"]
+RANKED_MODELS: tuple[Model, ...] = ("P0", "P1", "N")
+SYMBOLS = ("SPX", "QQQ")
+VALIDATION_START = dt.date(2017, 1, 3)        # 规格第八节：验证期第一个区间起点
+LEDGER_LOOKBACK = 20                          # 事件账需要高点前 20 个交易日的灯色
+# 对数按 Decimal 28 位有效数字计算，相加次序不同会在末位产生舍入差；核对只容许这一量级。
+RECONCILE_TOLERANCE = Decimal("1e-20")
 
 
 @dataclass(frozen=True)
@@ -76,10 +84,24 @@ class CandidateEvaluation:
     executions: Mapping[str, tuple[ExecutionDay, ...]]
     asset_losses: Mapping[str, tuple[AssetLossDay, ...]]
     daily_losses: tuple[MainLossDay, ...]
+    # 系统执行灯色 S_{j−1}（与单个资产是否缺价无关），与 days 对齐
+    system_executed: tuple[str, ...] = ()
+    # 漏报罚项（危险区间全程满暴露）：资产 → {区间 Tr−1 的起点日期: μ × 触发事件数}
+    miss_penalty: Mapping[str, Mapping[dt.date, Decimal]] = field(default_factory=dict)
 
     @property
     def total_loss(self) -> Decimal:
         return sum((row.total for row in self.daily_losses), Decimal(0))
+
+    @property
+    def executed_non_green_days(self) -> int:
+        """主损失计入的区间 j（j₀ 至最后一个计入区间）中执行灯色 S_{j−1} 非绿的天数，系统级计一次。"""
+        return sum(light != "绿" for light in self.system_executed[:-1])
+
+    @property
+    def billed_switches(self) -> int:
+        """j₀ 至窗口倒数第二日已执行且计费的系统切换次数；窗口末日切换不计。"""
+        return sum(row.switched for row in self.executions["SPX"][:-1])
 
 
 @dataclass(frozen=True)
@@ -100,21 +122,41 @@ class DailyAssetDetail:
     weighted_price_loss: Decimal
     system_switches: int
     switch_share: Decimal
-    full_exposure_share: Decimal
+    miss_penalty: Decimal
     excluded_reason: str
     terminal_switch_unbilled: bool
 
     @property
     def total(self) -> Decimal:
-        return self.weighted_price_loss + self.switch_share + self.full_exposure_share
+        """行合计 = 加权价格损失 + 切换罚分分摊额 + 漏报罚项。"""
+        return self.weighted_price_loss + self.switch_share + self.miss_penalty
+
+
+def _asset_detail(evaluated: CandidateEvaluation, index: int, symbol: str, weight: Decimal,
+                  system: MainLossDay, switched: bool) -> DailyAssetDetail:
+    """一个资产、一个区间的明细行；窗口末日没有后续区间，价格项为 0。"""
+    day = evaluated.days[index]
+    execution = evaluated.executions[symbol][index]
+    loss = evaluated.asset_losses[symbol][index] if index < len(evaluated.days) - 1 else None
+    danger = loss.danger_loss if loss else Decimal(0)
+    drawdown = loss.drawdown_loss if loss else Decimal(0)
+    opportunity = loss.opportunity_loss if loss else Decimal(0)
+    return DailyAssetDetail(
+        symbol, day, evaluated.days[index + 1] if loss else None,
+        execution.signal, execution.executed, execution.exposure, weight,
+        loss.log_return if loss else None, loss.dangerous if loss else None,
+        loss.drawdown_increment if loss else Decimal(0), danger, drawdown, opportunity,
+        weight * (danger + drawdown + opportunity), int(switched), system.switch_cost / 2,
+        evaluated.miss_penalty.get(symbol, {}).get(day, Decimal(0)),
+        loss.excluded_reason if loss else "评价窗口末日，无后续区间", system.terminal_switch_unbilled)
 
 
 def allocated_asset_days(evaluated: CandidateEvaluation,
                          weights: Mapping[str, Decimal]) -> tuple[DailyAssetDetail, ...]:
-    """系统切换费按两资产行均分，与价格权重无关；末日保留不计费标记。"""
-    if set(weights) != {"SPX", "QQQ"} or set(evaluated.asset_losses) != set(weights):
-        raise ValueError("逐资产分摊要求 SPX 与 QQQ 两行")
-    result = []
+    """系统切换费按两资产行均分（与价格权重无关）；漏报罚项整笔记在所属资产的 Tr−1 行，不乘权重。"""
+    if set(weights) != set(SYMBOLS) or set(evaluated.asset_losses) != set(weights):
+        raise ValueError("逐资产明细要求 SPX 与 QQQ 两行")
+    result: list[DailyAssetDetail] = []
     for index, day in enumerate(evaluated.days):
         system = evaluated.daily_losses[index]
         switches = {evaluated.executions[symbol][index].switched for symbol in weights}
@@ -123,22 +165,9 @@ def allocated_asset_days(evaluated: CandidateEvaluation,
         switched = switches.pop()
         if system.switch_cost and not switched:
             raise ValueError("未切换日出现系统切换罚分")
-        for symbol in ("SPX", "QQQ"):
-            execution = evaluated.executions[symbol][index]
-            loss = evaluated.asset_losses[symbol][index] if index < len(evaluated.days) - 1 else None
-            danger = loss.danger_loss if loss else Decimal(0)
-            drawdown = loss.drawdown_loss if loss else Decimal(0)
-            opportunity = loss.opportunity_loss if loss else Decimal(0)
-            result.append(DailyAssetDetail(
-                symbol, day, evaluated.days[index + 1] if loss else None,
-                execution.signal, execution.executed, execution.exposure, weights[symbol],
-                loss.log_return if loss else None, loss.dangerous if loss else None,
-                loss.drawdown_increment if loss else Decimal(0), danger, drawdown, opportunity,
-                weights[symbol] * (danger + drawdown + opportunity), int(switched),
-                system.switch_cost / 2, system.full_exposure_cost / 2,
-                loss.excluded_reason if loss else "评价窗口末日，无后续区间",
-                system.terminal_switch_unbilled))
-        if sum((row.total for row in result[-2:]), Decimal(0)) != system.total:
+        result.extend(_asset_detail(evaluated, index, symbol, weights[symbol], system, switched)
+                      for symbol in SYMBOLS)
+        if abs(sum((row.total for row in result[-2:]), Decimal(0)) - system.total) > RECONCILE_TOLERANCE:
             raise ValueError(f"{day} 两资产逐日明细未与系统主损失对齐")
     return tuple(result)
 
@@ -155,28 +184,76 @@ def first_loss_interval(days: Sequence[dt.date], tau: dt.date,
     return max(tau, days[position])
 
 
-def event_scope(days: Sequence[dt.date], event: ZZEvent, tau: dt.date,
-                first_loss_day: dt.date) -> tuple[bool, bool, bool]:
-    """返回跨 j₀、完整危险罚项、五类事件账纳入标志，三者口径各自独立。"""
-    if tau not in days or first_loss_day not in days or event.peak_date not in days:
-        raise ValueError("事件与评价边界不在同一交易日轴")
-    cross_start = event.peak_date < first_loss_day <= event.trough_date
-    complete_penalty = not event.right_censored and event.peak_date >= first_loss_day
-    peak = days.index(event.peak_date)
-    ledger = (not event.right_censored and peak >= 20
-              and days[peak - 20] >= tau)
-    return cross_start, complete_penalty, ledger
+@dataclass(frozen=True)
+class ScopeRule:
+    """一个评价期的事件纳入规则；开发期与验证期用同一套判断、不同的边界。"""
+
+    first_interval: dt.date          # 第一个计入损失的区间起点：开发期为 j₀，验证期为 2017-01-03
+    ledger_peak_floor: dt.date       # 事件账要求高点 P 不早于此日：开发期为 τ，验证期为 2017-01-03
+    ledger_lookback_floor: dt.date   # 事件账要求 P 前 20 个交易日不早于此日：两期均为 τ（此前灯色不可用）
+
+
+@dataclass(frozen=True)
+class EventScope:
+    crosses_start: bool              # P < 起点 ≤ Tr：只计起点之后的逐日危险项
+    complete_for_penalty: bool       # P ≥ 起点且非右截尾：纳入“危险区间全程满暴露”罚项
+    in_ledger: bool                  # 纳入事件账五类
+    category: str                    # 五种互斥情形之一，见 SCOPE_CATEGORIES
+
+
+SCOPE_CATEGORIES = ("右截尾", "起点之前结束", "跨起点", "完整纳入并进事件账", "完整纳入但高点前20天不足")
+
+
+def development_scope_rule(tau: dt.date, first_loss_day: dt.date) -> ScopeRule:
+    """开发期：逐日项自 j₀ 起；事件账要求 P 前 20 个交易日不早于 τ。"""
+    return ScopeRule(first_loss_day, tau, tau)
+
+
+def validation_scope_rule(tau: dt.date) -> ScopeRule:
+    """验证期（本轮只实现、不运行）：模型自评价起点连续运行，事件按 P ≥ 2017-01-03 归属；
+    事件账所需高点前 20 天的灯色可以落在 2016 年，只要不早于 τ。"""
+    if tau > VALIDATION_START:
+        raise ValueError("τ 晚于验证期起点，验证期事件账缺少可用灯色")
+    return ScopeRule(VALIDATION_START, VALIDATION_START, tau)
+
+
+def ledger_included(days: Sequence[dt.date], peak_date: dt.date, right_censored: bool,
+                    rule: ScopeRule) -> bool:
+    """事件账五类的纳入：非右截尾、P 不早于期内下限、P 前 20 个交易日不早于灯色可用下限。"""
+    if peak_date not in days:
+        raise ValueError("事件高点不在交易日轴")
+    peak = days.index(peak_date)
+    return (not right_censored and peak_date >= rule.ledger_peak_floor and peak >= LEDGER_LOOKBACK
+            and days[peak - LEDGER_LOOKBACK] >= rule.ledger_lookback_floor)
+
+
+def event_scope(days: Sequence[dt.date], event: ZZEvent, rule: ScopeRule) -> EventScope:
+    """跨起点、满暴露罚项、事件账三个纳入标志各自独立；另给互斥的情形名称用于计数。"""
+    if rule.first_interval not in days:
+        raise ValueError("评价起点不在交易日轴")
+    crosses = event.peak_date < rule.first_interval <= event.trough_date
+    complete = not event.right_censored and event.peak_date >= rule.first_interval
+    ledger = ledger_included(days, event.peak_date, event.right_censored, rule)
+    if event.right_censored:
+        category = "右截尾"
+    elif event.trough_date < rule.first_interval:
+        category = "起点之前结束"
+    elif crosses:
+        category = "跨起点"
+    else:
+        category = "完整纳入并进事件账" if ledger else "完整纳入但高点前20天不足"
+    return EventScope(crosses, complete, ledger, category)
 
 
 def candidate_grid(config: WavewarnConfig) -> tuple[Candidate, ...]:
     """候选与解释性分解按登记顺序生成；分解去掉 B 后 q 不再起作用。"""
     sets = config.candidate_sets()
-    result = []
+    result: list[Candidate] = []
     for model in ("P0", "P1", "N", "N去B/DV"):
         for k in sets.k:
             for theta in sets.theta_p:
                 for q in (sets.q if model == "N" else (None,)):
-                    result.append(Candidate(model, k, theta, q, len(result)))
+                    result.append(Candidate(model, k, theta, q, len(result)))  # type: ignore[arg-type]
     return tuple(result)
 
 
@@ -189,11 +266,15 @@ def _price_channels(spx: Sequence[AssetFeatures], qqq: Sequence[AssetFeatures],
     return channels
 
 
+def require_e2(config: WavewarnConfig) -> None:
+    """P1 与 N 的主损失只接受 E2（负责人 2026-09-30 确认的唯一退出版本）。"""
+    if config.require_business_parameters().e_version != "E2":
+        raise ValueError("P1/N 主损失只能使用 E2")
+
+
 def _validate_development_config(config: WavewarnConfig) -> ChannelSelection:
     """主损失口径必须与负责人登记的 E2 及四侧通道一致。"""
-    business = config.require_business_parameters()
-    if business.e_version != "E2":
-        raise ValueError("开发期主损失评价仅允许配置中的 E2")
+    require_e2(config)
     selection = config.require_channel_selection()
     if selection != ChannelSelection(False, True, True, True):
         raise ValueError("N 的 B/DV 四侧开关与负责人确认的通道组成不一致")
@@ -211,25 +292,26 @@ def _candidate_states(candidate: Candidate, config: WavewarnConfig, inputs: Deve
     if candidate.model in ("P0", "P1"):
         scenario = "P0" if candidate.model == "P0" else "P1-E2"
         channels = _price_channels(spx, qqq, candidate.theta_p, candidate.k)
-        state_rows = diagnostic_sequence(inputs.days, spx, qqq, t0, scenario,
+        state_rows = diagnostic_sequence(inputs.days, spx, qqq, t0, scenario,  # type: ignore[arg-type]
                                          candidate.theta_p, candidate.k, fixed)
         version = "P0" if candidate.model == "P0" else "E2"
     else:
+        scenario = "N-E2"
         selected = selection if candidate.model == "N" else ChannelSelection(False, False, False, False)
         channels = n_channel_inputs(spx, qqq, ratios, candidate.theta_p, candidate.k, selected, fixed)
         state_rows = n_diagnostic_sequence(inputs.days, spx, qqq, ratios, t0,
                                            candidate.theta_p, candidate.k, selected, "E2", fixed)
         version = "E2"
-    ready = _ready_inputs(inputs.days, spx, qqq, scenario if candidate.model in ("P0", "P1")
-                          else "N-E2", fixed)
-    converged = system_convergence(inputs.days, channels, ready, t0, candidate.k, version, fixed)
+    ready = ready_inputs(inputs.days, spx, qqq, scenario, fixed)  # type: ignore[arg-type]
+    converged = system_convergence(inputs.days, channels, ready, t0, candidate.k,  # type: ignore[arg-type]
+                                   version, fixed)  # type: ignore[arg-type]
     if converged.system_date is None:
         raise ValueError(f"候选未在开发期内收敛：{candidate.key}")
     return CandidateStates(candidate, converged.system_date, state_rows)
 
 
 def prepare_from_inputs(config: WavewarnConfig, inputs: DevelopmentInputs) -> PreparedEvaluation:
-    """开发期序列已在边界截断；以纯计算求所有候选与共同损失起点。"""
+    """开发期序列已在边界截断；τ 与 j₀ 取全部 45 组（含去 B/DV 分解）的系统收敛日最大值。"""
     selection = _validate_development_config(config)
     fixed = config.fixed_parameters()
     sets = config.candidate_sets()
@@ -253,49 +335,113 @@ def development_labels(prepared: PreparedEvaluation) -> tuple[dict[str, tuple[ZZ
     thresholds = prepared.config.zz_thresholds()
     events = {symbol: find_zz_events(symbol, prepared.inputs.days, prepared.inputs.series[symbol],
                                      prepared.config.development_end(), thresholds)
-              for symbol in ("SPX", "QQQ")}
+              for symbol in SYMBOLS}
     unknown = build_unknown_labels(events, prepared.inputs.days,
                                    {symbol: prepared.inputs.series[symbol] for symbol in events},
                                    prepared.config.development_end())
     return events, unknown
 
 
+@dataclass(frozen=True)
+class AxisLoss:
+    """同一日期轴上、给定执行序列的逐资产与系统损失。"""
+
+    asset_losses: Mapping[str, tuple[AssetLossDay, ...]]
+    daily_losses: tuple[MainLossDay, ...]
+    miss_penalty: Mapping[str, Mapping[dt.date, Decimal]]
+
+
+def axis_loss(prepared: PreparedEvaluation, executions: Mapping[str, Sequence[ExecutionDay]],
+              events: Mapping[str, Sequence[ZZEvent]], unknown: UnknownLabels,
+              settings: LossSettings) -> AxisLoss:
+    """候选模型与参照行共用的损失计算：j₀ 起重置回撤高点；满暴露罚项只纳入 P ≥ j₀ 的已确认事件。"""
+    axis = prepared.inputs.days[prepared.inputs.days.index(prepared.first_loss_day):]
+    asset_losses: dict[str, tuple[AssetLossDay, ...]] = {}
+    miss: dict[str, dict[dt.date, Decimal]] = {}
+    triggered: list[ZZEvent] = []
+    for symbol in SYMBOLS:
+        closes = tuple(prepared.inputs.series[symbol].get(day) for day in axis)
+        asset_losses[symbol] = evaluated_asset_price_loss(
+            axis, closes, executions[symbol], events[symbol], settings.parameters, symbol, unknown)
+        complete = [event for event in events[symbol]
+                    if event.peak_date >= prepared.first_loss_day and not event.right_censored]
+        own = full_exposure_events(complete, axis, executions[symbol])
+        triggered.extend(own)
+        miss[symbol] = {}
+        for event in own:
+            day = axis[axis.index(event.trough_date) - 1]
+            miss[symbol][day] = miss[symbol].get(day, Decimal(0)) + settings.mu
+    daily = daily_main_loss(axis, asset_losses, executions["SPX"], settings.weights,
+                            settings.parameters, triggered, settings.mu)
+    return AxisLoss(asset_losses, daily, miss)
+
+
 def evaluate_candidate(prepared: PreparedEvaluation, states: CandidateStates,
                        events: Mapping[str, Sequence[ZZEvent]],
                        unknown: UnknownLabels) -> CandidateEvaluation:
     """从完整 t0 状态连续执行，j₀ 起重置回撤高点并计算同轴逐日损失。"""
+    require_e2(prepared.config)
     settings = configured_loss_settings(prepared.config)
-    if prepared.config.require_business_parameters().e_version != "E2":
-        raise ValueError("P1/N 主损失只能使用 E2")
     days = prepared.inputs.days
-    start = days.index(prepared.first_loss_day)
-    t0_index = days.index(prepared.t0)
-    axis = days[start:]
-    state_days = days[t0_index:]
+    offset = days.index(prepared.first_loss_day) - days.index(prepared.t0)
+    state_days = days[days.index(prepared.t0):]
     if tuple(row.date for row in states.rows) != state_days:
         raise ValueError("候选状态与 t0 后交易日轴不一致")
     signals = tuple(row.light for row in states.rows)
-    all_executions = {
-        symbol: execute_asset(state_days, signals,
+    # 第 j 天收盘执行前一日信号 S_{j−1}；t0 当天沿用初始快照的绿灯（与 execute_asset 一致）。
+    system_executed = ("绿", *signals[:-1])[offset:]
+    executions = {
+        symbol: execute_asset(state_days, signals,  # type: ignore[arg-type]
                               tuple(prepared.inputs.series[symbol].get(day) for day in state_days),
-                              settings.parameters.eta)
-        for symbol in ("SPX", "QQQ")
+                              settings.parameters.eta)[offset:]
+        for symbol in SYMBOLS
     }
-    eval_executions = {symbol: rows[start - t0_index:] for symbol, rows in all_executions.items()}
-    asset_losses = {}
-    full_events = []
-    for symbol in ("SPX", "QQQ"):
-        closes = tuple(prepared.inputs.series[symbol].get(day) for day in axis)
-        asset_losses[symbol] = evaluated_asset_price_loss(
-            axis, closes, eval_executions[symbol], events[symbol], settings.parameters, symbol, unknown)
-        complete = [event for event in events[symbol]
-                    if event.peak_date >= prepared.first_loss_day and not event.right_censored]
-        full_events.extend(full_exposure_events(complete, axis, eval_executions[symbol]))
-    daily = daily_main_loss(axis, asset_losses, eval_executions["SPX"], settings.weights,
-                            settings.parameters, full_events, settings.mu)
-    offset = start - t0_index
-    return CandidateEvaluation(states.candidate, axis, signals[offset:],
+    losses = axis_loss(prepared, executions, events, unknown, settings)
+    return CandidateEvaluation(states.candidate, state_days[offset:], signals[offset:],
                                tuple(row.data_status for row in states.rows[offset:]),
                                tuple(row.active_channels for row in states.rows[offset:]),
                                tuple(row.reason for row in states.rows[offset:]),
-                               eval_executions, asset_losses, daily)
+                               executions, losses.asset_losses, losses.daily_losses,
+                               system_executed, losses.miss_penalty)
+
+
+@dataclass(frozen=True)
+class ReferenceResult:
+    """始终绿、黄、红的参照行：恒定暴露、零切换，只给主损失及其分项。"""
+
+    name: str
+    exposure: Decimal
+    total_loss: Decimal
+    danger_loss: Decimal
+    drawdown_loss: Decimal
+    opportunity_loss: Decimal
+    switch_cost: Decimal
+    miss_penalty: Decimal
+    executed_non_green_days: int
+
+
+REFERENCE_LIGHTS: tuple[tuple[str, Light], ...] = (("始终绿", "绿"), ("始终黄", "黄"), ("始终红", "红"))
+
+
+def reference_evaluation(prepared: PreparedEvaluation, name: str, light: Light,
+                         events: Mapping[str, Sequence[ZZEvent]],
+                         unknown: UnknownLabels) -> ReferenceResult:
+    """从 τ 起即为恒定暴露、零切换，按 j₀ 与同一损失函数计算；不参与选参与检验。"""
+    settings = configured_loss_settings(prepared.config)
+    axis = prepared.inputs.days[prepared.inputs.days.index(prepared.first_loss_day):]
+    level = exposure(light, settings.parameters.eta)
+    executions = {
+        symbol: tuple(ExecutionDay(day, light, light, level,
+                                   prepared.inputs.series[symbol].get(day) is not None, False)
+                      for day in axis)
+        for symbol in SYMBOLS
+    }
+    daily = axis_loss(prepared, executions, events, unknown, settings).daily_losses
+    return ReferenceResult(
+        name, level, sum((row.total for row in daily), Decimal(0)),
+        sum((row.danger_loss for row in daily), Decimal(0)),
+        sum((row.drawdown_loss for row in daily), Decimal(0)),
+        sum((row.opportunity_loss for row in daily), Decimal(0)),
+        sum((row.switch_cost for row in daily), Decimal(0)),
+        sum((row.full_exposure_cost for row in daily), Decimal(0)),
+        0 if light == "绿" else len(axis) - 1)

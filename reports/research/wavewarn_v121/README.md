@@ -1,6 +1,9 @@
 # v1.2.1 开发期工程诊断
 
-本目录只含截至 2016-12-30 的研究标签和工程诊断，不含 2017—2022 验证期或 2023 年起保留期数据，也不含主损失、模型排名、选参或历史预警效果。
+本目录只含截至 2016-12-30 的研究标签和工程诊断，不含 2017—2022 验证期或 2023 年起保留期数据，也不含历史预警效果。主损失与开发期名次只在子目录 `evaluation_development/`（2026-10-01 新增，开发期工程运行，未锁定），其余文件不含主损失、排名或选参。
+
+- `evaluation_development/`：45 组设定（P0、P1、N 及“N 去 B、DV”分解）的开发期评价，唯一退出版本 E2；文件与列说明见该目录的 `README.md`，由 `uv run market-risk wavewarn evaluate-development` 生成，目录已存在时拒绝覆盖。
+- `E退出代价_校准.md` 与 `E退出校准_*.csv`：固定延迟参照的描述性校准，由 `uv run market-risk wavewarn calibrate-exit-development` 生成。
 
 - `zz_events_development.csv`：SPX 4%/5%、QQQ 5%/6.5% 独立 ZZ 事件；`right_censored=是` 表示开发期末尚未确认结束。
 - `zz_merged_development.csv`：按闭区间 `[高点,低点]` 传递合并的研究事件，仅供事件账计数。

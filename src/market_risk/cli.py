@@ -619,9 +619,9 @@ def wavewarn_calibrate_exit_development() -> None:
 @wavewarn_app.command("evaluate-development")
 def wavewarn_evaluate_development() -> None:
     """运行开发期 E2 工程评价；不生成锁定记录或验证期结果。"""
-    prepared, summaries = _call(services.wavewarn_evaluate_development, _ctx())
-    typer.echo(f"已写入开发期工程评价：{len(summaries)} 个设定；"
-               f"t0={prepared.t0}，τ={prepared.tau}，j₀={prepared.first_loss_day}。")
+    run = _call(services.wavewarn_evaluate_development, _ctx())
+    typer.echo(f"已写入开发期工程评价（未锁定）：{run.settings} 个设定；"
+               f"t0={run.t0}，τ={run.tau}，j₀={run.first_loss_day}。输出目录：{run.output}")
 
 
 @backtest_app.command("zigzag-check")

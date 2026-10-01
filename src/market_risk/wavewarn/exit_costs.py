@@ -11,10 +11,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Literal
 
-from market_risk.wavewarn.config import load_wavewarn_config
 from market_risk.wavewarn.execution import ExecutionDay, execute_asset
-from market_risk.wavewarn.export import read_zz_events
-from market_risk.wavewarn.inputs import load_development_inputs
 from market_risk.wavewarn.labels_zz import ZZEvent
 from market_risk.wavewarn.ledgers import classify_asset_event
 
@@ -206,6 +203,11 @@ def _linear_percentile(values: Sequence[Decimal], probability: Decimal) -> Decim
 
 def run_development_exit_costs(root: Path) -> Path:
     """只输出开发期 P1 三种 E 的描述性代价；不组合 N 或计算主损失。"""
+    # 读写依赖只在本边界函数内加载：导入本模块的纯计算函数不会带入读写模块。
+    from market_risk.wavewarn.config import load_wavewarn_config
+    from market_risk.wavewarn.export import read_zz_events
+    from market_risk.wavewarn.inputs import load_development_inputs
+
     config = load_wavewarn_config(root / "config/wavewarn_v121.yaml")
     business = config.require_business_parameters()
     inputs = load_development_inputs(root, config.development_end())

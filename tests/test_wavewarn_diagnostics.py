@@ -9,15 +9,10 @@ from pathlib import Path
 import pytest
 
 from market_risk.wavewarn.config import CandidateSets, ChannelSelection, load_wavewarn_config
-from market_risk.wavewarn.diagnostics import (
-    diagnostic_sequence,
-    first_complete_day,
-    n_diagnostic_sequence,
-    write_anchor_126_audit,
-    write_input_coverage,
-)
+from market_risk.wavewarn.diagnostics import write_anchor_126_audit, write_input_coverage
 from market_risk.wavewarn.features import AssetFeatures
 from market_risk.wavewarn.inputs import DevelopmentInputs
+from market_risk.wavewarn.state_sequences import diagnostic_sequence, first_complete_day, n_diagnostic_sequence
 
 
 def test_anchor_126_audit_separates_p_and_pr_thresholds(tmp_path: Path) -> None:
