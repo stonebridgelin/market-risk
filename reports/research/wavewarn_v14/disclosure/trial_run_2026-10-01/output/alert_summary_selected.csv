@@ -1,0 +1,2 @@
+model,exit_version,k,theta_p,q,segments,with_event,no_event,tail_pending,longest_segment_days,signal_non_green_days,protected_decline,outside_danger_days,net_opportunity_cost
+v1.4,F,5,0.025,,67,48,19,0,106,834,2.552786325387223242079986160,376,2.025570135817120182342428347

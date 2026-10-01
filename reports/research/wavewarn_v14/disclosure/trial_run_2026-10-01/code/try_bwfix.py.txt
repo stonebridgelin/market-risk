@@ -1,0 +1,12 @@
+import sys
+from pathlib import Path
+from market_risk.wavewarn.config_v14 import load_v14_config
+from market_risk.wavewarn.inputs import load_development_inputs
+from market_risk.wavewarn.v14_model import prepare_v14
+from market_risk.wavewarn.evaluation_v14_run import write_v14_evaluation
+root = Path(".")
+config = load_v14_config(root / "config/wavewarn_v14.yaml")
+prepared = prepare_v14(config, load_development_inputs(root, config.base.development_end()))
+dest = Path(sys.argv[1])
+result = write_v14_evaluation(prepared, config, dest)
+print(prepared.t0, prepared.tau, prepared.first_loss_day, result.trace.selected.key, result.trace.tier, result.trace.sizes)

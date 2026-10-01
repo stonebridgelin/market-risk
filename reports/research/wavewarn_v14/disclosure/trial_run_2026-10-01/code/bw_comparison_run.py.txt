@@ -1,0 +1,150 @@
+"""BW 纠错前后对比的读写边界：读两次开发期评价的表格与开发期输入，写对比报告与来源清单。
+
+原输出在 `evaluation_development/superseded/` 下，修正后的输出在 `evaluation_development/`。
+只读开发期输入（截至 2016-12-30）。
+"""
+
+from __future__ import annotations
+
+import csv
+import hashlib
+import json
+from collections.abc import Sequence
+from dataclasses import dataclass
+from decimal import Decimal
+from pathlib import Path
+
+from market_risk.wavewarn.buffered_ma import buffered_ma_reference
+from market_risk.wavewarn.bw_comparison import (
+    COMPARISON_HEADER,
+    RunTables,
+    comparison_rows,
+    report_lines,
+    setting_name,
+)
+from market_risk.wavewarn.config_v14 import load_round2_config, load_validation_config
+from market_risk.wavewarn.diagnostics_round2_run import ROUND2_CONFIG
+from market_risk.wavewarn.evaluation import development_labels
+from market_risk.wavewarn.evaluation_run import file_sha256, write_csv
+from market_risk.wavewarn.evaluation_v13_report import num, share, table
+from market_risk.wavewarn.evaluation_v13_tables import REFERENCE_HEADER, reference_row
+from market_risk.wavewarn.evaluation_v14_run import OUTPUT_DIR
+from market_risk.wavewarn.inputs import load_development_inputs
+from market_risk.wavewarn.lock_guard import find_git, find_gzip, run_git
+from market_risk.wavewarn.timing import ReferenceRow, reference_rows
+from market_risk.wavewarn.v14_model import prepare_v14
+from market_risk.wavewarn.validation_output import DAILY_NAME, DailyHashes, gzip_file
+from market_risk.wavewarn.validation_run import CONFIG_FILE
+
+SUPERSEDED = "superseded/2026-10-01_BW退出偏差实现"
+REPORT_NAME = "BW修正对比报告.md"
+MANIFEST = "rerun_manifest.json"
+INPUT_FILES = ("data/market/daily/SPX.csv", "data/market/daily/QQQ.csv", "data/market/daily/S5TW.csv",
+               "data/processed/tradingview/NDTW.csv", "data/market/daily/VIX_CBOE.csv",
+               "data/research/wavewarn/v121/vix3m_cboe_development.csv")
+CONFIG_FILES = ("config/wavewarn_v14.yaml", "config/wavewarn_v121.yaml", "config/wavewarn_v14_diagnostics.yaml")
+SPEC_FILES = ("docs/research/波段预警研究规格_v1.2.1.md", "docs/research/波段预警研究规格_v1.4_修订登记.md",
+              "docs/research/波段预警_v1.4_暂停与纠错登记.md")
+
+
+@dataclass(frozen=True)
+class BwComparisonRun:
+    output: Path
+    selected_before: str
+    selected_after: str
+    changed_cells: int
+    report_sha256: str
+
+
+def read_records(path: Path) -> tuple[dict[str, str], ...]:
+    with path.open(encoding="utf-8", newline="") as file:
+        return tuple(csv.DictReader(file))
+
+
+def read_tables(directory: Path) -> RunTables:
+    """一次开发期评价写出的五张表。"""
+    return RunTables(*(read_records(directory / f"{name}.csv") for name in (
+        "settings_summary", "selection_trace", "convergence", "event_scope_counts", "reference_rows")))
+
+
+def committed_sha256(executable: str, root: Path, path: str) -> str:
+    """文件在 HEAD 中已提交内容的 SHA-256（不受本机换行转换影响）。"""
+    shown = run_git(executable, root, ("show", f"HEAD:{path}"))
+    if shown.returncode != 0:
+        raise ValueError(f"{path} 不在 HEAD 中，无法记录哈希")
+    return hashlib.sha256(shown.stdout).hexdigest().upper()
+
+
+def code_state(executable: str, root: Path) -> dict[str, object]:
+    """生成本目录时的代码提交号，以及工作区里除报告输出之外是否还有未提交的改动。"""
+    head = run_git(executable, root, ("rev-parse", "HEAD")).stdout.decode().strip()
+    status = run_git(executable, root, ("status", "--porcelain")).stdout.decode("utf-8").splitlines()
+    other = [line for line in status if "reports/" not in line.replace("\\", "/")]
+    return {"code_commit": head, "uncommitted_changes_outside_reports": len(other)}
+
+
+def reference_lines(references: Sequence[ReferenceRow], selected: dict[str, str]) -> list[str]:
+    """修正后的选定设定与两条均线参照行并列：T、T价格、ē、非绿占比、切换次数；只作描述，不做检验。"""
+    rows = [("修正后的选定设定 " + setting_name(selected), num(Decimal(selected["timing_score"])),
+             num(Decimal(selected["timing_score"]) - Decimal(selected["switch_cost"])),
+             num(Decimal(selected["mean_exposure"])), share(Decimal(selected["non_green_share"])),
+             selected["billed_switches"])]
+    for row in references:
+        cost = sum((day.switch_cost for day in row.evaluated.daily_losses), Decimal("0"))
+        rows.append((row.name, row.timing.score, row.timing.score - cost, row.timing.mean_exposure,
+                     share(row.timing.non_green_share), row.evaluated.billed_switches))
+    return ["## 五、带缓冲带的 200 日均线（描述性对照，不做检验）", "",
+            "带缓冲带的均线不含 BW，不受纠错影响；这里按同一损失函数、同一 j₀ 新增一行，与 200 日均线并列。", "",
+            *table(("行", "T", "T价格", "ē", "非绿占比", "计费切换次数"), rows), ""]
+
+
+def manifest_lines(manifest: dict[str, object]) -> list[str]:
+    lines = ["## 六、来源与哈希", "",
+             f"- 代码提交：`{manifest['code_commit']}`"
+             f"（工作区除报告输出外的未提交改动 {manifest['uncommitted_changes_outside_reports']} 处）。",
+             f"- 原输出：`{SUPERSEDED}/`（原样保留）。修正后的输出：本目录。完整清单见 `{MANIFEST}`。", ""]
+    for title, key in (("输入（已提交内容的 SHA-256）", "inputs"), ("配置", "configs"), ("规格与登记", "specs")):
+        rows = [(f"`{path}`", f"`{value}`") for path, value in manifest[key].items()]  # type: ignore[union-attr]
+        lines.extend([f"**{title}**", "", *table(("文件", "SHA-256"), rows), ""])
+    return lines
+
+
+def compress_daily_once(directory: Path, gzip_executable: str) -> DailyHashes | None:
+    """逐日明细尚未压缩时用 gzip -n 压缩；已压缩则不动。"""
+    return gzip_file(directory / DAILY_NAME, gzip_executable) if (directory / DAILY_NAME).exists() else None
+
+
+def run_bw_comparison(root: Path) -> BwComparisonRun:
+    """对比报告、逐项对比表、带缓冲带均线的参照行与来源清单；报告已存在时拒绝覆盖。"""
+    validation = load_validation_config(root / CONFIG_FILE)
+    band = load_round2_config(root / ROUND2_CONFIG).buffer_band
+    corrected = root / OUTPUT_DIR
+    original = corrected / SUPERSEDED
+    if not original.is_dir() or (corrected / REPORT_NAME).exists():
+        raise ValueError("找不到原输出目录，或对比报告已存在（拒绝覆盖）")
+    executable = find_git(validation.git_executable)
+    old, new = read_tables(original), read_tables(corrected)
+    daily = compress_daily_once(corrected, find_gzip(validation.gzip_executable))
+    model = validation.model
+    prepared = prepare_v14(model, load_development_inputs(root, model.base.development_end()))
+    events, unknown = development_labels(prepared)
+    references = reference_rows(prepared, events, unknown, model.mr_window)
+    buffered = buffered_ma_reference(prepared, events, unknown, references, model.mr_window, band)
+    rows = comparison_rows(old.settings, new.settings)
+    write_csv(corrected / "bw_comparison.csv", COMPARISON_HEADER, rows)
+    write_csv(corrected / "buffered_ma_reference.csv", REFERENCE_HEADER, [reference_row(buffered)])
+    manifest: dict[str, object] = {
+        **code_state(executable, root),
+        "inputs": {path: committed_sha256(executable, root, path) for path in INPUT_FILES},
+        "configs": {path: committed_sha256(executable, root, path) for path in CONFIG_FILES},
+        "specs": {path: committed_sha256(executable, root, path) for path in SPEC_FILES}}
+    selected = next(row for row in new.settings if row["selected_as"])
+    extra = [*reference_lines((references[3], buffered), selected), *manifest_lines(manifest)]
+    (corrected / REPORT_NAME).write_text("\n".join(report_lines(old, new, extra)), encoding="utf-8")
+    if daily is not None:
+        manifest["daily_selected_csv_sha256_before_gzip"] = daily.raw
+    manifest["outputs"] = {path.name: file_sha256(path) for path in sorted(corrected.iterdir()) if path.is_file()}
+    (corrected / MANIFEST).write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    before = next(setting_name(row) for row in old.settings if row["selected_as"])
+    return BwComparisonRun(corrected, before, setting_name(selected), sum(row[-1] == "是" for row in rows),
+                           file_sha256(corrected / REPORT_NAME))

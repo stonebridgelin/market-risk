@@ -6,3 +6,6 @@ data/market/** -text
 db/sql/** -text
 # 正式回测目录中的 CSV 必须保持生成时的原始字节（非正式运行目录由 .gitignore 排除）
 results/MARKET/risk_scoring/backtests/**/*.csv -text
+# 披露存档与补丁文件须逐字节保持不变（记录了 SHA-256），git 不做换行转换
+reports/research/wavewarn_v14/disclosure/** -text
+patches/** -text

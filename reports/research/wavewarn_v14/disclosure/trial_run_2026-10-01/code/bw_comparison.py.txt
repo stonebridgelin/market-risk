@@ -1,0 +1,188 @@
+"""BW 退出谓词纠错前后，v1.4 开发期评价结果的逐项对比（纯计算）。
+
+输入是两次运行写出的表格行（原输出与修正后的输出），不重新计算任何模型结果。
+重跑结果只作纠错证据，不自动推翻暂停；报告不得写“v1.4 已修复”或“可恢复推进”。
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from decimal import Decimal
+
+from market_risk.wavewarn.evaluation_v13_report import num, share, table
+
+Row = tuple[object, ...]
+Record = Mapping[str, str]
+SETTING_KEY = ("model", "exit_version", "k", "theta_p", "q")
+UNCHANGED = "无变化"
+OPENING = ("本报告仅使用开发期数据。BW 退出谓词按规格原文纠正后，按原候选集合、原可行条件、原三级选择程序机械重跑；"
+           "重跑结果只作纠错证据，不自动推翻暂停，也不构成候选资格的结论。")
+
+
+@dataclass(frozen=True)
+class RunTables:
+    """一次开发期评价写出的表格（按列名读入的行）。"""
+
+    settings: tuple[Record, ...]        # settings_summary.csv
+    trace: tuple[Record, ...]           # selection_trace.csv
+    convergence: tuple[Record, ...]     # convergence.csv
+    scope: tuple[Record, ...]           # event_scope_counts.csv
+    references: tuple[Record, ...]      # reference_rows.csv
+
+
+def setting_key(row: Record) -> tuple[str, ...]:
+    return tuple(row[name] for name in SETTING_KEY)
+
+
+def setting_name(row: Record) -> str:
+    extra = f"，q={row['q']}" if row["q"] else ""
+    version = "" if row["model"].startswith("v1.4") else f"·{row['exit_version']}"
+    return f"{row['model']}{version} K={row['k']} θ_P={row['theta_p']}{extra}"
+
+
+def price_score(row: Record) -> Decimal:
+    """T价格 = T − 切换项。"""
+    return Decimal(row["timing_score"]) - Decimal(row["switch_cost"])
+
+
+def paired(old: Sequence[Record], new: Sequence[Record]) -> tuple[tuple[Record, Record], ...]:
+    """两次运行的设定须一一对应、顺序相同。"""
+    if [setting_key(row) for row in old] != [setting_key(row) for row in new]:
+        raise ValueError("两次运行的设定集合或顺序不同，不能逐项对比")
+    return tuple(zip(old, new, strict=True))
+
+
+COMPARISON_HEADER = ("setting", "role", "field", "old", "new", "changed")
+COMPARED_FIELDS = (("timing_score", "T"), ("price_score", "T价格"), ("non_green_share", "非绿占比"),
+                   ("mean_exposure", "ē"), ("billed_switches", "计费切换次数"), ("total_loss", "主损失 L"),
+                   ("convergence_date", "系统收敛日"), ("spx_green_delay_median", "SPX 转绿延迟中位数"),
+                   ("qqq_green_delay_median", "QQQ 转绿延迟中位数"), ("spx_class_1", "SPX 类别①件数"),
+                   ("spx_class_2", "SPX 类别②件数"), ("spx_class_3", "SPX 类别③件数"),
+                   ("qqq_class_1", "QQQ 类别①件数"), ("qqq_class_2", "QQQ 类别②件数"),
+                   ("qqq_class_3", "QQQ 类别③件数"), ("non_green_ok", "条件(1) 非绿占比"),
+                   ("green_delay_spx_ok", "条件(2) SPX 转绿延迟"), ("green_delay_qqq_ok", "条件(3) QQQ 转绿延迟"),
+                   ("selected_as", "是否选定"))
+
+
+def field_value(row: Record, field: str) -> str:
+    return str(price_score(row)) if field == "price_score" else row[field]
+
+
+def comparison_rows(old: Sequence[Record], new: Sequence[Record]) -> tuple[Row, ...]:
+    """每个设定、每个对比字段一行；没有变化的也列出。"""
+    rows = []
+    for before, after in paired(old, new):
+        for field, label in COMPARED_FIELDS:
+            first, second = field_value(before, field), field_value(after, field)
+            rows.append((setting_name(after), after["role"], label, first, second, "是" if first != second else "否"))
+    return tuple(rows)
+
+
+def table_changes(old: Sequence[Record], new: Sequence[Record], key: Sequence[str]) -> tuple[Row, ...]:
+    """按主键对齐两张表，列出取值不同的单元格（主键、列名、原值、新值）。"""
+    before = {tuple(row[name] for name in key): row for row in old}
+    after = {tuple(row[name] for name in key): row for row in new}
+    if list(before) != list(after):
+        raise ValueError("两张表的行不一一对应")
+    return tuple(("／".join(index), column, before[index][column], row[column])
+                 for index, row in after.items() for column in row if row[column] != before[index][column])
+
+
+def _short(value: str) -> str:
+    """报告里的数值：小数保留 6 位，其余原样。"""
+    try:
+        return num(Decimal(value)) if "." in value else value
+    except ArithmeticError:
+        return value or "—"
+
+
+def _delta(old: str, new: str) -> str:
+    return num(Decimal(new) - Decimal(old))
+
+
+def selection_lines(old: RunTables, new: RunTables) -> list[str]:
+    """选定设定与各级候选数。"""
+    changes = table_changes(old.trace, new.trace, ("step", "item"))
+    picked = {name: next(setting_name(row) for row in tables.settings if row["selected_as"])
+              for name, tables in (("old", old), ("new", new))}
+    same = picked["old"] == picked["new"]
+    rows = [(row["step"], row["item"], before["value"], row["value"],
+             UNCHANGED if row["value"] == before["value"] else "有变化")
+            for before, row in zip(old.trace, new.trace, strict=True)]
+    return ["## 一、选定设定与各级候选数", "",
+            f"- 选定设定：原结果 {picked['old']}；修正后 {picked['new']}。**{'没有改变' if same else '发生改变'}。**",
+            f"- 选择追踪共 {len(rows)} 行，其中 {len(changes)} 行的取值有变化。", "",
+            *table(("步骤", "事项", "原结果", "修正后", "比较"), rows), ""]
+
+
+def score_lines(old: RunTables, new: RunTables) -> list[str]:
+    """各设定的 T、T价格、非绿占比、切换次数。"""
+    rows = []
+    for before, after in paired(old.settings, new.settings):
+        changed = any(field_value(before, field) != field_value(after, field)
+                      for field in ("timing_score", "price_score", "non_green_share", "billed_switches"))
+        rows.append((setting_name(after), _short(before["timing_score"]), _short(after["timing_score"]),
+                     _delta(before["timing_score"], after["timing_score"]), num(price_score(before)),
+                     num(price_score(after)), share(Decimal(before["non_green_share"])),
+                     share(Decimal(after["non_green_share"])), before["billed_switches"], after["billed_switches"],
+                     "有变化" if changed else UNCHANGED))
+    return ["## 二、各设定的 T、T价格、非绿占比与切换次数", "",
+            "T 为安全代理择时得分（越小越好）；T价格 = T − 切换项。不含 BW 的设定（P1·E2）应当没有变化。", "",
+            *table(("设定", "T 原", "T 修正后", "T 之差", "T价格 原", "T价格 修正后", "非绿占比 原", "非绿占比 修正后",
+                    "切换 原", "切换 修正后", "比较"), rows), ""]
+
+
+def delay_lines(old: RunTables, new: RunTables) -> list[str]:
+    """转绿延迟、三类件数与三项可行条件。"""
+    rows = []
+    fields = ("spx_green_delay_median", "qqq_green_delay_median", "spx_class_1", "spx_class_2", "spx_class_3",
+              "qqq_class_1", "qqq_class_2", "qqq_class_3", "non_green_ok", "green_delay_spx_ok", "green_delay_qqq_ok")
+    for before, after in paired(old.settings, new.settings):
+        cells = []
+        for row in (before, after):
+            cells.extend((f"{row['spx_green_delay_median'] or '—'}（{row['spx_class_1']}/{row['spx_class_2']}/"
+                          f"{row['spx_class_3']}）",
+                          f"{row['qqq_green_delay_median'] or '—'}（{row['qqq_class_1']}/{row['qqq_class_2']}/"
+                          f"{row['qqq_class_3']}）",
+                          "/".join(row[name] for name in ("non_green_ok", "green_delay_spx_ok",
+                                                          "green_delay_qqq_ok"))))
+        changed = any(before[name] != after[name] for name in fields)
+        rows.append((setting_name(after), *cells, "有变化" if changed else UNCHANGED))
+    return ["## 三、转绿延迟与可行条件", "",
+            "转绿延迟为类别②事件的中位数（交易日），括号内为类别①/②/③件数；条件依次为非绿占比、SPX 转绿延迟、"
+            "QQQ 转绿延迟是否满足。", "",
+            *table(("设定", "SPX 原", "QQQ 原", "条件 原", "SPX 修正后", "QQQ 修正后", "条件 修正后", "比较"), rows),
+            ""]
+
+
+def window_lines(old: RunTables, new: RunTables) -> list[str]:
+    """收敛日、τ、j₀、事件纳入数与参照行。"""
+    convergence = table_changes(old.convergence, new.convergence, SETTING_KEY)
+    scope = table_changes(old.scope, new.scope, ("symbol",))
+    references = table_changes(old.references, new.references, ("reference",))
+    first = new.convergence[0]
+    lines = ["## 四、收敛日、评价窗口、事件纳入数与参照行", "",
+             f"- t0 = {first['t0']}，τ = {first['tau']}，j₀ = {first['first_loss_day']}（修正后）。"
+             f"各设定的系统收敛日与 t0、τ、j₀：{_changes(convergence)}",
+             f"- 事件纳入数（`event_scope_counts.csv`，两资产各类件数）：{_changes(scope)}",
+             f"- 参照行（始终绿、黄、红与 200 日均线，`reference_rows.csv`）：{_changes(references)}", ""]
+    for title, changes in (("收敛日与评价窗口的变化", convergence), ("事件纳入数的变化", scope),
+                           ("参照行的变化", references)):
+        if changes:
+            lines.extend([f"**{title}**", "", *table(("行", "列", "原结果", "修正后"), changes), ""])
+    return lines
+
+
+def _changes(changes: Sequence[Row]) -> str:
+    return f"{UNCHANGED}。" if not changes else f"有 {len(changes)} 处变化，见下表。"
+
+
+def report_lines(old: RunTables, new: RunTables, extra: Sequence[str]) -> list[str]:
+    """对比报告；extra 为附加的小节（带缓冲带均线的参照行、来源与哈希）。"""
+    return ["# v1.4 开发期评价：BW 纠错前后对比", "", OPENING, "",
+            "纠错内容：BW 的退出谓词改为规格原文“W 连续 3 个有效日 > 40，且当日 C_t > C_{t−5}”；"
+            "此前的实现要求价格条件也连续 3 日成立（见 `docs/research/v1.4_一致性审计.md` 的 B-1）。"
+            "其余规则、候选集合（K、θ_P 九组）、可行条件、三级选择程序、事件标签、主损失与 γ 都没有改动。", "",
+            *selection_lines(old, new), *score_lines(old, new), *delay_lines(old, new), *window_lines(old, new),
+            *extra]
