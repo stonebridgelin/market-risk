@@ -1,0 +1,3 @@
+symbol,events,右截尾,起点之前结束,跨起点,完整纳入并进事件账,完整纳入但高点前20天不足,complete_for_penalty,in_event_ledger
+SPX,120,0,93,0,26,1,27,26
+QQQ,104,0,81,0,22,1,23,22
