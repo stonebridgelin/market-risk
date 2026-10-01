@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import pytest
 
-from market_risk.research.io import _label_rows, _rows, _values
+from market_risk.research.io import _rows, _values, label_rows
 from market_risk.wavewarn.inputs import development_series
 
 
@@ -33,12 +33,12 @@ def test_grouped_label_checks_all_date_columns_without_global_sort(tmp_path) -> 
     path.write_text("high_date,low_date,confirm_date,recovery_date\n"
                     "2022-05-01,2022-06-01,,\n2020-01-01,2020-02-01,,\n", encoding="utf-8")
     # 多资产／层级分组可使高点日回退，标签读取仍须保留两行。
-    assert len(list(_label_rows(path, ("high_date", "low_date", "confirm_date", "recovery_date")))) == 2
+    assert len(list(label_rows(path, ("high_date", "low_date", "confirm_date", "recovery_date")))) == 2
     path.write_text("high_date,low_date,confirm_date,recovery_date\n"
                     "2022-05-01,,2023-01-03,\n", encoding="utf-8")
     # 低点被屏蔽为空也不能容许另一日期列泄漏到保留期。
     with pytest.raises(ValueError, match=r"标签文件含保留期日期.*confirm_date"):
-        list(_label_rows(path, ("high_date", "low_date", "confirm_date", "recovery_date")))
+        list(label_rows(path, ("high_date", "low_date", "confirm_date", "recovery_date")))
 
 
 def test_outcome_screened_window_and_wavewarn_input_boundaries(tmp_path) -> None:
@@ -46,9 +46,32 @@ def test_outcome_screened_window_and_wavewarn_input_boundaries(tmp_path) -> None
     path.write_text("base_date,window_start,window_end,event_date\n"
                     "2022-12-01,2022-12-02,2023-01-03,\n", encoding="utf-8")
     with pytest.raises(ValueError, match="window_end"):
-        list(_label_rows(path, ("base_date", "window_start", "window_end", "event_date")))
+        list(label_rows(path, ("base_date", "window_start", "window_end", "event_date")))
     wavewarn = tmp_path / "wavewarn.csv"
     wavewarn.write_text("date,value\n2016-12-30,100\n2017-01-03,NOT_A_PRICE\n"
                         "2023-01-03,ALSO_NOT_A_PRICE\n", encoding="utf-8")
     assert development_series(wavewarn, "value", dt.date(2016, 12, 30)) == {
         dt.date(2016, 12, 30): Decimal(100)}
+
+
+def test_label_error_names_file_column_and_cutoff_by_scope(tmp_path) -> None:
+    """报错文字按截止日区分，并写出文件名、日期列与截止日；越界行的其他内容不被解析。"""
+    path = tmp_path / "episode_windows.csv"
+    # 第二行日期在保留期，score 列是一旦按数值解析就会抛错的内容；应先触发保留期日期错误。
+    path.write_text("high_date,date,score\n2022-12-01,2022-12-30,3\n2022-12-01,2023-01-03,NOT_A_NUMBER\n",
+                    encoding="utf-8")
+    with pytest.raises(ValueError, match=r"标签文件含保留期日期：episode_windows\.csv / date / 2023-01-03"
+                                         r"（截止日 2022-12-30）"):
+        [int(row["score"]) for row in label_rows(path, ("high_date", "date"))]
+    # 默认截止日是 2022-12-30：2022-12-31 也算越界，不依赖排序、不跳过。
+    path.write_text("high_date,date\n2022-12-31,2022-12-01\n2020-01-02,2020-01-03\n", encoding="utf-8")
+    with pytest.raises(ValueError, match=r"含保留期日期：episode_windows\.csv / high_date / 2022-12-31"):
+        list(label_rows(path, ("high_date", "date")))
+    # 开发期截止日（2016-12-30）之后是验证期，不称保留期。
+    zz = tmp_path / "zz_events_development.csv"
+    zz.write_text("peak_date,trough_date\n2016-12-20,2017-01-03\n", encoding="utf-8")
+    with pytest.raises(ValueError, match=r"标签文件越过开发期截止日：zz_events_development\.csv / trough_date / "
+                                         r"2017-01-03（截止日 2016-12-30）"):
+        list(label_rows(zz, ("peak_date", "trough_date"), dt.date(2016, 12, 30)))
+    with pytest.raises(ValueError, match="不得晚于"):
+        list(label_rows(zz, ("peak_date", "trough_date"), dt.date(2023, 1, 3)))

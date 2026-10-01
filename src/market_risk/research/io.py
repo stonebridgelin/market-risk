@@ -33,15 +33,30 @@ def _rows(path: Path, date_field: str = "date", end: dt.date = END) -> Iterator[
             yield row
 
 
-def _label_rows(path: Path, date_fields: tuple[str, ...],
-                end: dt.date = END) -> Iterator[dict[str, str]]:
-    """分组标签不假设全局排序；所有日期列逐行不得越过截止日。"""
+# 第一类标签文件（本不应含保留期行）的截止日：验证期最后一个交易日（负责人 2026-10-01 规定）。
+LABEL_END = dt.date(2022, 12, 30)
+
+
+def cutoff_violation(end: dt.date) -> str:
+    """越界报错的说法随截止日区分：开发期截止日之后未必是保留期。"""
+    if end <= DEVELOPMENT_END:
+        return "越过开发期截止日"
+    if end <= END:
+        return "含保留期日期"
+    raise ValueError(f"研究读取的截止日不得晚于 {END.isoformat()}：{end.isoformat()}")
+
+
+def label_rows(path: Path, date_fields: tuple[str, ...],
+               end: dt.date = LABEL_END) -> Iterator[dict[str, str]]:
+    """分组标签不假设全局排序；所有日期列逐行不得越过截止日，越界即报错，不跳过。"""
+    violation = cutoff_violation(end)          # 截止日晚于验证期末时，打开文件前即拒绝
     with path.open(encoding="utf-8-sig", newline="") as file:
         for row in csv.DictReader(file):
             for field in date_fields:
                 value = row.get(field, "")
                 if value and dt.date.fromisoformat(value) > end:
-                    raise ValueError(f"标签文件含保留期日期：{path.name} / {field} / {value}")
+                    raise ValueError(f"标签文件{violation}：{path.name} / {field} / {value}"
+                                     f"（截止日 {end.isoformat()}）")
             yield row
 
 
@@ -99,7 +114,7 @@ def load_inputs(paths: StoragePaths, expected_run_id: str) -> ResearchInputs:
               for row in _rows(run / "daily_scores.csv")}
     metrics = {dt.date.fromisoformat(row["date"]): row for row in _rows(run / "daily_metrics.csv")}
     window_count = 0
-    for row in _label_rows(run / "episode_windows.csv", ("high_date", "date")):
+    for row in label_rows(run / "episode_windows.csv", ("high_date", "date")):
         day = dt.date.fromisoformat(row["date"])
         for version, prefix in (("v2-M", "v2m"), ("v3-R1", "v3r1")):
             score = scores.get((day, version))
@@ -110,7 +125,7 @@ def load_inputs(paths: StoragePaths, expected_run_id: str) -> ResearchInputs:
     episodes = []
     bear_spans = []
     excluded_episodes = []
-    for row in _label_rows(run / "pullback_episodes.csv",
+    for row in label_rows(run / "pullback_episodes.csv",
                            ("high_date", "low_date", "confirm_date", "recovery_date")):
         if row["symbol"] == "SPX" and row["level"] == "20":
             if row["low_date"] and row["status"] == "已确认":
