@@ -13,6 +13,7 @@ from typing import Literal
 
 from market_risk.wavewarn.config import load_wavewarn_config
 from market_risk.wavewarn.execution import ExecutionDay, execute_asset
+from market_risk.wavewarn.export import read_zz_events
 from market_risk.wavewarn.inputs import load_development_inputs
 from market_risk.wavewarn.labels_zz import ZZEvent
 from market_risk.wavewarn.ledgers import classify_asset_event
@@ -203,23 +204,6 @@ def _linear_percentile(values: Sequence[Decimal], probability: Decimal) -> Decim
     return ordered[left] if fraction == 0 else ordered[left] * (1 - fraction) + ordered[left + 1] * fraction
 
 
-def _read_events(path: Path, cutoff: dt.date) -> dict[str, tuple[ZZEvent, ...]]:
-    result: dict[str, list[ZZEvent]] = {"SPX": [], "QQQ": []}
-    with path.open(encoding="utf-8-sig", newline="") as file:
-        for row in csv.DictReader(file):
-            peak = dt.date.fromisoformat(row["peak_date"])
-            if peak > cutoff:
-                raise ValueError("ZZ 事件超出开发期标签截止日")
-            end = dt.date.fromisoformat(row["end_date"]) if row["end_date"] else None
-            event = ZZEvent(row["symbol"], peak, dt.date.fromisoformat(row["t0_date"]),
-                            dt.date.fromisoformat(row["trough_date"]), end,
-                            Decimal(row["peak_close"]), Decimal(row["trough_close"]),
-                            row["right_censored"] == "是")
-            result[event.symbol].append(event)
-    return {symbol: tuple(sorted(events, key=lambda event: event.peak_date))
-            for symbol, events in result.items()}
-
-
 def run_development_exit_costs(root: Path) -> Path:
     """只输出开发期 P1 三种 E 的描述性代价；不组合 N 或计算主损失。"""
     config = load_wavewarn_config(root / "config/wavewarn_v121.yaml")
@@ -240,7 +224,7 @@ def run_development_exit_costs(root: Path) -> Path:
         raise ValueError("P1 的 t0 不一致")
     t0 = next(iter(t0_values))
     tau_e = common_exit_start(inputs.days, t0, convergence)
-    events = _read_events(base / "zz_events_development.csv", config.development_end())
+    events = read_zz_events(base / "zz_events_development.csv", config.development_end())
     tail_symbols: set[str] = set()
     with (base / "zz_unknown_development.csv").open(encoding="utf-8-sig", newline="") as file:
         for row in csv.DictReader(file):

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import csv
+import datetime as dt
 import json
+from decimal import Decimal
 from pathlib import Path
 
 from market_risk.wavewarn.config import WavewarnConfig
@@ -21,6 +23,24 @@ def _event_row(event: ZZEvent) -> tuple[str, ...]:
     return (event.symbol, event.peak_date.isoformat(), event.t0_date.isoformat(),
             event.trough_date.isoformat(), event.end_date.isoformat() if event.end_date else "",
             str(event.peak_close), str(event.trough_close), "是" if event.right_censored else "否")
+
+
+def read_zz_events(path: Path, cutoff: dt.date) -> dict[str, tuple[ZZEvent, ...]]:
+    """读回已导出的分资产 ZZ 事件；高点晚于标签截止日即报错。"""
+    result: dict[str, list[ZZEvent]] = {"SPX": [], "QQQ": []}
+    with path.open(encoding="utf-8-sig", newline="") as file:
+        for row in csv.DictReader(file):
+            peak = dt.date.fromisoformat(row["peak_date"])
+            if peak > cutoff:
+                raise ValueError("ZZ 事件超出开发期标签截止日")
+            end = dt.date.fromisoformat(row["end_date"]) if row["end_date"] else None
+            event = ZZEvent(row["symbol"], peak, dt.date.fromisoformat(row["t0_date"]),
+                            dt.date.fromisoformat(row["trough_date"]), end,
+                            Decimal(row["peak_close"]), Decimal(row["trough_close"]),
+                            row["right_censored"] == "是")
+            result[event.symbol].append(event)
+    return {symbol: tuple(sorted(events, key=lambda event: event.peak_date))
+            for symbol, events in result.items()}
 
 
 def write_development_labels(inputs: DevelopmentInputs, destination: Path,

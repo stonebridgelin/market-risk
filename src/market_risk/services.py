@@ -93,7 +93,7 @@ def research_zz_v121_sides(ctx: Context) -> Any:
 
 def wavewarn_calibrate_exit_development(ctx: Context) -> Path:
     """生成开发期退出代价的描述性校准，不参与模型选参。"""
-    from market_risk.wavewarn.calibration import run_exit_calibration
+    from market_risk.wavewarn.calibration_run import run_exit_calibration
 
     try:
         return run_exit_calibration(ctx.paths.root)
