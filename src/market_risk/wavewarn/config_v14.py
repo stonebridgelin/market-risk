@@ -176,3 +176,36 @@ def load_validation_config(path: Path) -> ValidationConfig:
     if not isinstance(raw, dict) or not isinstance(raw.get("base"), str):
         raise ValueError("wavewarn v1.4 验证期配置格式错误或缺少 base")
     return parse_validation_config(raw, load_v14_config(path.parent / raw["base"]))
+
+
+@dataclass(frozen=True)
+class Round2Config:
+    """第二轮开发期诊断（补充登记 D）的参数；不含任何 v1.4 规则，不参与任何判定。"""
+
+    reversal_windows: tuple[int, ...]      # 短期反转的观察窗口（交易日）
+    green_window: int                      # 低点后观察转绿的交易日数
+    rolling_windows: tuple[int, ...]       # 最差滚动收益的窗口（交易日）
+    trading_days_per_year: int             # 年化收益、年化波动率与“年均”所用的年交易日数
+    output: str
+
+
+def parse_round2_config(raw: dict[str, Any]) -> Round2Config:
+    """观察窗口必须等于补充登记 D 写明的值。"""
+    if raw.get("version") != "v1.4-diagnostics-round2":
+        raise ValueError("wavewarn v1.4 第二轮诊断配置版本错误")
+    config = Round2Config(tuple(int(item) for item in raw.get("reversal_windows", ())), int(raw.get("green_window", 0)),
+                          tuple(int(item) for item in raw.get("rolling_windows", ())),
+                          int(raw.get("trading_days_per_year", 0)), str(raw.get("output")))
+    if (config.reversal_windows, config.green_window, config.rolling_windows) != ((5, 10), 8, (20, 60, 120)):
+        raise ValueError("短期反转、转绿观察或滚动收益的窗口与补充登记不一致")
+    if config.trading_days_per_year <= 0:
+        raise ValueError("年交易日数必须为正")
+    return config
+
+
+def load_round2_config(path: Path) -> Round2Config:
+    with path.open(encoding="utf-8") as file:
+        raw = yaml.safe_load(file)
+    if not isinstance(raw, dict):
+        raise ValueError("wavewarn v1.4 第二轮诊断配置格式错误")
+    return parse_round2_config(raw)

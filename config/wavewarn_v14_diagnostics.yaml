@@ -1,0 +1,17 @@
+# 波段预警 v1.4 第二轮开发期诊断（补充登记 D）的参数。只作描述，不参与任何判定；
+# 不含任何 v1.4 规则。诊断对象的 K、θ_P 取 wavewarn_v14_validation.yaml 的锁定设定。
+version: v1.4-diagnostics-round2
+
+# 短期反转：每次切换随后 5 个、10 个交易日内是否出现反方向切换（两个窗口分别报告）
+reversal_windows: [5, 10]
+
+# 转绿：低点后 8 个交易日内是否转绿；并标记事件是否有完整的 8 个交易日观察窗口
+green_window: 8
+
+# 完整净值：最差滚动 20、60、120 日收益
+rolling_windows: [20, 60, 120]
+
+# 年化收益、年化波动率与“年均目标暴露变化量”按每年 252 个交易日折算
+trading_days_per_year: 252
+
+output: reports/research/wavewarn_v14/diagnostics_round2

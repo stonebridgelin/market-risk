@@ -208,6 +208,16 @@ def wavewarn_v14_rehearse_validation(ctx: Context, lock_draft: Path) -> Any:
         raise ServiceError(str(exc)) from exc
 
 
+def wavewarn_v14_diagnostics_round2(ctx: Context) -> Any:
+    """v1.4 第二轮开发期诊断（切换、转绿、完整净值）：只用开发期数据，只作描述，不参与任何判定。"""
+    from market_risk.wavewarn.diagnostics_round2_run import run_v14_round2
+
+    try:
+        return run_v14_round2(ctx.paths.root)
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
 # ---------------------------------------------------------------------------
 # 日期与样本
 # ---------------------------------------------------------------------------

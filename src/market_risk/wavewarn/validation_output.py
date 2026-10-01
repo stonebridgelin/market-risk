@@ -71,15 +71,19 @@ class DailyHashes:
     compressed: str
 
 
-def compress_daily(destination: Path, gzip_executable: str) -> DailyHashes:
-    """逐日明细用 gzip -n 压缩（不含文件名与时间戳），只保留 .gz；返回压缩前后的 SHA-256。"""
-    source = destination / DAILY_NAME
-    packed = destination / (DAILY_NAME + ".gz")
+def gzip_file(source: Path, gzip_executable: str) -> DailyHashes:
+    """用 gzip -n 压缩一个文件（不含文件名与时间戳），只保留 .gz；返回压缩前后的 SHA-256。"""
+    packed = source.with_name(source.name + ".gz")
     raw = file_sha256(source)
     done = subprocess.run([gzip_executable, "-n", str(source)], capture_output=True, check=False)
     if done.returncode != 0 or source.exists() or not packed.is_file():
-        raise OSError("gzip -n 压缩逐日明细失败")
+        raise OSError(f"gzip -n 压缩失败：{source.name}")
     return DailyHashes(raw, file_sha256(packed))
+
+
+def compress_daily(destination: Path, gzip_executable: str) -> DailyHashes:
+    """逐日明细用 gzip -n 压缩，只保留 .gz。"""
+    return gzip_file(destination / DAILY_NAME, gzip_executable)
 
 
 def write_lock_info(destination: Path, lock: LockInfo, head: str, daily: DailyHashes) -> None:

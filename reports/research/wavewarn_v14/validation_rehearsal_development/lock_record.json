@@ -1,7 +1,10 @@
 {
   "lock_record": "docs/research/v14_锁定记录_草稿.md",
-  "lock_record_sha256": "6D70F1BE8C49EF325B03E8CA15968B3B838E18FDE4E5B973B64E19F5F5832385",
+  "lock_record_sha256": "A54FA2EA346FB3F84FEF96D813E848B85676E262C01BFE961129873493787CF2",
   "code_commit": "5bc227f",
   "head": "",
-  "formal": false
+  "formal": false,
+  "daily_selected_csv_sha256": "4257155AAF6CDD34C4B04E3D6A8C1EEBA26F378E6CCD830645FBE71D4C45F561",
+  "daily_selected_csv_gz_sha256": "04C87701F5219F8E93B451C4EC6C81590694013405B84A1F5383E2102CD455D5",
+  "compression": "gzip -n"
 }

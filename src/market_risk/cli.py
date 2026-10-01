@@ -705,6 +705,14 @@ def wavewarn_v14_rehearse_validation(
     typer.echo(f"逐日明细 SHA-256：压缩前 {run.daily_sha256}；gzip -n 压缩后 {run.daily_gz_sha256}。")
 
 
+@wavewarn_app.command("v14-diagnostics-round2")
+def wavewarn_v14_diagnostics_round2() -> None:
+    """v1.4 第二轮开发期诊断（切换、转绿、完整净值）；只用开发期数据，不参与任何判定。"""
+    run = _call(services.wavewarn_v14_diagnostics_round2, _ctx())
+    typer.echo(f"已写入 v1.4 第二轮开发期诊断：{run.intervals} 个区间，{run.first_interval} 至 {run.last_day}。")
+    typer.echo(f"报告 SHA-256 {run.report_sha256}。输出目录：{run.output}")
+
+
 @backtest_app.command("zigzag-check")
 def backtest_zigzag_check(
     symbol: Annotated[str, typer.Option("--symbol", help="SPX 或 QQQ")],
