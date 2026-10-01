@@ -12,8 +12,6 @@ import datetime as dt
 from decimal import Decimal
 from pathlib import Path
 
-import pytest
-
 from market_risk.wavewarn.calibration import distribution
 from market_risk.wavewarn.channels import (
     ChannelDay,
@@ -88,14 +86,49 @@ def _bw(breadth: tuple[str | None, ...], price_up: tuple[bool, ...]) -> list[boo
     return [item.exit for item in breadth_predicates(features, "BW", FIXED)]
 
 
-@pytest.mark.xfail(strict=True, reason="审计 (b) 类偏差 B-1：现行代码把 BW 退出的价格条件也放进了“连续 3 日”")
 def test_bw_exit_needs_three_breadth_days_but_price_only_today() -> None:
     """规格：“W 连续 3 个有效日 > 40，且 C_t > C_{t−5}”——连续 3 日只管广度，价格条件只看当日。
 
     近 3 日广度都是 41，价格条件依次为假、真、真：第 3 日广度已连续 3 日 > 40、当日价格条件为真 → 退出。
     错误写法（把价格条件也放进连续 3 日的括号里）在第 3 日不退出。
+    审计时这是唯一会改变输出的偏差（B-1），本案例当时标记为预期失败；补丁 f_BW 之后必须通过。
     """
     assert _bw(("41", "41", "41"), (False, True, True)) == [False, False, True]
+
+
+def _bw_run(rows: list[AssetFeatures]) -> list[tuple[str, bool]]:
+    states = run_channel(DAYS[:len(rows)], breadth_predicates(rows, "BW", FIXED), "active")
+    return [(item.status, item.valid) for item in states]
+
+
+def test_bw_missing_breadth_day_resets_the_streak() -> None:
+    """缺值政策沿用原有规则：BW 所需任一输入缺失的一天，连续日计数清零，当日不判断退出，通道保持原状态。
+
+    价格条件每天为真，广度 41、41、缺、41、41、41（自激活起）：行号 0、1 只连续 1、2 日 → 维持；
+    行号 2 广度缺失 → 当日无效、保持激活；行号 3、4 只连续 1、2 个有效日 → 维持（若缺值不清零，行号 3 就会退出）；
+    行号 5 连续 3 个有效日 → 退出。
+    """
+    rows = [_feature(index, breadth=None if index == 2 else D(41), close=D(101), close_t5=D(100))
+            for index in range(6)]
+    assert _bw_run(rows) == [("active", True), ("active", True), ("active", False), ("active", True),
+                             ("active", True), ("unarmed", True)]
+
+
+def test_bw_missing_price_today_resets_the_streak_and_keeps_the_channel() -> None:
+    """广度每天 41。行号 2 当日收盘价缺失：当日不判断退出、通道无效并保持激活，连续日计数清零；
+
+    行号 3、4 只连续 1、2 个有效日 → 维持；行号 5 连续 3 个有效日且当日价格条件为真 → 退出。
+    5 日前收盘价缺失的一天同样处理（行号 2 改为缺 C_{t−5}，结果相同）。
+    若把“价格缺失”只当作当日价格条件不成立而不清零，行号 3 就会退出。
+    """
+    def rows(missing: str) -> list[AssetFeatures]:
+        values = {"breadth": D(41), "close": D(101), "close_t5": D(100)}
+        return [_feature(index, **({**values, missing: None} if index == 2 else values)) for index in range(6)]
+
+    expected = [("active", True), ("active", True), ("active", False), ("active", True), ("active", True),
+                ("unarmed", True)]
+    assert _bw_run(rows("close")) == expected
+    assert _bw_run(rows("close_t5")) == expected
 
 
 def test_bw_exit_breadth_streak_and_price_boundaries() -> None:

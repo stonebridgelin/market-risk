@@ -133,8 +133,12 @@ def breadth_predicates(features: Sequence[AssetFeatures], channel: Literal["B", 
     collapse_repair_breadth = fixed.collapse_repair_breadth if fixed else Decimal("40")
     repair_days = fixed.breadth_repair if fixed else 3
     repair = [_compare(item.breadth, ">=", item.median60) for item in features]
-    collapse_repair = [_all(_compare(item.breadth, ">", collapse_repair_breadth),
-                            _compare(item.close, ">", item.close_t5)) for item in features]
+    # BW 退出（规格原文）：W 连续 3 个有效日 > 40，且当日 C_t > C_{t−5}——连续 3 日只约束广度，价格条件只看当日。
+    # 2026-10-01 纠错 f_BW：此前把价格条件也放进了连续 3 日的合取（docs/research/v1.4_一致性审计.md 的 B-1）。
+    # 缺值处理沿用原有规则：当日广度、当日收盘价、5 日前收盘价任一缺失的一天，连续日计数清零，当日不判断退出。
+    collapse_price = [_compare(item.close, ">", item.close_t5) for item in features]
+    collapse_breadth = [None if price is None else _compare(item.breadth, ">", collapse_repair_breadth)
+                        for item, price in zip(features, collapse_price, strict=True)]
     result = []
     for index, item in enumerate(features):
         if channel == "B":
@@ -149,7 +153,7 @@ def breadth_predicates(features: Sequence[AssetFeatures], channel: Literal["B", 
         elif channel == "BW":
             entry = _all(_compare(item.drawdown63, ">=", collapse_min),
                          _compare(item.breadth, "<=", collapse_max_breadth))
-            exit = _streak(collapse_repair, index, repair_days)
+            exit = _all(_streak(collapse_breadth, index, repair_days), collapse_price[index])
         else:
             raise ValueError(channel)
         result.append(ChannelPredicate(entry, exit, entry is False if entry is not None else None,
