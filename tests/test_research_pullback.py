@@ -123,7 +123,34 @@ def test_downgrade_before_danger_start_keeps_full_tail() -> None:
     assert result["spx_downgrade_to_min_pct"] == (Decimal("60") / Decimal("95") - 1) * 100
 
 
+def test_danger_period_merge_sources_and_repeated_episodes_on_constructed_data() -> None:
+    """危险时段的合并逻辑（构造数据）：按闭区间相交合并，来源按成员所属指数区分，同一指数可以有多段成员。
+
+    九个交易日（行号 0—8）。五段回调：SPX [0,0]、QQQ [1,1]、SPX [3,4]、QQQ [4,6]、SPX [6,7]。
+    SPX [0,0] 与 QQQ [1,1] 只是相邻、不相交 → 各自成段，来源分别为 SPX、QQQ。
+    后三段在行号 4、6 处相接，传递合并为 [3,7]，来源“双指数”，其中 SPX 有两段成员。
+    所以共 3 个危险时段：双指数 1、SPX 1、QQQ 1；含同一指数多段成员的只有 [3,7]。
+    """
+    days = _days()
+    episodes = (Episode("SPX", days[0], days[0], Decimal("100")), Episode("QQQ", days[1], days[1], Decimal("200")),
+                Episode("SPX", days[3], days[4], Decimal("100")), Episode("QQQ", days[4], days[6], Decimal("200")),
+                Episode("SPX", days[6], days[7], Decimal("100")))
+    periods = build_danger_periods(episodes, _prices(days), days)
+    assert [(p.start, p.end, p.source) for p in periods] == [
+        (days[0], days[0], "SPX"), (days[1], days[1], "QQQ"), (days[3], days[7], "双指数")]
+    multi = [(p.start, p.end) for p in periods
+             if sum(e.symbol == "SPX" for e in p.members) > 1 or sum(e.symbol == "QQQ" for e in p.members) > 1]
+    assert multi == [(days[3], days[7])]
+    assert [sum(p.source == name for p in periods) for name in ("双指数", "SPX", "QQQ")] == [1, 1, 1]
+
+
+@pytest.mark.full_period
 def test_formal_danger_period_counts() -> None:
+    """需另行授权的全期回归（《暂停与纠错登记》补充裁决第 11 条）：保留，但默认不运行。
+
+    它读取完整的正式回测（含 2017 年以后的数据），核对的是全期人工核对的危险时段件数；
+    合并逻辑本身由上面的构造数据测试覆盖。未经负责人授权不得用 `-m full_period` 运行。
+    """
     root = Path(__file__).resolve().parents[1]
     inputs = load_inputs(StoragePaths(root), "run_20260928T112013Z_2cc8969")
     periods = build_danger_periods(inputs.episodes, inputs.market, inputs.days)

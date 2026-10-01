@@ -17,6 +17,7 @@ import pytest
 from market_risk.wavewarn.calibration import distribution
 from market_risk.wavewarn.channels import (
     ChannelDay,
+    ChannelPredicate,
     breadth_predicates,
     price_predicates,
     run_channel,
@@ -25,9 +26,16 @@ from market_risk.wavewarn.channels import (
 )
 from market_risk.wavewarn.config_v14 import NON_GREEN, REGISTERED_TIERS, V14Limits, load_v14_config
 from market_risk.wavewarn.convergence import loss_start
-from market_risk.wavewarn.evaluation import first_loss_interval
-from market_risk.wavewarn.execution import execute_asset
-from market_risk.wavewarn.feasibility_v14 import GreenDelay, TierItem, condition_flags, select_by_tiers
+from market_risk.wavewarn.evaluation import Candidate, CandidateEvaluation, first_loss_interval
+from market_risk.wavewarn.execution import ExecutionDay, execute_asset
+from market_risk.wavewarn.exit_costs import ExitCostEvent, exit_cost_for_event
+from market_risk.wavewarn.feasibility_v14 import (
+    GreenDelay,
+    TierItem,
+    condition_flags,
+    green_delay,
+    select_by_tiers,
+)
 from market_risk.wavewarn.features import (
     AssetFeatures,
     asset_features,
@@ -35,12 +43,21 @@ from market_risk.wavewarn.features import (
     new_low20,
     q_from_new_lows,
     rolling_high,
+    vix_term_ratio,
 )
-from market_risk.wavewarn.labels_zz import ZZEvent, dangerous_interval, find_zz_events
-from market_risk.wavewarn.loss import LossParameters, asset_price_loss, daily_main_loss
+from market_risk.wavewarn.labels_zz import (
+    ZZEvent,
+    build_unknown_labels,
+    dangerous_interval,
+    find_zz_events,
+    merge_zz_events,
+    right_censored_unknown,
+    terminal_peak_unknown,
+)
+from market_risk.wavewarn.loss import LossParameters, MainLossDay, asset_price_loss, daily_main_loss
 from market_risk.wavewarn.state_machine import ReadyInputs, SystemMemory, release_f_step
-from market_risk.wavewarn.timing import ma200_signals
-from market_risk.wavewarn.v14_model import trend_predicates
+from market_risk.wavewarn.timing import benchmark_loss, ma200_signals, mean_executed_exposure, timing_result
+from market_risk.wavewarn.v14_model import release_f_sequence, trend_predicates
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXED = load_v14_config(ROOT / "config/wavewarn_v14.yaml").base.fixed_parameters()
@@ -421,3 +438,196 @@ def test_feasibility_boundaries_and_tie_break_order() -> None:
     # T 更小但不满足亮灯上限的设定不进入第 1、2 级；全部不满足时才进入第 3 级。
     blocked = TierItem("f", D("-0.9"), 1, 1, 9, {**flags, NON_GREEN: False})
     assert select_by_tiers([*items, blocked], REGISTERED_TIERS).selected.key == "d"
+
+
+# ---------------------------------------------------------------------------
+# 补齐：审计时只对照了代码与规格原文、没有另写案例的六条规则（L3、S4、F5、M5、T1、T6）
+# ---------------------------------------------------------------------------
+
+SPX_LEVELS = {"SPX": (D("0.04"), D("0.05")), "QQQ": (D("0.05"), D("0.065"))}
+
+
+def _prices(values: tuple[str, ...]) -> dict[dt.date, Decimal | None]:
+    return dict(zip(DAYS, _closes(values), strict=False))
+
+
+def test_l3_right_censored_and_tail_unknown_intervals() -> None:
+    """规格第四节第 4 条。
+
+    右截尾：收盘 100、95、94、96，标签截止于行号 3。95 ≤ 96 触发 T0（行号 1），低点 94（行号 2），
+    96 < 94×1.05 = 98.7 未结束 → 右截尾；暂定低点之后的区间 [Tr, 期末) = 行号 2 未定，危险区间仍是行号 0、1。
+    尾段（寻峰）：收盘 100、101、99、100.5，没有事件，候选高点在行号 1 → [行号 1, 期末) = 行号 1、2 未定。
+    期末当天严格新高（100、101、99、102）→ 候选高点就是期末，集合为空；并列高点（100、101、99、101）取最早 → 行号 1、2。
+    事件结束后重新寻峰：100、95、100、99、98，行号 2 是结束日（100 ≥ 95×1.05 = 99.75）也是新的候选高点
+    → 行号 2、3 未定；期末当天就是结束日（100、95、100）→ 集合为空。
+    """
+    days = DAYS[:4]
+    (event,) = find_zz_events("SPX", days, _prices(("100", "95", "94", "96")), days[3], SPX_LEVELS)
+    assert event.right_censored and (event.t0_date, event.trough_date) == (days[1], days[2])
+    assert right_censored_unknown(event, days, days[3]) == (days[2],)
+    assert dangerous_interval(event, days) == days[:2]
+    tail = lambda values: terminal_peak_unknown((), DAYS[:len(values)], list(_closes(values)))  # noqa: E731
+    assert tail(("100", "101", "99", "100.5")) == (DAYS[1], DAYS[2])
+    assert tail(("100", "101", "99", "102")) == ()
+    assert tail(("100", "101", "99", "101")) == (DAYS[1], DAYS[2])
+    closes = ("100", "95", "100", "99", "98")
+    ended = find_zz_events("SPX", DAYS[:5], _prices(closes), DAYS[4], SPX_LEVELS)
+    assert ended[0].end_date == DAYS[2] and not ended[0].right_censored
+    assert terminal_peak_unknown(ended, DAYS[:5], list(_closes(closes))) == (DAYS[2], DAYS[3])
+    short = find_zz_events("SPX", DAYS[:3], _prices(closes[:3]), DAYS[2], SPX_LEVELS)
+    assert terminal_peak_unknown(short, DAYS[:3], list(_closes(closes[:3]))) == ()
+    # 两类未定区间按资产分别生成，并带原因。
+    labels = build_unknown_labels({"SPX": (event,)}, days, {"SPX": _prices(("100", "95", "94", "96"))}, days[3])
+    assert labels.reasons_by_asset["SPX"] == {days[2]: "右截尾（寻底）"}
+
+
+def test_l3_merge_uses_closed_intervals_and_is_transitive() -> None:
+    """规格第四节第 5 条：闭区间 [P, Tr] 有交集（含端点相接）即合并，并传递合并。
+
+    A = SPX [0, 2]、B = QQQ [2, 4]、C = SPX [4, 5]：A 与 B 在行号 2 相接，B 与 C 在行号 4 相接，
+    A 与 C 不相交但经 B 传递合并为一组；D = QQQ [6, 7] 与前一组不相接（5 < 6），单独一组。
+    合并事件的 P、T0 取最早，Tr 取最晚；各资产自己的日期与价格保留在成员里。
+    """
+    def event(symbol: str, peak: int, trough: int) -> ZZEvent:
+        return ZZEvent(symbol, DAYS[peak], DAYS[peak], DAYS[trough], None, D(100), D(90), False)
+
+    a, b, c, d = event("SPX", 0, 2), event("QQQ", 2, 4), event("SPX", 4, 5), event("QQQ", 6, 7)
+    first, second = merge_zz_events((d, c, a, b))
+    assert (first.peak_date, first.trough_date, first.source) == (DAYS[0], DAYS[5], "SPX+QQQ")
+    assert set(first.members) == {a, b, c} and second.members == (d,) and second.source == "QQQ"
+
+
+def test_s4_channels_update_before_the_system_and_t0_is_a_snapshot() -> None:
+    """通道先更新、系统后判定；t0 是初始快照（绿灯、通道已武装），从下一交易日起才更新。
+
+    一个红灯通道，t0 = 行号 1。行号 1：进入谓词为真，但 t0 当日不更新 → 绿。
+    行号 2：进入 → 当日系统即为红（若系统先于通道判定，这一天会是绿）。行号 3：维持。
+    行号 4：退出谓词为真 → 通道当日退出，系统用更新后的通道状态，当日即可红转黄（先判系统则仍是红）。
+    行号 5：全部通道未激活 → 黄转绿。
+    """
+    predicate = lambda entry, leave: ChannelPredicate(entry, leave, not entry)  # noqa: E731
+    series = (predicate(False, False), predicate(True, False), predicate(True, False), predicate(True, False),
+              predicate(False, True), predicate(False, True))
+    ready = tuple(ReadyInputs(9, 9, None, None, None, None, None, True) for _ in range(6))
+    candidate = Candidate("V4", 5, D("0.025"), None, 0, "F")
+    rows = release_f_sequence(DAYS[:6], {"PR_SPX": ("红", series)}, ready, DAYS[1], candidate, FIXED)
+    assert [(row.date, row.light) for row in rows] == [
+        (DAYS[1], "绿"), (DAYS[2], "红"), (DAYS[3], "红"), (DAYS[4], "黄"), (DAYS[5], "绿")]
+    assert rows[0].reason == "t0 初始快照" and rows[1].active_channels == ("PR_SPX",)
+
+
+def test_f5_term_structure_ratio() -> None:
+    """R_t = VIX_t ÷ VIX3M_t；任一缺失即缺值（不用邻近值替代）。22 ÷ 20 = 1.1；19 ÷ 20 = 0.95。"""
+    assert vix_term_ratio(D(22), D(20)) == D("1.1") and vix_term_ratio(D(19), D(20)) == D("0.95")
+    assert vix_term_ratio(None, D(20)) is None and vix_term_ratio(D(22), None) is None
+
+
+def _manual(executed: tuple[str, ...], switched: tuple[bool, ...]) -> tuple[ExecutionDay, ...]:
+    level = {"绿": D(1), "黄": D("0.5"), "红": D(0)}
+    return tuple(ExecutionDay(DAYS[index], light, light, level[light], True, flag)  # type: ignore[arg-type]
+                 for index, (light, flag) in enumerate(zip(executed, switched, strict=True)))
+
+
+def test_m5_weights_excluded_asset_and_switch_follow_the_spec_numeric_example() -> None:
+    """规格第五节“排除区间的范围”的数值验收例（κ_D = 2、权重各 0.5、γ = 0.005）。
+
+    第 1 日 QQQ 缺价，其区间被排除；SPX 的区间 1 在危险区间内，r = ln(0.99)。N 在第 1 日收盘执行绿→红（暴露 0，
+    切换 1 次）；P1 保持绿灯（暴露 1，无切换）。
+    SPX：ℓ^N = 0；ℓ^{P1} = 2×1×0.010050 = 0.020101。QQQ：两者都记 0。
+    d = 0.5×(0 − 0.020101) + 0.005×(1 − 0) = −0.005050。
+    若当日两个资产都被排除（SPX 当日也缺价）：d = 0.005×(1 − 0) = +0.005000，切换罚分照计。
+    """
+    days = DAYS[:4]
+    weights = {"SPX": D("0.5"), "QQQ": D("0.5")}
+    event = ZZEvent("SPX", days[1], days[1], days[2], DAYS[200], D(100), D(99), False)
+    model = _manual(("绿", "红", "红", "红"), (False, True, False, False))
+    base = _manual(("绿",) * 4, (False,) * 4)
+
+    def total(executions: tuple[ExecutionDay, ...], spx: tuple[str | None, ...]) -> Decimal:
+        assets = {"SPX": asset_price_loss(days, _closes(spx), executions, (event,), PARAMS),
+                  "QQQ": asset_price_loss(days, _closes(("50", None, "50", "50")), executions, (), PARAMS)}
+        assert assets["QQQ"][1].excluded_reason == "跨缺价区间" and assets["QQQ"][1].price_loss == 0
+        return daily_main_loss(days, assets, executions, weights, PARAMS)[1].total
+
+    priced = ("100", "100", "99", "99")
+    difference = total(model, priced) - total(base, priced)
+    assert abs(difference - (D("0.005") - (D(100) / D(99)).ln())) < D("1e-24")
+    assert round(difference, 6) == D("-0.005050")
+    gap = ("100", None, "99", "99")
+    assert total(model, gap) - total(base, gap) == D("0.005")
+
+
+def test_t1_mean_exposure_counts_every_interval_and_score_formula() -> None:
+    """v1.3 修订登记第二节：ē = (1/|J|) Σ e_j，J 含被排除区间；T = L − [ē·L_G + (1−ē)·L_R]。
+
+    五天、四个区间，执行灯色 绿、黄、红、绿（末日的灯色不计）：ē = (1 + 0.5 + 0 + 1)/4 = 0.625。
+    区间 1 的价格损失为 0（被排除），仍计入分母（若剔除它，ē 会是 2/3）。非绿占比 = 2/4。
+    L = 0.1 + 0 + 0.2 + 0.05 = 0.35；L_G = 1、L_R = 0.2 → 基准 = 0.625×1 + 0.375×0.2 = 0.7；T = −0.35。
+    """
+    days = DAYS[:5]
+    losses = tuple(MainLossDay(day, D(value), D(0), D(0), D(0), D(0))
+                   for day, value in zip(days, ("0.1", "0", "0.2", "0.05", "0"), strict=True))
+    lights = ("绿", "黄", "红", "绿", "红")
+    evaluated = CandidateEvaluation(Candidate("V4", 5, D("0.025"), None, 0, "F"), days, lights, ("完整",) * 5,
+                                    ((),) * 5, ("",) * 5, {"SPX": _manual(lights, (False,) * 5)}, {}, losses, lights)
+    result = timing_result(evaluated, D("0.5"), D(1), D("0.2"))
+    assert (result.intervals, result.mean_exposure, result.benchmark_loss, result.score) == (
+        4, D("0.625"), D("0.7"), D("-0.35"))
+    assert result.non_green_share == D("0.5") and mean_executed_exposure(evaluated, D("0.5")) == D("0.625")
+    assert benchmark_loss(D(1), D(1), D("0.2")) == D(1) and benchmark_loss(D(0), D(1), D("0.2")) == D("0.2")
+
+
+def _exit(signals: tuple[str, ...], next_t0: int | None) -> ExitCostEvent:
+    closes = _closes(("98", "98", "98", "100", "97", "93", "90", "92", "94", "96", "97", "98"))
+    days = DAYS[:12]
+    event = ZZEvent("SPX", days[3], days[4], days[6], days[8], D(100), D(90), False)
+    executions = execute_asset(days, signals, closes, D("0.5"))  # type: ignore[arg-type]
+    return exit_cost_for_event(days, executions, closes, event, days[next_t0] if next_t0 is not None else None,
+                               days[0], days[1])
+
+
+def test_t6_green_delay_classes_are_anchored_on_the_light_executed_before_the_trough() -> None:
+    """分类锚点是最后一段下跌区间 Tr−1→Tr 的执行灯色，即第 Tr−1 天收盘执行的 S_{Tr−2}。事件 P=行号 3、Tr=行号 6。
+
+    甲：信号在行号 3 转红、4 转黄、5 转绿 → 执行灯色 行号 4 红、5 黄、6 绿。Tr−1（行号 5）执行黄 → 不是类别①；
+        首次绿灯执行日 g = 行号 6 = Tr → 类别②，延迟 0，R = 0。若错用 Tr 当日的执行灯色（绿）作锚点，会判成类别①。
+    乙：信号在行号 3 转红、4 转绿 → 行号 5 执行绿 → 类别①（低点前已绿），期间有一次低点前转绿。
+    丙：信号一直是红，行号 8 转绿 → g = 行号 9，早于下一事件 T0（行号 10）→ 类别②，延迟 3。
+    丁：信号在行号 9 才转绿 → g = 行号 10，不早于下一事件 T0 → 类别③，仍记录实际首次转绿日。
+    转绿延迟只统计类别②：(0, 3) → 中位 1.5；三类件数 1、2、1。
+    """
+    green, red = ("绿",), ("红",)
+    first = _exit((*green * 3, "红", "黄", *green * 7), 10)
+    second = _exit((*green * 3, "红", *green * 8), 10)
+    third = _exit((*green * 3, *red * 5, *green * 4), 10)
+    fourth = _exit((*green * 3, *red * 6, *green * 3), 10)
+    assert (first.rebound_class, first.first_green_from_trough, first.rebound_recovery) == (
+        "②低点或之后转绿", DAYS[6], D(0))
+    assert (second.rebound_class, second.half_way_green_count) == ("①低点前已绿", 1)
+    assert (third.rebound_class, third.first_green_from_trough) == ("②低点或之后转绿", DAYS[9])
+    assert (fourth.rebound_class, fourth.first_green_from_trough) == ("③下一事件前未转绿", DAYS[10])
+    delay = green_delay("SPX", DAYS[:12], (first, second, third, fourth))
+    assert (delay.class_1, delay.class_2, delay.class_3, delay.delays.median) == (1, 2, 1, D("1.5"))
+    # 没有下一事件时，窗口末日之前转绿都算类别②。
+    assert _exit((*green * 3, *red * 6, *green * 3), None).rebound_class == "②低点或之后转绿"
+
+
+def test_missing_value_clause_resets_the_streak_of_the_predicate_inputs() -> None:
+    """通用缺值条款（规格第三节“通道的每日更新”第 1 步）：输入缺失时状态不变、通道当日无效、连续有效日计数清零。
+
+    连续日计数函数的实际处理：当日输入缺失 → 谓词为缺值（通道无效、状态沿用）；窗口内此前某日缺失 → 那一天不算“真”，
+    连续被打断，须重新数满（清零）。V：0.94、缺、0.94、0.94 → 行号 3 只连续 2 日，不退出；行号 4 连续 3 日，退出。
+    清零的范围是“该谓词自己的输入”：激活的 BW 判断退出时，只看广度、当日收盘价与 5 日前收盘价；
+    只用于进入的 D 缺失不使通道无效，也不打断退出的连续计数（负责人确认过的“只检查当前状态相关操作”，
+    见审计 A-2；规格条款的字面是“进入或退出所需的任一输入”）。
+    """
+    ratios = _closes(("0.94", None, "0.94", "0.94", "0.94"))
+    states = run_channel(DAYS[:5], volatility_predicates(ratios, FIXED), "active")
+    assert [(item.status, item.valid) for item in states] == [
+        ("active", True), ("active", False), ("active", True), ("active", True), ("unarmed", True)]
+    features = [_feature(index, breadth=D(41), close=D(101), close_t5=D(100),
+                         drawdown63=None if index == 1 else D("0.03")) for index in range(3)]
+    predicates = breadth_predicates(features, "BW", FIXED)
+    assert predicates[1].entry is None and predicates[1].exit is False and predicates[2].exit is True
+    kept = run_channel(DAYS[:3], predicates, "active")
+    assert [(item.status, item.valid) for item in kept] == [("active", True), ("active", True), ("unarmed", True)]

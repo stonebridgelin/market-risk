@@ -44,8 +44,9 @@ build-backend = "uv_build"
 testpaths = ["tests"]
 # --basetemp：Windows 上 pytest 默认的临时目录会遇到 "pytest-current" 链接的权限问题与路径长度（260 字符）限制，
 # 固定为项目内较短的 .pytest_tmp/（每次运行开始时由 pytest 清空；已在 .gitignore 中排除）。在项目根目录运行。
-addopts = "-m 'not network and not mysql' --basetemp=.pytest_tmp"
+addopts = "-m 'not network and not mysql and not full_period' --basetemp=.pytest_tmp"
 markers = [
+    "full_period: 需另行授权的全期回归（读取完整正式回测，含 2017 年以后的数据），默认不运行；未经负责人授权不得运行",
     "network: 需要联网的测试，默认跳过；用 `uv run pytest -m network` 运行",
     "mysql: MySQL 兼容性集成测试，默认跳过；需 .env 的 MYSQL_VERIFY_URL，用 `uv run --extra mysql pytest -m mysql` 运行",
 ]
