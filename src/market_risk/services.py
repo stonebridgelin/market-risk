@@ -175,6 +175,36 @@ def wavewarn_fetch_vix3m_validation(ctx: Context) -> Any:
         raise ServiceError(str(exc)) from exc
 
 
+def wavewarn_v14_lock_check(ctx: Context, lock_record: Path) -> Any:
+    """只核对正式锁定记录与仓库是否一致；不读取任何数据，不运行验证期。"""
+    from market_risk.wavewarn.validation_run import check_v14_lock
+
+    try:
+        return check_v14_lock(ctx.paths.root, lock_record)
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def wavewarn_v14_validate(ctx: Context, lock_record: Path) -> Any:
+    """v1.4 验证期评价：只能在正式锁定之后运行一次；锁定记录核对不过或已有结果时拒绝。"""
+    from market_risk.wavewarn.validation_run import run_v14_validation
+
+    try:
+        return run_v14_validation(ctx.paths.root, lock_record)
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def wavewarn_v14_rehearse_validation(ctx: Context, lock_draft: Path) -> Any:
+    """用验证期的同一套流程在开发期上演练；不读取 2016-12-30 之后的数据，不构成任何证据。"""
+    from market_risk.wavewarn.validation_run import run_v14_rehearsal
+
+    try:
+        return run_v14_rehearsal(ctx.paths.root, lock_draft)
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
 # ---------------------------------------------------------------------------
 # 日期与样本
 # ---------------------------------------------------------------------------

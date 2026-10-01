@@ -676,6 +676,33 @@ def wavewarn_fetch_vix3m_validation() -> None:
                f"SHA-256 {meta['sha256']}。")
 
 
+LockRecordOpt = Annotated[Path, typer.Option("--lock-record", help="正式锁定记录的路径（须已单独提交）")]
+
+
+@wavewarn_app.command("v14-lock-check")
+def wavewarn_v14_lock_check(lock_record: LockRecordOpt) -> None:
+    """只核对正式锁定记录与仓库是否一致；不读取任何数据，不运行验证期。"""
+    check = _call(services.wavewarn_v14_lock_check, _ctx(), lock_record)
+    typer.echo(f"锁定记录核对通过：{check.path}，SHA-256 {check.sha256}；HEAD {check.head}。")
+
+
+@wavewarn_app.command("v14-validate")
+def wavewarn_v14_validate(lock_record: LockRecordOpt) -> None:
+    """v1.4 验证期评价：只能在正式锁定之后运行一次。结果只写入输出目录，不在此回显。"""
+    run = _call(services.wavewarn_v14_validate, _ctx(), lock_record)
+    typer.echo(f"已写入{run.title}：{run.intervals} 个区间；锁定记录 SHA-256 {run.lock_record_sha256}。")
+    typer.echo(f"输出目录：{run.output}")
+
+
+@wavewarn_app.command("v14-rehearse-validation")
+def wavewarn_v14_rehearse_validation(
+    lock_draft: Annotated[Path, typer.Option("--lock-draft", help="锁定记录草稿的路径")],
+) -> None:
+    """用验证期的同一套流程在开发期上演练；不是验证期结果，不构成任何证据。"""
+    run = _call(services.wavewarn_v14_rehearse_validation, _ctx(), lock_draft)
+    typer.echo(f"已写入演练（{run.title}）：{run.intervals} 个区间。输出目录：{run.output}")
+
+
 @backtest_app.command("zigzag-check")
 def backtest_zigzag_check(
     symbol: Annotated[str, typer.Option("--symbol", help="SPX 或 QQQ")],
