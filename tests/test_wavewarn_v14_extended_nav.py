@@ -20,6 +20,7 @@ import yaml
 from market_risk.wavewarn.buffered_ma import BUFFERED_MA200, buffered_ma_signals
 from market_risk.wavewarn.config_v14 import load_round2_config, load_validation_config, parse_round2_config
 from market_risk.wavewarn.diagnostics_round2 import MA200, PORTFOLIO, nav_rows
+from market_risk.wavewarn.diagnostics_round2_report import old_convention
 from market_risk.wavewarn.evaluation import evaluate_candidate, period_labels
 from market_risk.wavewarn.extended_history import truncate_inputs
 from market_risk.wavewarn.extended_history_v14 import prepare_price_window
@@ -92,6 +93,32 @@ def test_buffer_band_is_pinned_to_registration() -> None:
         parse_round2_config({**raw, "buffered_ma200": {"band": "0.02"}})
 
 
+def test_two_kinds_of_drawdown_inside_a_period() -> None:
+    """满仓、两资产同价，简单收益 +10%、−20%、+10%、−5%：全程净值 1 → 1.1 → 0.88 → 0.968 → 0.9196。
+
+    期间取 [行号 2, 行号 4)（起点为行号 2、3 的两个区间，收益 +10%、−5%）：
+    区间内回撤：净值在行号 2 重新记为 1 → 1.1 → 1.045，最大回撤 1 − 1.045/1.1 = 5%（行号 3 至 4），期间内未恢复，
+    谷底就是期末，已过 0 日；期间收益 +4.5%。
+    全程曲线在期间内的最深回撤：相对此前最高点 1.1（行号 1，在期间之前），行号 2、3、4 的回撤为 20%、12%、16.4%，
+    最深 20%。两种回撤不是同一个数：5% 对 20%。
+    """
+    days = DAYS[:5]
+    simple = (D("0.1"), D("-0.2"), D("0.1"), D("-0.05"))
+    rows = nav_rows("满仓", days, [D(1)] * 4, {"SPX": simple, "QQQ": simple},
+                    {"SPX": D("0.5"), "QQQ": D("0.5")}, 0, D(0), CONFIG)
+    (period,) = [row for row in period_rows(days, rows, ((days[2], days[4]),)) if row.scope == PORTFOLIO]
+    assert (period.intervals, period.period_return) == (2, D("0.045"))
+    assert (period.drawdown.depth, period.drawdown.peak_date, period.drawdown.trough_date) == (
+        D("0.05"), days[3], days[4])
+    assert (period.drawdown.decline_days, period.drawdown.recovery_days, period.drawdown.days_after_trough) == (
+        1, None, 0)
+    assert period.full_curve_depth == D("0.2")
+    # 全程曲线的最大回撤（不分期间）是 1.1 → 0.88 的 20%，到窗口末日未恢复，已过 2 日。
+    whole = rows[0].metrics.drawdown
+    assert (whole.depth, whole.peak_date, whole.trough_date, whole.recovery_days, whole.days_after_trough) == (
+        D("0.2"), days[1], days[2], None, 2)
+
+
 def test_period_rows_restart_wealth_inside_the_period() -> None:
     """满仓、两资产同价：收盘价 100、110、99、99、108.9 → 简单收益 +10%、−10%、0、+10%。
 
@@ -146,14 +173,19 @@ def test_executed_lights_match_the_loss_path_and_stored_extended_history(history
     for states, item in zip(prepared.states, result.grid, strict=True):
         evaluated = evaluate_candidate(prepared, states, events, unknown)
         assert executed_lights(prepared, states) == evaluated.system_executed == item.lights
-        # 诊断口径不计 j₀′ 当日的切换（初始建仓）；主损失的计费口径计入，所以恰好相差这一次。
-        assert evaluated.billed_switches == len(item.switches) + int(item.switch_at_start)
+        # 切换次数与主损失的计费口径一致：j₀′ 当日相对前一日的切换计入（暂停与纠错登记第 10 条）。
+        assert evaluated.billed_switches == len(item.switches)
+        assert item.switch_at_start == (states.candidate.theta_p == D("0.025"))
         row = stored[states.candidate.k, states.candidate.theta_p]
         assert D(row["mean_exposure"]) == item.mean_exposure
         assert int(row["billed_switches"]) == evaluated.billed_switches
     average = next(item for item in result.objects if item.name == MA200)
     assert executed_lights(prepared, ma200_states(prepared, VALIDATION.model.mr_window)) == average.lights
     assert not average.switch_at_start and len(average.switches) == 96
+    # 选定设定（K=5、θ_P=2.5%）在 j₀′ 当日恰有一次切换：现口径 322 次，旧口径（不计这一次）321 次。
+    selected = result.objects[0]
+    assert (len(selected.switches), old_convention(selected.switches)[0]) == (322, 321)
+    assert selected.switches[0].index == 0 and selected.switches[0].date == dt.date(1999, 9, 7)
 
 
 def test_objects_and_reference_rows_follow_definitions(history: ExtendedNavResult) -> None:

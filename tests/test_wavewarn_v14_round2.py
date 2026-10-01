@@ -46,6 +46,7 @@ from market_risk.wavewarn.nav import (
     max_drawdown,
     nav_metrics,
     portfolio_returns,
+    running_drawdowns,
     simple_returns,
     wealth_path,
     worst_rolling,
@@ -54,6 +55,7 @@ from market_risk.wavewarn.switch_diagnostics import (
     TimingSplit,
     break_even_gamma,
     exposure_change,
+    first_day_switches,
     holding_segments,
     holding_summary,
     reversal_count,
@@ -74,15 +76,14 @@ LIGHTS = ("黄", "黄", "绿", "黄", "红", "红", "黄", "绿", "绿", "红")
 DAYS = tuple(dt.date(2015, 12, 27) + dt.timedelta(days=index) for index in range(10))
 
 
-def test_switches_exclude_initial_position_and_terminal_day() -> None:
-    """窗口内相邻两日执行灯色不同才计：
+def test_switches_inside_the_window_and_terminal_day() -> None:
+    """窗口前一日的执行灯色也是黄（j₀ 当日没有切换）：
 
     行号 2 黄→绿（+0.5）、3 绿→黄（−0.5）、4 黄→红（−0.5）、6 红→黄（+0.5）、7 黄→绿（+0.5），共 5 次；
-    行号 0 的黄灯是继承来的初始暴露（即使此前是空仓或满仓也不计）；行号 9 的绿→红在窗口末日，不计。
-    Σ|Δe| = 0.5×5 = 2.5（若把初始建仓 0.5 或末日的 1 计入，就会是 3 或 3.5）。
+    行号 9 的绿→红在窗口末日，不计。Σ|Δe| = 0.5×5 = 2.5（若把末日的 1 计入，就会是 3.5）。
     执行日：12-29、12-30、12-31 属 2015 年（3 次），01-02、01-03 属 2016 年（2 次）。
     """
-    switches = window_switches(DAYS, LIGHTS, LEVELS)
+    switches = window_switches(DAYS, LIGHTS, LEVELS, "黄")
     assert [(item.index, item.before, item.after, item.change) for item in switches] == [
         (2, "黄", "绿", D("0.5")), (3, "绿", "黄", D("-0.5")), (4, "黄", "红", D("-0.5")),
         (6, "红", "黄", D("0.5")), (7, "黄", "绿", D("0.5"))]
@@ -90,6 +91,27 @@ def test_switches_exclude_initial_position_and_terminal_day() -> None:
     assert switches_by_year(switches) == {2015: 3, 2016: 2}
     assert switches_by_type(switches) == {("绿", "黄"): 1, ("黄", "绿"): 2, ("黄", "红"): 1, ("红", "黄"): 1,
                                           ("绿", "红"): 0, ("红", "绿"): 0}
+
+
+def test_first_day_switch_is_counted_unless_there_was_no_prior_position() -> None:
+    """《暂停与纠错登记》第 10 条：j₀ 当日执行灯色与前一日不同时计为一次切换，与主损失的计费口径一致。
+
+    窗口前一日为绿、j₀ 当日为黄：多计一次 绿→黄（行号 0，−0.5），共 6 次，Σ|Δe| = 3.0；
+    窗口前一日为红：多计一次 红→黄（+0.5）。前一日与 j₀ 同为黄：不多计。
+    从无仓位开始（previous 为空）才是初始建仓，j₀ 当日不计。
+    j₀ 当日的切换同样参加短期反转的判断：前一日为绿时，行号 0 的下降之后 5 日内（行号 2）有上升 → 反转数由 3 变 4。
+    """
+    counted = window_switches(DAYS, LIGHTS, LEVELS, "绿")
+    first = counted[0]
+    assert (first.index, first.before, first.after, first.change) == (0, "绿", "黄", D("-0.5"))
+    assert len(counted) == 6 and exposure_change(counted) == D("3.0")
+    assert [(item.index, item.change) for item in first_day_switches(counted)] == [(0, D("-0.5"))]
+    assert window_switches(DAYS, LIGHTS, LEVELS, "红")[0].change == D("0.5")
+    assert len(window_switches(DAYS, LIGHTS, LEVELS, "黄")) == 5
+    assert len(window_switches(DAYS, LIGHTS, LEVELS, None)) == 5
+    assert first_day_switches(window_switches(DAYS, LIGHTS, LEVELS, "黄")) == ()
+    assert [reversal_count(counted, window) for window in (1, 2, 5)] == [1, 3, 4]
+    assert switches_by_year(counted) == {2015: 4, 2016: 2}
 
 
 def test_reversal_uses_exposure_direction_and_counts_each_switch_once_per_window() -> None:
@@ -100,11 +122,11 @@ def test_reversal_uses_exposure_direction_and_counts_each_switch_once_per_window
     窗口 5：2 之后 (2,7] 有 3、4 两次反向，只计一次；3 之后 (3,8] 有 6 → 计；4 之后 (4,9] 有 6 → 计；
             6、7 之后只有同向的上升（行号 9 的下降在窗口末日，不在切换之列）→ 不计 → 共 3（不是 4）。
     """
-    switches = window_switches(DAYS, LIGHTS, LEVELS)
+    switches = window_switches(DAYS, LIGHTS, LEVELS, "黄")
     assert [item.direction for item in switches] == ["暴露上升", "暴露下降", "暴露下降", "暴露上升", "暴露上升"]
     assert [reversal_count(switches, window) for window in (1, 2, 5)] == [1, 2, 3]
     # 黄→红 与 绿→红 同为暴露下降，不算互为反向；红→黄 之后的 黄→绿 也不算反向。
-    same = window_switches(DAYS[:5], ("绿", "黄", "红", "黄", "黄"), LEVELS)
+    same = window_switches(DAYS[:5], ("绿", "黄", "红", "黄", "黄"), LEVELS, "绿")
     assert [item.direction for item in same] == ["暴露下降", "暴露下降", "暴露上升"]
     assert reversal_count(same, 5) == 2      # 两次下降之后都有一次上升；上升之后没有下降
 
@@ -242,6 +264,30 @@ def test_portfolio_nav_rebalances_daily_to_half_and_half() -> None:
 WEALTH = (D(1), D("1.2"), D("0.9"), D("1.08"), D("0.96"), D("1.3"))
 
 
+def test_drawdown_duration_and_recovery_boundaries() -> None:
+    """净值 1、1.2、0.9、1.08、0.96、1.3（行号 0—5）：最大回撤 25%，峰值行号 1、谷底行号 2。
+
+    峰值到谷底 1 个交易日；谷底之后净值首次回到或超过峰值 1.2 是行号 5（1.3）→ 谷底到恢复 3 个交易日。
+    只看前 5 天（行号 0—4）：窗口内没有恢复，恢复日与恢复天数为空，谷底到窗口末日已过 2 个交易日。
+    恰好回到峰值也算恢复：1、1.2、0.9、1.2 → 恢复在行号 3，1 个交易日。
+    谷底就是窗口最后一天：未恢复，已过 0 日。
+    """
+    days = AXIS[:6]
+    full = max_drawdown(days, WEALTH)
+    assert (full.depth, full.decline_days, full.recovery_date, full.recovery_days, full.days_after_trough) == (
+        D("0.25"), 1, days[5], 3, 3)
+    cut = max_drawdown(days[:5], WEALTH[:5])
+    assert (cut.depth, cut.recovery_date, cut.recovery_days, cut.days_after_trough) == (D("0.25"), None, None, 2)
+    exact = max_drawdown(days[:4], (D(1), D("1.2"), D("0.9"), D("1.2")))
+    assert (exact.recovery_date, exact.recovery_days) == (days[3], 1)
+    last = max_drawdown(days[:3], (D(1), D("1.2"), D("0.9")))
+    assert (last.recovery_days, last.days_after_trough, last.decline_days) == (None, 0, 1)
+    # 从未回撤：深度 0，下跌与恢复天数都是 0。
+    flat = max_drawdown(days[:3], (D(1), D("1.1"), D("1.2")))
+    assert (flat.depth, flat.decline_days, flat.recovery_days) == (D(0), 0, 0)
+    assert running_drawdowns(WEALTH) == (D(0), D(0), D("0.25"), D("0.1"), D("0.2"), D(0))
+
+
 def test_max_drawdown_and_rolling_return_boundaries() -> None:
     """净值 1、1.2、0.9、1.08、0.96、1.3（行号 0—5）。
 
@@ -323,7 +369,9 @@ def test_switch_counts_match_registered_billing_and_initial_position_is_excluded
         # 与主损失计费的切换次数一致；j₀ 当日的初始暴露继承此前信号，不在切换之列。
         assert len(item.switches) == item.evaluated.billed_switches == item.split.switches
         assert item.split.switch_cost == Decimal("0.005") * len(item.switches)
-        assert all(0 < switch.index < len(result.days) - 1 for switch in item.switches)
+        assert all(0 <= switch.index < len(result.days) - 1 for switch in item.switches)
+        # 开发期窗口里三个对象在 j₀ 当日都没有切换：新旧两种口径的切换次数相同。
+        assert first_day_switches(item.switches) == ()
         assert item.initial_light == item.evaluated.system_executed[0]
         assert sum(segment.length for segment in item.segments) == 1762
         assert item.segments[0].truncated and item.segments[0].start == result.days[0]
@@ -359,7 +407,7 @@ def test_nav_reference_rows_follow_definitions(development: Round2Result) -> Non
 def test_report_opening_and_tables(development: Round2Result) -> None:
     lines = report_lines(development, CONFIG)
     assert lines[2] == OPENING
-    assert OPENING == "本报告仅使用开发期数据；诊断不改变模型规则、参数、选定设定与γ。统计口径修订已另行登记。"
+    assert OPENING == "本报告仅使用开发期数据；诊断不改变模型规则、参数、选定设定与γ。"
     text = "\n".join(lines)
     for heading in ("## 一、对象与初始暴露", "## 二、切换诊断", "## 三、转绿双层报告", "## 四、完整净值"):
         assert heading in text

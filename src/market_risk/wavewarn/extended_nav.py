@@ -14,48 +14,30 @@ from decimal import Decimal
 
 from market_risk.wavewarn.buffered_ma import BUFFERED_MA200, buffered_ma_states
 from market_risk.wavewarn.config_v14 import Round2Config, ValidationConfig
-from market_risk.wavewarn.diagnostics_round2 import MA200, PORTFOLIO, NavRow, exposure_levels, nav_rows
+from market_risk.wavewarn.diagnostics_round2 import (
+    MA200,
+    PORTFOLIO,
+    NavRow,
+    executed_lights,
+    exposure_levels,
+    nav_rows,
+    previous_light,
+)
 from market_risk.wavewarn.evaluation import SYMBOLS, CandidateStates, PreparedEvaluation
 from market_risk.wavewarn.loss import configured_loss_settings
-from market_risk.wavewarn.nav import Drawdown, max_drawdown, simple_returns, wealth_path
-from market_risk.wavewarn.switch_diagnostics import Switch, exposure_change, reversal_count, window_switches
+from market_risk.wavewarn.nav import Drawdown, max_drawdown, running_drawdowns, simple_returns, wealth_path
+from market_risk.wavewarn.switch_diagnostics import (
+    Switch,
+    exposure_change,
+    first_day_switches,
+    reversal_count,
+    window_switches,
+)
 from market_risk.wavewarn.timing import ma200_states
 
 SELECTED_PRICE = "v1.4 纯价格版（选定设定）"
 HOLD = "一直持有"
 SCOPES = (PORTFOLIO, *SYMBOLS)
-
-
-def executed_from_t0(prepared: PreparedEvaluation, states: CandidateStates) -> tuple[str, ...]:
-    """自 t0 起逐日的系统执行灯色：第 j 天收盘执行前一日信号；t0 当日为初始的绿灯。"""
-    days = prepared.inputs.days
-    if tuple(row.date for row in states.rows) != days[days.index(prepared.t0):]:
-        raise ValueError("状态序列与 t0 后交易日轴不一致")
-    return ("绿", *(row.light for row in states.rows[:-1]))
-
-
-def window_offset(prepared: PreparedEvaluation) -> int:
-    """j₀ 在 t0 起的日期轴上的行号。"""
-    days = prepared.inputs.days
-    return days.index(prepared.first_loss_day) - days.index(prepared.t0)
-
-
-def executed_lights(prepared: PreparedEvaluation, states: CandidateStates) -> tuple[str, ...]:
-    """评价窗口（j₀ 至末日）逐日的系统执行灯色。
-
-    与 evaluate_candidate 的 system_executed 是同一条规则（有测试核对），这里不需要标签与损失。
-    """
-    return executed_from_t0(prepared, states)[window_offset(prepared):]
-
-
-def switched_at_start(prepared: PreparedEvaluation, states: CandidateStates) -> bool:
-    """j₀ 当日收盘是否恰有一次切换（j₀ 的执行灯色与前一交易日不同）。
-
-    诊断口径把它看作初始建仓、不计入切换次数；主损失的计费口径会计入这一次。
-    """
-    offset = window_offset(prepared)
-    lights = executed_from_t0(prepared, states)
-    return offset > 0 and lights[offset] != lights[offset - 1]
 
 
 @dataclass(frozen=True)
@@ -65,9 +47,13 @@ class SignalObject:
     name: str
     lights: tuple[str, ...]            # N+1 个
     exposures: tuple[Decimal, ...]     # N 个区间的执行暴露
-    switches: tuple[Switch, ...]
+    switches: tuple[Switch, ...]       # 含 j₀ 当日相对前一日的切换（与主损失的计费口径一致）
     mean_exposure: Decimal
-    switch_at_start: bool              # j₀ 当日恰有一次切换（按诊断口径不计入）
+
+    @property
+    def switch_at_start(self) -> bool:
+        """j₀ 当日恰有一次切换：旧口径（不计 j₀ 当日）下的切换次数比现在少这一次。"""
+        return bool(first_day_switches(self.switches))
 
 
 def signal_object(name: str, prepared: PreparedEvaluation, states: CandidateStates,
@@ -75,8 +61,8 @@ def signal_object(name: str, prepared: PreparedEvaluation, states: CandidateStat
     lights = executed_lights(prepared, states)
     days = prepared.inputs.days[prepared.inputs.days.index(prepared.first_loss_day):]
     exposures = tuple(levels[light] for light in lights[:-1])
-    return SignalObject(name, lights, exposures, window_switches(days, lights, levels),
-                        sum(exposures, Decimal(0)) / len(exposures), switched_at_start(prepared, states))
+    switches = window_switches(days, lights, levels, previous_light(prepared, states))
+    return SignalObject(name, lights, exposures, switches, sum(exposures, Decimal(0)) / len(exposures))
 
 
 @dataclass(frozen=True)
@@ -89,7 +75,8 @@ class PeriodRow:
     end: dt.date
     intervals: int
     period_return: Decimal
-    drawdown: Drawdown
+    drawdown: Drawdown                 # 净值在期间起点重新归一化后的区间内最大回撤（恢复也只在期间内找）
+    full_curve_depth: Decimal          # 全程净值曲线在该期间内相对此前最高点的最深回撤
 
 
 @dataclass(frozen=True)
@@ -118,8 +105,9 @@ def period_rows(days: Sequence[dt.date], rows: Sequence[NavRow],
         span = days[indices[0]:indices[-1] + 2]
         for row in rows:
             wealth = wealth_path(row.returns[indices[0]:indices[-1] + 1])
+            running = running_drawdowns(wealth_path(row.returns))
             result.append(PeriodRow(row.name, row.scope, start, end, len(indices), wealth[-1] - 1,
-                                    max_drawdown(span, wealth)))
+                                    max_drawdown(span, wealth), max(running[indices[0]:indices[-1] + 2])))
     return tuple(result)
 
 

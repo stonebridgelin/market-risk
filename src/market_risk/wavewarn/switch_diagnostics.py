@@ -1,8 +1,10 @@
 """切换诊断（纯计算，描述性，不参与任何判定）：补充登记 D。
 
-输入是评价窗口内逐日的执行灯色 L_0 … L_N（L_j 为第 j 天收盘执行后的灯色，持有于区间 j→j+1）。
-切换口径与登记一致：只计窗口内相邻两日执行灯色不同的切换，即第 j 天（1 ≤ j ≤ N−1）L_j ≠ L_{j−1}；
-初始建仓（j₀ 当日继承的灯色）不计，窗口末日（第 N 天）的切换不计费、不计入。
+输入是评价窗口内逐日的执行灯色 L_0 … L_N（L_j 为第 j 天收盘执行后的灯色，持有于区间 j→j+1），
+以及窗口前一个交易日的执行灯色 L_{−1}。
+切换口径与主损失的计费口径一致（《暂停与纠错登记》第 10 条）：第 j 天（0 ≤ j ≤ N−1）L_j ≠ L_{j−1} 计一次。
+j₀ 当日（j = 0）相对前一日的切换计入——状态机自 t0 起连续运行，j₀ 前一日已有执行状态，这不是初始建仓；
+“初始建仓不计”只适用于从无仓位开始建立的情形（previous 为空）。窗口末日（第 N 天）的切换不计费、不计入。
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ UP, DOWN = "暴露上升", "暴露下降"
 
 @dataclass(frozen=True)
 class Switch:
-    index: int                 # 执行日在窗口内的行号 j（1 ≤ j ≤ N−1）
+    index: int                 # 执行日在窗口内的行号 j（0 ≤ j ≤ N−1；0 为 j₀ 当日）
     date: dt.date              # 执行日
     before: str
     after: str
@@ -34,13 +36,24 @@ class Switch:
         return UP if self.change > 0 else DOWN
 
 
-def window_switches(days: Sequence[dt.date], lights: Lights, exposures: Mapping[str, Decimal]) -> tuple[Switch, ...]:
-    """窗口内计费的切换；days 与 lights 等长（N+1），首日与末日的切换都不在其中。"""
+def window_switches(days: Sequence[dt.date], lights: Lights, exposures: Mapping[str, Decimal],
+                    previous: str | None) -> tuple[Switch, ...]:
+    """窗口内计费的切换；days 与 lights 等长（N+1）。
+
+    previous 为窗口前一个交易日的执行灯色：与 lights[0] 不同时，j₀ 当日计一次切换。
+    previous 为空表示从无仓位开始（初始建仓），j₀ 当日不计。末日的切换不在其中。
+    """
     if len(days) != len(lights) or len(days) < 2:
         raise ValueError("切换诊断要求日期与执行灯色等长，且至少有一个区间")
-    return tuple(Switch(index, days[index], lights[index - 1], lights[index],
-                        exposures[lights[index]] - exposures[lights[index - 1]])
-                 for index in range(1, len(days) - 1) if lights[index] != lights[index - 1])
+    before = [previous, *lights[:-1]]
+    return tuple(Switch(index, days[index], before[index], lights[index],  # type: ignore[arg-type]
+                        exposures[lights[index]] - exposures[before[index]])  # type: ignore[index]
+                 for index in range(len(days) - 1) if before[index] is not None and lights[index] != before[index])
+
+
+def first_day_switches(switches: Sequence[Switch]) -> tuple[Switch, ...]:
+    """j₀ 当日的切换（至多一次）：旧口径（不计 j₀ 当日）与现口径相差的就是这一次。"""
+    return tuple(item for item in switches if item.index == 0)
 
 
 def switches_by_year(switches: Sequence[Switch]) -> dict[int, int]:

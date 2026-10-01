@@ -7,10 +7,18 @@ from decimal import Decimal
 
 from market_risk.wavewarn.config_v14 import Round2Config
 from market_risk.wavewarn.diagnostics_round2 import PORTFOLIO, NavRow
-from market_risk.wavewarn.diagnostics_round2_report import nav_header, nav_row, percent, plain
+from market_risk.wavewarn.diagnostics_round2_report import (
+    nav_header,
+    nav_row,
+    old_convention,
+    percent,
+    plain,
+    recovery_text,
+)
 from market_risk.wavewarn.evaluation_v13_report import share, table
 from market_risk.wavewarn.extended_nav import SCOPES, ExtendedNavResult, SignalObject, reversal_share
 from market_risk.wavewarn.nav import wealth_path
+from market_risk.wavewarn.switch_diagnostics import exposure_change
 
 Row = tuple[object, ...]
 OPENING = "本报告仅使用2009-09-30以前的纯价格数据；诊断不改变模型规则、参数、选定设定与γ。"
@@ -29,7 +37,8 @@ def reversal_cells(item: SignalObject | None, config: Round2Config) -> tuple[obj
 
 def metric_header(config: Round2Config) -> tuple[str, ...]:
     return (*nav_header(config), "mean_exposure",
-            *(f"reversed_within_{window}_share" for window in config.reversal_windows), "switch_on_first_day")
+            *(f"reversed_within_{window}_share" for window in config.reversal_windows), "switch_on_first_day",
+            "switches_excluding_first_day", "exposure_change_excluding_first_day")
 
 
 def metric_rows(rows: Sequence[NavRow], signals: Sequence[SignalObject], config: Round2Config) -> tuple[Row, ...]:
@@ -38,19 +47,24 @@ def metric_rows(rows: Sequence[NavRow], signals: Sequence[SignalObject], config:
     result = []
     for row in rows:
         item = by_name.get(row.name)
+        old = old_convention(item.switches) if item is not None else (0, Decimal(0))
         result.append((*nav_row(row), item.mean_exposure if item is not None else "",
                        *reversal_cells(item, config),
-                       ("是" if item.switch_at_start else "否") if item is not None else ""))
+                       ("是" if item.switch_at_start else "否") if item is not None else "", *old))
     return tuple(result)
 
 
-PERIOD_HEADER = ("period_start", "period_end", "object", "scope", "intervals", "period_return", "max_drawdown",
-                 "drawdown_peak_date", "drawdown_trough_date")
+PERIOD_HEADER = ("period_start", "period_end", "object", "scope", "intervals", "period_return",
+                 "renormalized_max_drawdown", "drawdown_peak_date", "drawdown_trough_date", "drawdown_decline_days",
+                 "recovery_date_within_period", "recovery_days_within_period", "days_from_trough_to_period_end",
+                 "full_curve_deepest_drawdown_in_period")
 
 
 def period_table(result: ExtendedNavResult) -> tuple[Row, ...]:
     return tuple((row.start, row.end, row.name, row.scope, row.intervals, row.period_return, row.drawdown.depth,
-                  row.drawdown.peak_date, row.drawdown.trough_date) for row in result.periods)
+                  row.drawdown.peak_date, row.drawdown.trough_date, row.drawdown.decline_days,
+                  _blank(row.drawdown.recovery_date), _blank(row.drawdown.recovery_days),
+                  row.drawdown.days_after_trough, row.full_curve_depth) for row in result.periods)
 
 
 def nav_daily(result: ExtendedNavResult, places: Decimal) -> tuple[tuple[str, ...], tuple[Row, ...]]:
@@ -76,7 +90,8 @@ def _share(value: object) -> str:
 def scope_lines(result: ExtendedNavResult, config: Round2Config) -> list[str]:
     prepared = result.prepared
     signals = [(item.name, item.mean_exposure, item.lights[0], len(item.switches),
-                "有" if item.switch_at_start else "无",
+                plain(exposure_change(item.switches)), old_convention(item.switches)[0],
+                plain(old_convention(item.switches)[1]),
                 *(_share(cell) for cell in reversal_cells(item, config))) for item in result.objects]
     first_day = [item.name.split("版 ")[1] for item in result.grid if item.switch_at_start]
     return [
@@ -91,31 +106,38 @@ def scope_lines(result: ExtendedNavResult, config: Round2Config) -> list[str]:
         "200 日均线的 ē）。",
         "- 各对象的执行灯色由状态序列按“次日收盘执行”直接得到，没有读取任何标签，也没有计算损失"
         "（ē 与原补充历史报告一致，有测试核对）；"
-        "选定设定是开发期选择程序的结果，这里不重新选择。初始暴露继承此前的信号，初始建仓与窗口末日的切换不计。",
+        "选定设定是开发期选择程序的结果，这里不重新选择。初始暴露继承此前的信号。",
+        "- 定位：本报告只解释冻结的纯价格版本（MR 加两资产 P、PR，K=5、θ_P=2.5%），不作为完整 v1.4 的通过条件；"
+        "九组结果只作附录，不用于选择。纯价格版不含 BW，不受 BW 退出谓词偏差的影响。",
         f"- 净值口径与第二轮诊断相同：单资产 R_{{a,j}} = e_j·(exp(r_{{a,j}}) − 1)；双资产每日收盘按“总暴露 e_j、"
         "两资产各半”再平衡，R_j = Σ_a (e_j/2)·(exp(r_{a,j}) − 1)；现金收益为 0；不含分红与费用。"
         "SPX 为价格指数，QQQ 为不含分红的 ETF 价格；γ 是代理损失罚分，不扣入净值。"
         f"年化按每年 {config.trading_days_per_year} 个交易日、波动率用样本标准差。", "",
         "## 一、对象", "",
-        *table(("对象", "平均执行暴露 ē", "j₀′ 的执行灯色", "切换次数", "j₀′ 当日有无切换",
-                *(f"{window} 日内反向切换占比" for window in config.reversal_windows)), signals), "",
-        "切换次数按诊断口径：只计窗口内相邻两日执行灯色不同的切换，初始建仓与窗口末日的切换不计。"
-        "j₀′ 当日收盘若恰有一次切换（执行灯色与前一交易日不同），按初始建仓处理、不计入；"
-        "主损失的计费口径会计入这一次，所以这类对象在补充历史报告（`extended_history/`）里的计费切换次数比这里多 1。"
-        + (f"九组中属于这种情形的：{'、'.join(first_day)}。" if first_day else "九组中没有这种情形。"), ""]
+        *table(("对象", "平均执行暴露 ē", "j₀′ 的执行灯色", "切换次数", "目标暴露变化量", "旧口径切换次数",
+                "旧口径目标暴露变化量", *(f"{window} 日内反向切换占比" for window in config.reversal_windows)),
+               signals), "",
+        "切换次数与目标暴露变化量按主损失的计费口径：j₀′ 当日执行灯色与前一日不同时计为一次切换"
+        "（状态机自 t0′ 起连续运行，j₀′ 前一日已有执行状态，这不是初始建仓），窗口末日的切换不计。"
+        "旧口径不计 j₀′ 当日的这一次；两种口径只在 j₀′ 当日恰有切换的对象上相差 1 次。"
+        + (f"九组中属于这种情形的：{'、'.join(first_day)}。" if first_day else "九组中没有这种情形。")
+        + "现口径下各组的切换次数与补充历史报告（`extended_history/`）的计费切换次数相同。", ""]
 
 
 def nav_table(rows: Sequence[NavRow], names: Sequence[str], signals: Sequence[SignalObject],
               config: Round2Config) -> list[str]:
     """一个口径的净值表。"""
     by_name = {item.name: item for item in signals}
-    header = ("对象", "累计收益", "年化收益", "最大回撤（起止日）",
+    header = ("对象", "累计收益", "年化收益", "全程最大回撤（峰值日至谷底日）", "峰值到谷底（交易日）",
+              "谷底到恢复前高（交易日）",
               *(f"最差滚动 {window} 日" for window in config.rolling_windows), "年化波动率", "切换次数",
               "目标暴露变化量", *(f"{window} 日内反向" for window in config.reversal_windows))
     body = []
     for row, name in zip(rows, names, strict=True):
         metrics = row.metrics
         body.append((name, percent(metrics.cumulative), percent(metrics.annualized), _drawdown(row),
+                     metrics.drawdown.decline_days if metrics.drawdown.depth else "—",
+                     recovery_text(metrics.drawdown, "窗口末日"),
                      *(percent(item.value) for item in metrics.rolling), percent(metrics.volatility), row.switches,
                      plain(row.exposure_change),
                      *(_share(cell) for cell in reversal_cells(by_name.get(row.name), config))))
@@ -124,8 +146,10 @@ def nav_table(rows: Sequence[NavRow], names: Sequence[str], signals: Sequence[Si
 
 def nav_lines(result: ExtendedNavResult, config: Round2Config) -> list[str]:
     lines = ["## 二、完整净值", "",
-             "最大回撤 = 1 − 谷值 ÷ 此前最高值；最差滚动 k 日收益 = min W_{t+k} ÷ W_t − 1；"
-             "目标暴露变化量只累计窗口内每次切换的目标暴露变化，不含每日再平衡交易与初始建仓。", ""]
+             "回撤区分两种：本节是全程净值曲线上的最大回撤（1 − 谷值 ÷ 此前最高值，净值在 j₀′ 记为 1）；"
+             "第四节是在熊市区间起点把净值重新记为 1 之后的区间内回撤。恢复指谷底之后净值首次回到或超过峰值，"
+             "窗口内没有恢复的注明截至窗口末日已过去的交易日数。最差滚动 k 日收益 = min W_{t+k} ÷ W_t − 1；"
+             "目标暴露变化量只累计窗口内每次切换的目标暴露变化，不含每日再平衡交易。", ""]
     for scope in SCOPES:
         rows = [row for row in result.nav if row.scope == scope]
         lines.extend([f"### {scope}", "",
@@ -144,18 +168,22 @@ def grid_lines(result: ExtendedNavResult, config: Round2Config) -> list[str]:
 
 
 def period_lines(result: ExtendedNavResult) -> list[str]:
-    lines = ["## 四、两次熊市的期间收益与最大回撤", "",
+    lines = ["## 四、两次熊市的期间收益与回撤", "",
              "期间按 SPX 收盘价的高点到低点划定，两个资产共用；取区间起点在 [起, 止) 内的区间"
-             "（最后一个区间止于期末当日收盘），净值在期间起点重新记为 1。", ""]
+             "（最后一个区间止于期末当日收盘）。“区间内回撤”把净值在期间起点重新记为 1，峰值与恢复都只在期间内找；"
+             "“全程曲线的最深回撤”是整条净值曲线在该期间内相对此前最高点（可以在期间之前）的最深回撤。", ""]
+    header = ("对象", "区间数", "期间收益", "区间内最大回撤（峰值日至谷底日）", "峰值到谷底（交易日）",
+              "谷底到恢复（交易日，期间内）", "全程曲线在期间内的最深回撤")
     for start, end in dict.fromkeys((row.start, row.end) for row in result.periods):
         lines.extend([f"### {start} 至 {end}", ""])
         for scope in SCOPES:
             rows = [(row.name, row.intervals, percent(row.period_return),
                      f"{percent(row.drawdown.depth)}（{row.drawdown.peak_date} 至 {row.drawdown.trough_date}）"
-                     if row.drawdown.depth else "0.00%")
+                     if row.drawdown.depth else "0.00%",
+                     row.drawdown.decline_days if row.drawdown.depth else "—",
+                     recovery_text(row.drawdown, "期末"), percent(row.full_curve_depth))
                     for row in result.periods if (row.start, row.end, row.scope) == (start, end, scope)]
-            lines.extend([f"**{scope}**", "", *table(("对象", "区间数", "期间收益", "期间最大回撤（起止日）"), rows),
-                          ""])
+            lines.extend([f"**{scope}**", "", *table(header, rows), ""])
     return lines
 
 

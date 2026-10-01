@@ -53,19 +53,41 @@ class Drawdown:
     depth: Decimal                 # 1 − 谷值 ÷ 此前最高值，不小于 0
     peak_date: dt.date             # 回撤起点（此前最高值所在日）
     trough_date: dt.date           # 回撤终点（谷值所在日）
+    decline_days: int              # 峰值到谷底的交易日数
+    recovery_date: dt.date | None  # 谷底之后净值首次回到或超过峰值的日期；所给区间内未恢复为空
+    recovery_days: int | None      # 谷底到恢复日的交易日数；未恢复为空
+    days_after_trough: int         # 谷底到所给区间最后一日的交易日数（未恢复时用来注明已过去多久）
+
+
+def running_drawdowns(wealth: Sequence[Decimal]) -> tuple[Decimal, ...]:
+    """每一日相对此前（含当日）最高净值的回撤 1 − W_t ÷ max_{s≤t} W_s。"""
+    result, peak = [], wealth[0]
+    for value in wealth:
+        peak = max(peak, value)
+        result.append(1 - value / peak)
+    return tuple(result)
 
 
 def max_drawdown(days: Sequence[dt.date], wealth: Sequence[Decimal]) -> Drawdown:
-    """最大回撤及其起止日；深度相同时取最早出现的一次；从未回撤时深度为 0，起止日同为首日。"""
-    best = Drawdown(Decimal(0), days[0], days[0])
-    peak_index = 0
+    """所给净值序列上的最大回撤、起止日、下跌与恢复的交易日数。
+
+    深度相同时取最早出现的一次；从未回撤时深度为 0，起止日与恢复日同为首日。
+    恢复只在所给的区间内寻找：谷底之后净值首次回到或超过峰值的那一天。
+    """
+    if len(days) != len(wealth) or not days:
+        raise ValueError("回撤要求日期与净值等长且非空")
+    best, peak_index, span = Decimal(0), 0, (0, 0)
     for index, value in enumerate(wealth):
         if value > wealth[peak_index]:
             peak_index = index
         depth = 1 - value / wealth[peak_index]
-        if depth > best.depth:
-            best = Drawdown(depth, days[peak_index], days[index])
-    return best
+        if depth > best:
+            best, span = depth, (peak_index, index)
+    start, low = span
+    recovered = next((index for index in range(low, len(wealth)) if wealth[index] >= wealth[start]), None)
+    return Drawdown(best, days[start], days[low], low - start,
+                    days[recovered] if recovered is not None else None,
+                    recovered - low if recovered is not None else None, len(wealth) - 1 - low)
 
 
 @dataclass(frozen=True)

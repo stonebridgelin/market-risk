@@ -94,6 +94,37 @@ def exposure_levels(eta: Decimal) -> dict[str, Decimal]:
     return {light: exposure(light, eta) for light in LIGHTS}  # type: ignore[arg-type]
 
 
+def executed_from_t0(prepared: PreparedEvaluation, states: CandidateStates) -> tuple[str, ...]:
+    """自 t0 起逐日的系统执行灯色：第 j 天收盘执行前一日信号；t0 当日为初始的绿灯。"""
+    days = prepared.inputs.days
+    if tuple(row.date for row in states.rows) != days[days.index(prepared.t0):]:
+        raise ValueError("状态序列与 t0 后交易日轴不一致")
+    return ("绿", *(row.light for row in states.rows[:-1]))
+
+
+def window_offset(prepared: PreparedEvaluation) -> int:
+    """j₀ 在 t0 起的日期轴上的行号。"""
+    days = prepared.inputs.days
+    return days.index(prepared.first_loss_day) - days.index(prepared.t0)
+
+
+def executed_lights(prepared: PreparedEvaluation, states: CandidateStates) -> tuple[str, ...]:
+    """评价窗口（j₀ 至末日）逐日的系统执行灯色。
+
+    与 evaluate_candidate 的 system_executed 是同一条规则（有测试核对），不需要标签与损失。
+    """
+    return executed_from_t0(prepared, states)[window_offset(prepared):]
+
+
+def previous_light(prepared: PreparedEvaluation, states: CandidateStates) -> str | None:
+    """j₀ 前一个交易日的系统执行灯色；状态机自 t0 起连续运行，j₀ 晚于 t0 时它总是存在。
+
+    j₀ 就是 t0（此前没有执行状态）时为空：那才是从无仓位开始的初始建仓。
+    """
+    offset = window_offset(prepared)
+    return executed_from_t0(prepared, states)[offset - 1] if offset > 0 else None
+
+
 def object_green(prepared: PreparedEvaluation, states: CandidateStates,
                  events: Mapping[str, Sequence[ZZEvent]], window: int
                  ) -> tuple[dict[str, tuple[GreenEvent, ...]], dict[str, GreenSummary]]:
@@ -111,12 +142,14 @@ def object_green(prepared: PreparedEvaluation, states: CandidateStates,
 def object_diagnostics(name: str, prepared: PreparedEvaluation, states: CandidateStates,
                        evaluated: CandidateEvaluation, timing: TimingResult,
                        events: Mapping[str, Sequence[ZZEvent]], config: Round2Config) -> ObjectDiagnostics:
-    """切换按登记口径（窗口内相邻两日执行灯色不同）；与主损失计费的切换次数不符即报错。"""
+    """切换按主损失的计费口径（j₀ 当日相对前一日的切换计入）；与计费的切换次数不符即报错。"""
     eta = configured_loss_settings(prepared.config).parameters.eta
     lights = evaluated.system_executed
-    switches = window_switches(evaluated.days, lights, exposure_levels(eta))
+    if lights != executed_lights(prepared, states):
+        raise ValueError(f"{name} 的执行灯色与状态序列不一致")
+    switches = window_switches(evaluated.days, lights, exposure_levels(eta), previous_light(prepared, states))
     marks = evaluated.executions["SPX"]
-    if len(switches) != evaluated.billed_switches or marks[0].switched:
+    if len(switches) != evaluated.billed_switches:
         raise ValueError(f"{name} 的窗口内切换次数与登记的计费切换次数不一致")
     cost = sum((row.switch_cost for row in evaluated.daily_losses), Decimal(0))
     green, summaries = object_green(prepared, states, events, config.green_window)
