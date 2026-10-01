@@ -42,7 +42,9 @@ powershell -File reports\research\wavewarn_v14\correction_rerun\recovery\rebuild
 
 2026-10-01，在一个新的临时工作目录里按上面的命令重建了 B + f_BW：代码树哈希 `c88614a503c73f33f94da3e08b54ecbe4747716d` 与固定设定汇总的哈希 `2A1969DDE3CA4A5529B56EEEC3F2996B68B05AA0906ECA96AE4D934B03CF158E` 都与记录一致（`verification_result.json`）。验证通过后才删除了原来的四个工作目录与这个临时工作目录。
 
-这次验证没有走到“由原始导出重新生成 NDTW”的分支（主仓库那份的哈希与清单一致），该分支没有实际运行过。
+这次验证没有走到“由原始导出重新生成 NDTW”的分支（主仓库那份的哈希与清单一致）。
+
+**补充验证（2026-10-01，合并到 main 之前）。** 按负责人的要求另做了一次：把已入库的原始导出 `data/manual/tradingview/raw/2026-09-26/INDEX_NDTW, 1D.csv` 与导入清单复制到仓库之外的临时目录，用现有处理流程（`market_risk.data.tradingview.rebuild`，即 `market-risk tv validate` 调用的同一个函数，存储根目录指向该临时目录）重新生成清洗结果。重新生成的 `NDTW.csv` 的 SHA-256 为 `691CEBFC92F368E2C5CC8A80E1A79BB0820EE84641BC13FDF4B1A6C7335DB4C3`，与清单一致。比对后删除了临时目录；仓库中的文件没有改动。`rebuild.ps1` 里“哈希不符时在主仓库里运行 `tv validate`”这一分支本身仍然没有被触发过。
 
 ## 限制
 
