@@ -123,13 +123,25 @@ def ma200_signals(days: Sequence[dt.date], closes: Mapping[dt.date, Decimal | No
 def signal_reference(prepared: PreparedEvaluation, name: str, signals: Sequence[Light], order: int,
                      events: Mapping[str, Sequence[ZZEvent]], unknown: UnknownLabels) -> CandidateEvaluation:
     """由逐日信号驱动的参照行：自 t0 起次日收盘执行，切换罚分照常，同一损失函数与 j₀。"""
+    return evaluate_candidate(prepared, signal_states(prepared, name, signals, order), events, unknown)
+
+
+def signal_states(prepared: PreparedEvaluation, name: str, signals: Sequence[Light],
+                  order: int) -> CandidateStates:
+    """把逐日信号包装成与模型相同的状态序列（自 t0 起），供损失与退出代价共用同一条计算路径。"""
     state_days = prepared.inputs.days[prepared.inputs.days.index(prepared.t0):]
     if len(signals) != len(state_days):
         raise ValueError("参照信号须覆盖 t0 至窗口末日的全部交易日")
     candidate = Candidate(name, 0, Decimal(0), None, order)  # type: ignore[arg-type]
     rows = tuple(DiagnosticRow(day, "P0", 0, Decimal(0), light, "完整", (), "信号参照")
                  for day, light in zip(state_days, signals, strict=True))
-    return evaluate_candidate(prepared, CandidateStates(candidate, prepared.t0, rows), events, unknown)
+    return CandidateStates(candidate, prepared.t0, rows)
+
+
+def ma200_states(prepared: PreparedEvaluation, window: int) -> CandidateStates:
+    """200日均线参照的状态序列：SPX 收盘价不低于其均线为绿，否则为红。"""
+    signals = ma200_signals(prepared.inputs.days, prepared.inputs.series["SPX"], prepared.t0, window)
+    return signal_states(prepared, MA200_REFERENCE, signals, len(CONSTANT_REFERENCES))
 
 
 @dataclass(frozen=True)

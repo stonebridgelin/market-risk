@@ -30,7 +30,7 @@ from market_risk.wavewarn.loss import (
     evaluated_asset_price_loss,
     full_exposure_events,
 )
-from market_risk.wavewarn.state_machine import Light
+from market_risk.wavewarn.state_machine import Light, ReadyInputs
 from market_risk.wavewarn.state_sequences import (
     DiagnosticRow,
     diagnostic_sequence,
@@ -312,32 +312,68 @@ def _validate_development_config(config: WavewarnConfig) -> ChannelSelection:
     return selection
 
 
+FeatureSet = Mapping[Decimal, tuple[Sequence[AssetFeatures], Sequence[AssetFeatures]]]
+
+
 def candidate_states(candidate: Candidate, config: WavewarnConfig, inputs: DevelopmentInputs,
-                      features: Mapping[Decimal, tuple[Sequence[AssetFeatures], Sequence[AssetFeatures]]],
-                      ratios: Sequence[Decimal | None], t0: dt.date,
-                      selection: ChannelSelection) -> CandidateStates:
+                     features: FeatureSet, ratios: Sequence[Decimal | None], t0: dt.date,
+                     selection: ChannelSelection) -> CandidateStates:
     """单个候选的状态与系统收敛日，纯计算。"""
     fixed = config.fixed_parameters()
-    sets = config.candidate_sets()
-    spx, qqq = features[candidate.q if candidate.q is not None else sets.q[0]]
-    version = "P0" if candidate.model == "P0" else candidate.exit_version
+    spx, qqq = features[candidate.q if candidate.q is not None else config.candidate_sets().q[0]]
+    setup = candidate_channel_setup(candidate, config, inputs.days, features, ratios, selection)
     if candidate.model in ("P0", "P1"):
-        scenario = "P0" if candidate.model == "P0" else f"P1-{version}"
-        channels = _price_channels(spx, qqq, candidate.theta_p, candidate.k)
-        state_rows = diagnostic_sequence(inputs.days, spx, qqq, t0, scenario,  # type: ignore[arg-type]
+        state_rows = diagnostic_sequence(inputs.days, spx, qqq, t0, setup.scenario,  # type: ignore[arg-type]
                                          candidate.theta_p, candidate.k, fixed)
     else:
-        scenario = f"N-{version}"
-        selected = selection if candidate.model == "N" else ChannelSelection(False, False, False, False)
-        channels = n_channel_inputs(spx, qqq, ratios, candidate.theta_p, candidate.k, selected, fixed)
-        state_rows = n_diagnostic_sequence(inputs.days, spx, qqq, ratios, t0, candidate.theta_p,
-                                           candidate.k, selected, version, fixed)  # type: ignore[arg-type]
-    ready = ready_inputs(inputs.days, spx, qqq, scenario, fixed)  # type: ignore[arg-type]
-    converged = system_convergence(inputs.days, channels, ready, t0, candidate.k,  # type: ignore[arg-type]
-                                   version, fixed)  # type: ignore[arg-type]
+        state_rows = n_diagnostic_sequence(inputs.days, spx, qqq, ratios, t0, candidate.theta_p, candidate.k,
+                                           setup.selection, setup.version, fixed)  # type: ignore[arg-type]
+    converged = system_convergence(inputs.days, setup.channels, setup.ready, t0, candidate.k,  # type: ignore[arg-type]
+                                   setup.version, fixed)  # type: ignore[arg-type]
     if converged.system_date is None:
         raise ValueError(f"候选未在开发期内收敛：{candidate.key}")
     return CandidateStates(candidate, converged.system_date, state_rows)
+
+
+@dataclass(frozen=True)
+class ChannelSetup:
+    """一个设定的通道谓词与 Ready 输入；状态序列、收敛检查与诊断共用。"""
+
+    scenario: str
+    version: str                                  # P0、E2、X1 或 X2
+    selection: ChannelSelection                   # N 的四侧开关；P0、P1 不使用
+    channels: Mapping[str, tuple[str, tuple]]
+    ready: tuple[ReadyInputs, ...]
+
+
+def candidate_channel_setup(candidate: Candidate, config: WavewarnConfig, days: Sequence[dt.date],
+                            features: FeatureSet, ratios: Sequence[Decimal | None],
+                            selection: ChannelSelection) -> ChannelSetup:
+    """P0、P1 只有两资产的 P、PR；N 按四侧开关加入 B、DV，N′（去 B/DV）四侧全关。"""
+    fixed = config.fixed_parameters()
+    spx, qqq = features[candidate.q if candidate.q is not None else config.candidate_sets().q[0]]
+    version = "P0" if candidate.model == "P0" else candidate.exit_version
+    selected = selection if candidate.model == "N" else ChannelSelection(False, False, False, False)
+    if candidate.model in ("P0", "P1"):
+        scenario = "P0" if candidate.model == "P0" else f"P1-{version}"
+        channels = _price_channels(spx, qqq, candidate.theta_p, candidate.k)
+    else:
+        scenario = f"N-{version}"
+        channels = n_channel_inputs(spx, qqq, ratios, candidate.theta_p, candidate.k, selected, fixed)
+    ready = ready_inputs(days, spx, qqq, scenario, fixed)  # type: ignore[arg-type]
+    return ChannelSetup(scenario, version, selected, channels, ready)
+
+
+def grid_features(config: WavewarnConfig,
+                  inputs: DevelopmentInputs) -> tuple[FeatureSet, tuple[Decimal | None, ...]]:
+    """每个分位数 q 一套两资产特征，以及逐日 VIX÷VIX3M。"""
+    fixed = config.fixed_parameters()
+    features = {q: (asset_features(inputs.days, inputs.series["SPX"], inputs.series["S5TW"], q, fixed),
+                    asset_features(inputs.days, inputs.series["QQQ"], inputs.series["NDTW"], q, fixed))
+                for q in config.candidate_sets().q}
+    ratios = tuple(vix_term_ratio(inputs.series["VIX"].get(day), inputs.series["VIX3M"].get(day))
+                   for day in inputs.days)
+    return features, ratios
 
 
 def prepare_from_inputs(config: WavewarnConfig, inputs: DevelopmentInputs) -> PreparedEvaluation:
@@ -350,15 +386,10 @@ def prepare_grid(config: WavewarnConfig, inputs: DevelopmentInputs,
     """开发期序列已在边界截断；τ 与 j₀ 取 grid 中全部设定的系统收敛日最大值。"""
     selection = _validate_development_config(config)
     fixed = config.fixed_parameters()
-    sets = config.candidate_sets()
-    features = {q: (asset_features(inputs.days, inputs.series["SPX"], inputs.series["S5TW"], q, fixed),
-                    asset_features(inputs.days, inputs.series["QQQ"], inputs.series["NDTW"], q, fixed))
-                for q in sets.q}
-    base_spx, base_qqq = features[sets.q[0]]
+    features, ratios = grid_features(config, inputs)
+    base_spx, base_qqq = features[config.candidate_sets().q[0]]
     t0 = first_complete_day(inputs.days, base_spx, base_qqq,
                             inputs.series["VIX"], inputs.series["VIX3M"], fixed)
-    ratios = tuple(vix_term_ratio(inputs.series["VIX"].get(day), inputs.series["VIX3M"].get(day))
-                   for day in inputs.days)
     rows = tuple(candidate_states(candidate, config, inputs, features, ratios, t0, selection)
                  for candidate in grid)
     tau = loss_start(inputs.days, t0, [item.convergence_date for item in rows], fixed)

@@ -131,6 +131,16 @@ def wavewarn_extended_history(ctx: Context) -> Any:
         raise ServiceError(str(exc)) from exc
 
 
+def wavewarn_diagnose_v13(ctx: Context) -> Any:
+    """运行 v1.3 的描述性诊断（转绿瓶颈、亮灯原因、200日均线参照、逐年对照）；不改变任何登记。"""
+    from market_risk.wavewarn.diagnostics_v13_run import run_v13_diagnostics
+
+    try:
+        return run_v13_diagnostics(ctx.paths.root)
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
 # ---------------------------------------------------------------------------
 # 日期与样本
 # ---------------------------------------------------------------------------

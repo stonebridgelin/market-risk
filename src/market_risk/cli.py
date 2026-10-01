@@ -644,6 +644,13 @@ def wavewarn_extended_history() -> None:
     typer.echo(f"已写入补充历史：t0′={run.t0}，τ′={run.tau}，j₀′={run.first_loss_day}。输出目录：{run.output}")
 
 
+@wavewarn_app.command("diagnose-v13")
+def wavewarn_diagnose_v13() -> None:
+    """运行 v1.3 的描述性诊断；不改任何规则，不选参，不锁定。"""
+    run = _call(services.wavewarn_diagnose_v13, _ctx())
+    typer.echo(f"已写入 v1.3 描述性诊断（不改变任何登记）：{run.settings} 个设定。输出目录：{run.output}")
+
+
 @backtest_app.command("zigzag-check")
 def backtest_zigzag_check(
     symbol: Annotated[str, typer.Option("--symbol", help="SPX 或 QQQ")],
