@@ -40,7 +40,7 @@ from market_risk.wavewarn.state_sequences import (
     ready_inputs,
 )
 
-Model = Literal["P0", "P1", "N", "N去B/DV"]
+Model = Literal["P0", "P1", "N", "N去B/DV", "V4", "V4去MR", "V4纯价格"]      # V4 开头的为 v1.4 的三个变体
 RANKED_MODELS: tuple[Model, ...] = ("P0", "P1", "N")
 SYMBOLS = ("SPX", "QQQ")
 VALIDATION_START = dt.date(2017, 1, 3)        # 规格第八节：验证期第一个区间起点
@@ -56,7 +56,8 @@ class Candidate:
     theta_p: Decimal
     q: Decimal | None
     order: int
-    exit_version: Literal["E2", "X1", "X2"] = "E2"      # P0 不使用；v1.2.1 只有 E2，v1.3 另有 X1、X2
+    # P0 不使用；v1.2.1 只有 E2，v1.3 另有 X1、X2，v1.4 为解除规则 F
+    exit_version: Literal["E2", "X1", "X2", "F"] = "E2"
 
     @property
     def key(self) -> str:
@@ -288,7 +289,7 @@ def candidate_grid(config: WavewarnConfig) -> tuple[Candidate, ...]:
     return tuple(result)
 
 
-def _price_channels(spx: Sequence[AssetFeatures], qqq: Sequence[AssetFeatures],
+def price_channels(spx: Sequence[AssetFeatures], qqq: Sequence[AssetFeatures],
                     theta: Decimal, k: int) -> dict[str, tuple[str, tuple]]:
     channels = {}
     for symbol, features in (("SPX", spx), ("QQQ", qqq)):
@@ -303,7 +304,7 @@ def require_e2(config: WavewarnConfig) -> None:
         raise ValueError("P1/N 主损失只能使用 E2")
 
 
-def _validate_development_config(config: WavewarnConfig) -> ChannelSelection:
+def validated_channel_selection(config: WavewarnConfig) -> ChannelSelection:
     """主损失口径必须与负责人登记的 E2 及四侧通道一致。"""
     require_e2(config)
     selection = config.require_channel_selection()
@@ -356,7 +357,7 @@ def candidate_channel_setup(candidate: Candidate, config: WavewarnConfig, days: 
     selected = selection if candidate.model == "N" else ChannelSelection(False, False, False, False)
     if candidate.model in ("P0", "P1"):
         scenario = "P0" if candidate.model == "P0" else f"P1-{version}"
-        channels = _price_channels(spx, qqq, candidate.theta_p, candidate.k)
+        channels = price_channels(spx, qqq, candidate.theta_p, candidate.k)
     else:
         scenario = f"N-{version}"
         channels = n_channel_inputs(spx, qqq, ratios, candidate.theta_p, candidate.k, selected, fixed)
@@ -384,7 +385,7 @@ def prepare_from_inputs(config: WavewarnConfig, inputs: DevelopmentInputs) -> Pr
 def prepare_grid(config: WavewarnConfig, inputs: DevelopmentInputs,
                  grid: Sequence[Candidate]) -> PreparedEvaluation:
     """开发期序列已在边界截断；τ 与 j₀ 取 grid 中全部设定的系统收敛日最大值。"""
-    selection = _validate_development_config(config)
+    selection = validated_channel_selection(config)
     fixed = config.fixed_parameters()
     features, ratios = grid_features(config, inputs)
     base_spx, base_qqq = features[config.candidate_sets().q[0]]

@@ -79,9 +79,20 @@ def paired_timing_differences(n_daily: Sequence[Decimal], p1_daily: Sequence[Dec
 
     本批只实现并用构造数据测试，没有在验证期运行。
     """
-    n_terms = timing_daily_terms(n_daily, green_daily, red_daily, mean_n)
-    p1_terms = timing_daily_terms(p1_daily, green_daily, red_daily, mean_p1)
-    return tuple(first - second for first, second in zip(n_terms, p1_terms, strict=True))
+    return timing_differences(n_daily, p1_daily, green_daily, red_daily, mean_n, mean_p1)
+
+
+def timing_differences(model_daily: Sequence[Decimal], baseline_daily: Sequence[Decimal],
+                       green_daily: Sequence[Decimal], red_daily: Sequence[Decimal], mean_model: Decimal,
+                       mean_baseline: Decimal) -> tuple[Decimal, ...]:
+    """主检验日度差的一般形式：d_j = [ℓ_M − ē_M g − (1−ē_M) r] − [ℓ_B − ē_B g − (1−ē_B) r]。
+
+    v1.3 取 M=N、B=P1；v1.4 取 M=选定的 v1.4 设定、B=200 日均线参照行。Σd_j = T_M − T_B。
+    本批只实现并用构造数据测试，没有在验证期运行。
+    """
+    model_terms = timing_daily_terms(model_daily, green_daily, red_daily, mean_model)
+    baseline_terms = timing_daily_terms(baseline_daily, green_daily, red_daily, mean_baseline)
+    return tuple(first - second for first, second in zip(model_terms, baseline_terms, strict=True))
 
 
 def caution_gap(mean_n: Decimal, mean_p1: Decimal, green_loss: Decimal, red_loss: Decimal) -> Decimal:

@@ -651,6 +651,23 @@ def wavewarn_diagnose_v13() -> None:
     typer.echo(f"已写入 v1.3 描述性诊断（不改变任何登记）：{run.settings} 个设定。输出目录：{run.output}")
 
 
+@wavewarn_app.command("evaluate-v14-development")
+def wavewarn_evaluate_v14_development() -> None:
+    """运行 v1.4 开发期工程评价；不生成正式锁定记录或验证期结果。"""
+    run = _call(services.wavewarn_evaluate_v14_development, _ctx())
+    typer.echo(f"已写入 v1.4 开发期工程评价（未锁定）：{run.settings} 个设定；"
+               f"t0={run.t0}，τ={run.tau}，j₀={run.first_loss_day}。")
+    typer.echo(f"选定设定：{run.selected}；第 {run.tier} 级{'（' + run.note + '）' if run.note else ''}。")
+    typer.echo(f"输出目录：{run.output}")
+
+
+@wavewarn_app.command("v14-extended-history")
+def wavewarn_v14_extended_history() -> None:
+    """运行 v1.4 的补充历史（纯价格版）；只作描述，不参与选择。"""
+    run = _call(services.wavewarn_v14_extended_history, _ctx())
+    typer.echo(f"已写入 v1.4 补充历史：t0′={run.t0}，τ′={run.tau}，j₀′={run.first_loss_day}。输出目录：{run.output}")
+
+
 @backtest_app.command("zigzag-check")
 def backtest_zigzag_check(
     symbol: Annotated[str, typer.Option("--symbol", help="SPX 或 QQQ")],

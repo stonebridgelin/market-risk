@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -14,7 +14,7 @@ Level = Literal["黄", "红"]
 DataStatus = Literal["完整", "沿用"]
 
 
-ExitVersion = Literal["P0", "E1", "E2", "E3", "X1", "X2"]
+ExitVersion = Literal["P0", "E1", "E2", "E3", "X1", "X2", "F"]
 PRICE_CHANNEL_PREFIXES = ("P_", "PR_")           # 两资产的 P、PR 为价格通道，其余为非价格通道
 
 
@@ -102,6 +102,8 @@ def step_system(day: dt.date, previous: SystemMemory, channels: Mapping[str, tup
     """通道先更新；系统升级可跨级，降级每天最多一级。"""
     if not channels:
         raise ValueError("系统至少需要一个通道")
+    if e_version == "F":                     # v1.4 解除规则 F 另行实现；以下各版本的既有逻辑不变
+        return release_f_step(day, previous, channels, inputs, k)
     red_rows = [state for level, state in channels.values() if level == "红"]
     all_rows = [state for _, state in channels.values()]
     price_rows = [state for name, (_, state) in channels.items() if is_price_channel(name)]
@@ -126,3 +128,39 @@ def step_system(day: dt.date, previous: SystemMemory, channels: Mapping[str, tup
         light = "红" if red or quiet_red < red_quiet_days or inputs.q_spx < k or inputs.q_qqq < k else "黄"
         reason = "红通道激活或红灯降级条件不足" if light == "红" else "红灯静默与两资产Q满足"
     return SystemDay(day, SystemMemory(light, quiet_red, quiet_all, quiet_nonprice), status, ready, reason)
+
+
+def _clear(rows: Sequence[ChannelDay]) -> bool:
+    """这些通道当日全部有效且未激活。"""
+    return all(row.valid and row.status != "active" for row in rows)
+
+
+def release_f_step(day: dt.date, previous: SystemMemory, channels: Mapping[str, tuple[Level, ChannelDay]],
+                   inputs: ReadyInputs, k: int) -> SystemDay:
+    """v1.4 解除规则 F：只看当日，不叠加静默期，不要求广度修复与高于 MA50；每天最多降一级。
+
+    红→黄：全部红灯通道当日有效且未激活，且两指数 Q ≥ K。
+    黄→绿：全部通道当日有效且未激活，且两指数 Q ≥ K。
+    任一所需输入缺失时不降级，数据状态记“沿用”。升级规则不变：取全部激活通道的最高级，可跨级。
+    """
+    red_rows = [state for level, state in channels.values() if level == "红"]
+    all_rows = [state for _, state in channels.values()]
+    red = any(row.status == "active" for row in red_rows)
+    yellow = any(level == "黄" and row.status == "active" for level, row in channels.values())
+    q_ok = inputs.downgrade_inputs_valid and inputs.q_spx >= k and inputs.q_qqq >= k
+    red_clear = q_ok and _clear(red_rows)
+    all_clear = q_ok and _clear(all_rows)
+    status: DataStatus = ("完整" if all(row.valid for row in all_rows) and inputs.downgrade_inputs_valid
+                          else "沿用")
+    if previous.light == "绿":
+        light: Light = "红" if red else "黄" if yellow else "绿"
+        reason = "红通道激活" if red else "黄通道激活" if yellow else "维持绿灯"
+    elif previous.light == "黄":
+        light = "红" if red else "绿" if all_clear else "黄"
+        reason = "红通道激活" if red else "解除规则F：黄转绿" if all_clear else "维持黄灯"
+    else:
+        light = "黄" if red_clear else "红"
+        reason = "解除规则F：红转黄" if red_clear else "红通道激活或红转黄条件不足"
+    memory = SystemMemory(light, previous.quiet_red + 1 if _clear(red_rows) else 0,
+                          previous.quiet_all + 1 if _clear(all_rows) else 0, 0)
+    return SystemDay(day, memory, status, all_clear, reason)

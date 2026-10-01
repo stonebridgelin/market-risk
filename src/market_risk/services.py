@@ -141,6 +141,26 @@ def wavewarn_diagnose_v13(ctx: Context) -> Any:
         raise ServiceError(str(exc)) from exc
 
 
+def wavewarn_evaluate_v14_development(ctx: Context) -> Any:
+    """运行 v1.4 开发期工程评价（MR、解除规则 F、三级选择程序）；不锁定，不运行验证期。"""
+    from market_risk.wavewarn.evaluation_v14_run import run_v14_development
+
+    try:
+        return run_v14_development(ctx.paths.root)
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def wavewarn_v14_extended_history(ctx: Context) -> Any:
+    """运行 v1.4 的补充历史（纯价格版与 200 日均线、两次熊市）；只作描述，不改变选择。"""
+    from market_risk.wavewarn.extended_history_v14_run import run_v14_extended_history
+
+    try:
+        return run_v14_extended_history(ctx.paths.root)
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
 # ---------------------------------------------------------------------------
 # 日期与样本
 # ---------------------------------------------------------------------------
