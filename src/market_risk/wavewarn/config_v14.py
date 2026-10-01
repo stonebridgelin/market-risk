@@ -138,10 +138,13 @@ class ValidationConfig:
     git_executable: str
     validation_output: str
     rehearsal_output: str
+    rehearsal_split: dt.date            # 开发期演练前后两半的固定日历日分界（补充登记 A.8）
+    gzip_executable: str                # 逐日明细用 gzip -n 压缩
+    failures_output: str                # 验证期运行失败记录的目录（补充登记 C）
 
 
 def parse_validation_config(raw: dict[str, Any], model: V14Config) -> ValidationConfig:
-    """验证期起止日、锁定设定与大跌门槛必须等于登记与审核过的值。"""
+    """验证期起止日、锁定设定、大跌门槛与演练分界日必须等于登记与审核过的值。"""
     if raw.get("version") != "v1.4-validation":
         raise ValueError("wavewarn v1.4 验证期配置版本错误")
     setting, period, output = raw.get("locked_setting", {}), raw.get("validation", {}), raw.get("output", {})
@@ -150,12 +153,17 @@ def parse_validation_config(raw: dict[str, Any], model: V14Config) -> Validation
         _date(period.get("end")), str(period.get("vix3m_file")), Decimal(str(raw.get("big_drop_threshold"))),
         Decimal(str(raw.get("significance"))),
         {str(name): tuple(str(item) for item in files) for name, files in raw.get("locked_files", {}).items()},
-        str(raw.get("git_executable", "")), str(output.get("validation")), str(output.get("rehearsal")))
+        str(raw.get("git_executable", "")), str(output.get("validation")), str(output.get("rehearsal")),
+        _date(raw.get("rehearsal", {}).get("half_split")), str(raw.get("gzip_executable", "")),
+        str(output.get("failures")))
     if (config.locked_k, config.locked_theta) not in [(k, theta) for k in model.k for theta in model.theta_p]:
         raise ValueError("锁定设定不在登记的候选网格内")
     if (config.first_interval, config.end, config.big_drop_threshold, config.significance) != (
             dt.date(2017, 1, 3), dt.date(2022, 12, 30), Decimal("0.15"), Decimal("0.05")):
         raise ValueError("验证期起止日、大跌门槛或显著性门槛与登记不一致")
+    if (config.rehearsal_split, model.base.paired_parameters().half_split) != (
+            dt.date(2013, 7, 1), dt.date(2020, 1, 1)):
+        raise ValueError("前后两半的分界日与补充登记不一致")
     if not config.locked_files:
         raise ValueError("缺少须与锁定记录核对的文件清单")
     return config

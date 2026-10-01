@@ -186,13 +186,16 @@ def wavewarn_v14_lock_check(ctx: Context, lock_record: Path) -> Any:
 
 
 def wavewarn_v14_validate(ctx: Context, lock_record: Path) -> Any:
-    """v1.4 验证期评价：只能在正式锁定之后运行一次；锁定记录核对不过或已有结果时拒绝。"""
-    from market_risk.wavewarn.validation_run import run_v14_validation
+    """v1.4 验证期评价：只能在正式锁定之后运行一次；锁定记录核对不过或已有结果时拒绝。
+
+    中途失败时只写失败记录（不含任何数值），正式输出目录不创建；错误信息里只有失败阶段、错误类型与记录路径。
+    """
+    from market_risk.wavewarn.validation_run import evaluate_validation, run_v14_validation
 
     try:
-        return run_v14_validation(ctx.paths.root, lock_record)
+        return run_v14_validation(ctx.paths.root, lock_record, dt.datetime.now(dt.UTC), evaluate_validation)
     except ValueError as exc:
-        raise ServiceError(str(exc)) from exc
+        raise ServiceError(str(exc)) from None
 
 
 def wavewarn_v14_rehearse_validation(ctx: Context, lock_draft: Path) -> Any:

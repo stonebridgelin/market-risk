@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import bisect
+import csv
 import dataclasses
 import datetime as dt
 import gzip
@@ -29,17 +30,21 @@ from market_risk.wavewarn.inputs import (
     load_inputs_until,
     series_until,
 )
-from market_risk.wavewarn.main_test import NOT_SUPPORTED, SUPPORTED, conclusion
+from market_risk.wavewarn.joint_test import JointDay, joint_matrix, point_estimate, resampled_sums
+from market_risk.wavewarn.loss import configured_loss_settings
+from market_risk.wavewarn.main_test import NOT_SUPPORTED, SUPPORTED, conclusion, joint_days
+from market_risk.wavewarn.paired_test import stationary_bootstrap_indices
 from market_risk.wavewarn.v14_model import prepare_v14
 from market_risk.wavewarn.validation_flow import (
     WindowEvaluation,
     evaluate_window,
     locked_states,
+    rehearsal_window,
     validation_window,
     window_prepared,
 )
 from market_risk.wavewarn.validation_output import REPORT_NAME, write_window_outputs
-from market_risk.wavewarn.validation_report import LockInfo
+from market_risk.wavewarn.validation_report import CONDITIONAL, DEVELOPMENT_ONLY, FORMAL, LockInfo
 
 ROOT = Path(__file__).resolve().parents[1]
 DEVELOPMENT_END = dt.date(2016, 12, 30)
@@ -186,37 +191,62 @@ def test_validation_window_mechanics_on_synthetic_data(
     assert all(drop.event.peak_date >= start and drop.decline >= Decimal("0.15") for drop in result.big_drops)
 
 
+def _joint(result: WindowEvaluation, include_switch: bool) -> tuple[JointDay, ...]:
+    eta = configured_loss_settings(result.prepared.config).parameters.eta
+    references = result.references
+    return joint_days(result.locked, references[3].evaluated, references[0].evaluated, references[2].evaluated,
+                      eta, include_switch)
+
+
 def test_main_test_identities_on_synthetic_data(
         synthetic_run: tuple[DevelopmentInputs, PreparedEvaluation, WindowEvaluation]) -> None:
     _, _, result = synthetic_run
     test = result.main_test
     close = lambda a, b: abs(a - b) < Decimal("1e-18")  # noqa: E731
     locked_row = next(row for row in result.rows if row.candidate == result.locked_states.candidate)
-    # Σd_j = T_V4 − T_MA；按损失分项的分解之和等于 Σd_j。
-    assert close(test.main.total_difference, locked_row.timing.score - result.references[3].timing.score)
-    assert close(sum(test.components.values(), Decimal(0)), test.main.total_difference)
+    days = _joint(result, True)
+    # θ̂ = T_V4 − T_MA（正式口径与条件性对照共用）；按损失分项的分解之和等于 θ̂。
+    expected = locked_row.timing.score - result.references[3].timing.score
+    assert close(test.main.formal.total_difference, expected)
+    assert close(test.main.conditional.total_difference, expected)
+    assert close(sum(test.components.values(), Decimal(0)), expected)
     assert all(close(sum(row.components.values(), Decimal(0)), row.total) for row in result.differences[:50])
-    # 同一条 d_j 序列：三种区块的统计量相同（只有重抽样不同）；前后两半的统计量之和等于全期，区间数之和等于全期。
-    assert test.short_block.total_difference == test.long_block.total_difference == test.main.total_difference
+    # 三种区块的点估计相同（只有重抽样不同）；种子与区块长度取登记值。
+    assert test.main.point == test.short_block.point == test.long_block.point == point_estimate(days)
+    assert [(item.formal.block_length, item.formal.seed) for item in (test.main, test.short_block,
+                                                                      test.long_block)] == [
+        (20, 20260929), (10, 20260910), (40, 20260940)]
+    # 前后两半以登记的固定日历日 2020-01-01 分界，各自重算 ē 与基准；区间数之和等于全期，统计量不要求相加。
     assert test.first_half is not None and test.second_half is not None and test.split == dt.date(2020, 1, 1)
-    assert close(test.first_half.total_difference + test.second_half.total_difference, test.main.total_difference)
-    assert test.first_half.sample_count + test.second_half.sample_count == test.main.sample_count
-    assert (test.main.block_length, test.short_block.block_length, test.long_block.block_length) == (20, 10, 40)
-    assert (test.main.seed, test.short_block.seed, test.long_block.seed) == (20260929, 20260910, 20260940)
-    # 逐事件剔除：只含与窗口相交的合并事件；置零后的统计量 = 原统计量 − 被置零区间内的 d_j 之和。
-    days = [row.date for row in result.differences]
-    assert test.leave_one and all(item.trough_date >= days[0] for item in test.leave_one)
+    first = [row for row in days if row.date < dt.date(2020, 1, 1)]
+    second = [row for row in days if row.date >= dt.date(2020, 1, 1)]
+    assert first[-1].date == dt.date(2019, 12, 31) and second[0].date == dt.date(2020, 1, 2)
+    assert (test.first_half.point, test.second_half.point) == (point_estimate(first), point_estimate(second))
+    assert test.first_half.formal.sample_count + test.second_half.formal.sample_count == len(days)
+    # 恒等式逐次核对过：最大残差在容差之内；条件性对照与正式口径的重抽样次数相同。
+    for item in (test.main, test.short_block, test.long_block, test.first_half, test.second_half):
+        assert item.gap.max_identity_residual < Decimal("1e-18")
+        assert item.formal.resamples == item.conditional.resamples == QUICK.resamples
+    # 逐事件剔除：只含与窗口相交的合并事件；删除并重算的点估计等于在剩余区间上重新计算，置零归因等于减去该范围的 d_j。
+    dates = [row.date for row in result.differences]
+    assert test.leave_one and all(item.trough_date >= dates[0] for item in test.leave_one)
     item = test.leave_one[0]
-    low = max(0, bisect.bisect_left(days, item.peak_date) - 20)
-    high = min(len(days), bisect.bisect_right(days, item.trough_date) + 20)
+    low = max(0, bisect.bisect_left(dates, item.peak_date) - 20)
+    high = min(len(dates), bisect.bisect_right(dates, item.trough_date) + 20)
+    assert (item.removed, item.remaining) == (high - low, len(dates) - (high - low))
+    assert item.recomputed == point_estimate([*days[:low], *days[high:]]).theta
     removed = sum((row.total for row in result.differences[low:high]), Decimal(0))
-    assert close(item.total, test.main.total_difference - removed)
-    # 置零日期按“当日有资产区间被排除”统计；超过 1% 才做删除敏感性。
+    assert close(item.zeroed_total, test.main.conditional.total_difference - removed)
+    # 置零日期按“当日有资产区间被排除”统计；超过 1% 才做删除并重算的敏感性。
     assert test.zero_dates == sum(row.zeroed for row in result.differences)
     assert (test.without_zero is not None) == (test.zero_dates * 100 > len(result.differences))
-    # 措辞规则只取决于主设定的 p。
-    assert conclusion(test, Decimal("0.05")) == (SUPPORTED if test.main.p_value < Decimal("0.05") else NOT_SUPPORTED)
-
+    if test.without_zero is not None:
+        kept = [day for day, row in zip(days, result.differences, strict=True) if not row.zeroed]
+        assert test.without_zero.point == point_estimate(kept)
+    # 措辞规则只取决于正式口径主设定的 p；验证期窗口不计算 T价格 的解释性检验。
+    assert conclusion(test, Decimal("0.05")) == (
+        SUPPORTED if test.main.formal.p_value < Decimal("0.05") else NOT_SUPPORTED)
+    assert result.explanatory is None
 
 def test_truncation_keeps_states_and_losses_up_to_cutoff(
         synthetic_run: tuple[DevelopmentInputs, PreparedEvaluation, WindowEvaluation]) -> None:
@@ -249,16 +279,83 @@ def test_window_outputs_and_report_are_written(
     write_window_outputs(tmp_path, result, LOCK, VALIDATION_CONFIG, QUICK)
     names = {path.name for path in tmp_path.iterdir()}
     assert {"zz_events.csv", "zz_merged.csv", "zz_unknown.csv", "settings_summary.csv", "reference_rows.csv",
-            "main_test.csv", "paired_differences.csv", "leave_one_event.csv", "big_drop_events.csv",
-            "daily_selected.csv", "event_ledger_selected.csv", "alert_ledger_selected.csv", REPORT_NAME} <= names
+            "main_test.csv", "identity_gap.csv", "paired_differences.csv", "leave_one_event.csv",
+            "big_drop_events.csv", "daily_selected.csv", "event_ledger_selected.csv", "alert_ledger_selected.csv",
+            REPORT_NAME} <= names
     report = (tmp_path / REPORT_NAME).read_text(encoding="utf-8")
     # 四部分与开头的锁定记录、披露、措辞规则都在；结论句只能是登记的两句之一。
-    for text in ("## 一、主检验", "## 二、损失与择时", "## 三、事件账与警报账", "## 四、大跌事件", "措辞规则",
-                 "披露", LOCK.sha256):
+    for text in ("## 一、主检验", "## 二、损失与安全代理择时得分", "## 三、事件账与警报账", "## 四、大跌事件",
+                 "措辞规则", "披露", "推断目标", LOCK.sha256):
         assert text in report
     assert (SUPPORTED in report.split("## 一、主检验")[1]) != (
         f"按措辞规则：{NOT_SUPPORTED}" in report)
+    # 正式口径在前、条件性对照在后；验证期报告没有 T价格 一节，也没有“仅使用开发期数据”的开头。
+    assert 0 < report.index(f"**{FORMAL}**") < report.index(f"**{CONDITIONAL}**")
+    assert "T价格" not in report and DEVELOPMENT_ONLY not in report
+    # 主检验表：六个样本各两行（两种口径；未运行的样本一行），正式口径在前。
+    with (tmp_path / "main_test.csv").open(encoding="utf-8", newline="") as file:
+        tests = list(csv.DictReader(file))
+    assert {row["object"] for row in tests} == {"T"}
+    assert [row["method"] for row in tests[:2]] == [FORMAL, CONDITIONAL] and tests[0]["sample"] == "主设定"
     # 逐日差序列逐行写出，行数等于计入区间数；汇总含全部 21 组运行对象。
     assert len((tmp_path / "paired_differences.csv").read_text(encoding="utf-8").splitlines()) == len(
         result.differences) + 1
     assert len((tmp_path / "settings_summary.csv").read_text(encoding="utf-8").splitlines()) == 22
+
+
+# ---------------------------------------------------------------------------
+# 开发期演练：真实数据只读到 2016-12-30（少量重抽样，只检验流程与口径）
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def development_rehearsal() -> WindowEvaluation:
+    base = prepare_v14(VALIDATION_CONFIG.model, load_inputs_until(ROOT, DEVELOPMENT_END, VIX3M_VALIDATION_FILE))
+    return evaluate_window(base, rehearsal_window(base, VALIDATION_CONFIG), VALIDATION_CONFIG, QUICK)
+
+
+def test_rehearsal_window_ends_at_development_end_and_splits_on_registered_date(
+        development_rehearsal: WindowEvaluation) -> None:
+    result = development_rehearsal
+    days = result.locked.days
+    # 最后一个区间为 2016-12-29 收盘至 2016-12-30 收盘：区间起点不晚于 2016-12-29，没有任何 2017 年的价格。
+    assert result.prepared.inputs.days[-1] == days[-1] == DEVELOPMENT_END
+    assert result.differences[-1].date == dt.date(2016, 12, 29) and len(result.differences) == 1762
+    assert all(row.end <= DEVELOPMENT_END for symbol in ("SPX", "QQQ") for row in result.locked.asset_losses[symbol])
+    # 前后两半以登记的固定日历日 2013-07-01 分界（取代按区间数对半分）。
+    test = result.main_test
+    assert result.window.split == test.split == dt.date(2013, 7, 1)
+    first = sum(row.date < dt.date(2013, 7, 1) for row in result.differences)
+    assert test.first_half is not None and test.second_half is not None
+    assert (test.first_half.formal.sample_count, test.second_half.formal.sample_count) == (first, 1762 - first)
+    assert first == len(stock_trading_days(dt.date(2009, 12, 31), dt.date(2013, 6, 28)))
+
+
+def test_rehearsal_price_only_test_is_explanatory_and_shares_exposures(
+        development_rehearsal: WindowEvaluation) -> None:
+    result = development_rehearsal
+    test, price = result.main_test, result.explanatory
+    assert price is not None
+    # T价格 = T − 切换项：点估计相差恰为切换项的分解值；ē 与基准不变。
+    assert abs(price.main.point.theta - (test.main.point.theta - test.components["切换项"])) < Decimal("1e-18")
+    assert (price.mean_model, price.mean_baseline) == (test.mean_model, test.mean_baseline)
+    assert price.components["切换项"] == 0 and price.main.point.spread == test.main.point.spread
+
+
+def test_joint_resampling_draws_both_asset_rows_of_a_day_together(
+        development_rehearsal: WindowEvaluation) -> None:
+    """抽取一个交易日即同时抽取它的 SPX 行与 QQQ 行：重抽样后的模型损失等于同一组索引上两资产行之和。"""
+    result = development_rehearsal
+    days = _joint(result, True)
+    weights = configured_loss_settings(result.prepared.config).weights
+    matrix = joint_matrix(days, [row.total for row in result.differences])
+    for indices in stationary_bootstrap_indices(len(days), 20, 3, 20260929):
+        star, _ = resampled_sums(matrix, indices)
+        by_asset = sum((weights[symbol] * result.locked.asset_losses[symbol][index].price_loss
+                        for index in indices for symbol in ("SPX", "QQQ")), Decimal(0))
+        other = sum((result.locked.daily_losses[index].switch_cost
+                     + result.locked.daily_losses[index].full_exposure_cost for index in indices), Decimal(0))
+        assert abs(star.model_loss - (by_asset + other)) < Decimal("1e-18")
+        # 两模型的执行暴露也用同一组索引：ē* 等于这组索引上执行暴露的平均。
+        exposure = {"绿": Decimal(1), "黄": Decimal("0.5"), "红": Decimal(0)}
+        lights = result.locked.system_executed
+        assert star.model_exposure == sum((exposure[lights[index]] for index in indices), Decimal(0))

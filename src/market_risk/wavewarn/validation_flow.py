@@ -34,7 +34,14 @@ from market_risk.wavewarn.feasibility import AssetRebound
 from market_risk.wavewarn.feasibility_v14 import GreenDelay
 from market_risk.wavewarn.labels_zz import MergedZZEvent, UnknownLabels, ZZEvent, merge_zz_events
 from market_risk.wavewarn.loss import configured_loss_settings
-from market_risk.wavewarn.main_test import DailyDifference, MainTestResult, daily_differences, run_main_test
+from market_risk.wavewarn.main_test import (
+    DailyDifference,
+    MainTestResult,
+    daily_differences,
+    joint_days,
+    run_main_test,
+    without_switch,
+)
 from market_risk.wavewarn.period_stats import period_row
 from market_risk.wavewarn.timing import ReferenceRow, TimingResult, reference_rows, timing_result
 from market_risk.wavewarn.v14_model import FULL
@@ -63,19 +70,19 @@ def validation_window(prepared: PreparedEvaluation, config: ValidationConfig,
         raise ValueError("验证期窗口要求输入恰好截至验证期末，且起点是交易日")
     return WindowSpec(VALIDATION_TITLE, False, config.first_interval, config.first_interval,
                       validation_scope_rule(prepared.tau), params.half_split,
-                      f"前后两半以 {params.half_split} 分界（登记）")
+                      f"前后两半以固定日历日 {params.half_split} 分界（登记）")
 
 
-def rehearsal_window(prepared: PreparedEvaluation) -> WindowSpec:
-    """开发期演练窗口：起点 j₀、事件门槛 τ；按计入区间数对半分（演练专用分界）。"""
-    days = prepared.inputs.days
-    start = days.index(prepared.first_loss_day)
-    intervals = len(days) - 1 - start
-    split = days[start + intervals // 2]
+def rehearsal_window(prepared: PreparedEvaluation, config: ValidationConfig) -> WindowSpec:
+    """开发期演练窗口：起点 j₀、事件门槛 τ；前后两半以登记的固定日历日分界（补充登记 A.8）。"""
+    if prepared.inputs.days[-1] != config.model.base.development_end():
+        raise ValueError("开发期演练要求输入恰好截至开发期末")
+    split = config.rehearsal_split
+    if not prepared.first_loss_day < split <= prepared.inputs.days[-1]:
+        raise ValueError("演练的前后两半分界日不在评价窗口内")
     return WindowSpec(REHEARSAL_TITLE, True, prepared.first_loss_day, prepared.tau,
                       development_scope_rule(prepared.tau, prepared.first_loss_day), split,
-                      f"演练专用分界：按计入区间数对半分，前 {intervals // 2} 个、后 {intervals - intervals // 2} 个，"
-                      f"分界日 {split}；正式验证期以登记的日期分界")
+                      f"前后两半以固定日历日 {split} 分界（开发期演练的登记分界；正式验证期为登记的另一日期）")
 
 
 @dataclass(frozen=True)
@@ -113,6 +120,8 @@ class WindowEvaluation:
     main_test: MainTestResult
     big_drops: tuple[BigDrop, ...]
     missing: tuple[Row, ...]
+    # T价格（未计切换罚分）的同样检验：只在开发期演练中计算，只作解释，不是第二个主检验；验证期为空。
+    explanatory: MainTestResult | None
 
 
 def window_prepared(prepared: PreparedEvaluation, window: WindowSpec) -> PreparedEvaluation:
@@ -172,7 +181,10 @@ def big_drops(events: Sequence[ZZEvent], named: Sequence[tuple[str, CandidateEva
 
 def evaluate_window(base: PreparedEvaluation, window: WindowSpec, config: ValidationConfig,
                     params: PairedParameters) -> WindowEvaluation:
-    """标签 → 参照行 → 全部运行对象 → 主检验（锁定设定对 200 日均线）→ 大跌事件表。"""
+    """标签 → 参照行 → 全部运行对象 → 主检验（锁定设定对 200 日均线）→ 大跌事件表。
+
+    演练窗口另对 T价格 做同样的检验（只作解释）；验证期窗口不计算。
+    """
     prepared = window_prepared(base, window)
     events, unknown = period_labels(prepared.config, prepared.inputs, prepared.inputs.days[-1])
     merged = merge_zz_events(tuple(event for symbol in SYMBOLS for event in events[symbol]))
@@ -184,10 +196,12 @@ def evaluate_window(base: PreparedEvaluation, window: WindowSpec, config: Valida
     green, average, red = references[0], references[3], references[2]
     differences = daily_differences(locked, average.evaluated, green.evaluated, red.evaluated,
                                     timing.mean_exposure, average.timing.mean_exposure)
-    test = run_main_test(differences, window.split, merged, params, timing.mean_exposure,
-                         average.timing.mean_exposure, green.evaluated.total_loss, red.evaluated.total_loss)
     eta = configured_loss_settings(prepared.config).parameters.eta
+    compared = (locked, average.evaluated, green.evaluated, red.evaluated)
+    test = run_main_test(joint_days(*compared, eta, True), differences, window.split, merged, params)
+    explanatory = (run_main_test(joint_days(*compared, eta, False), without_switch(differences), window.split,
+                                 merged, params) if window.rehearsal else None)
     named = (("选定的 v1.4 设定", locked), (average.name, average.evaluated), (green.name, green.evaluated))
     drops = big_drops(events["SPX"], named, eta, window.event_floor, config.big_drop_threshold)
     return WindowEvaluation(prepared, window, events, merged, unknown, references, rows, chosen, locked,
-                            differences, test, drops, missing)
+                            differences, test, drops, missing, explanatory)

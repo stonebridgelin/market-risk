@@ -691,6 +691,7 @@ def wavewarn_v14_validate(lock_record: LockRecordOpt) -> None:
     """v1.4 验证期评价：只能在正式锁定之后运行一次。结果只写入输出目录，不在此回显。"""
     run = _call(services.wavewarn_v14_validate, _ctx(), lock_record)
     typer.echo(f"已写入{run.title}：{run.intervals} 个区间；锁定记录 SHA-256 {run.lock_record_sha256}。")
+    typer.echo(f"逐日明细 SHA-256：压缩前 {run.daily_sha256}；gzip -n 压缩后 {run.daily_gz_sha256}。")
     typer.echo(f"输出目录：{run.output}")
 
 
@@ -701,6 +702,7 @@ def wavewarn_v14_rehearse_validation(
     """用验证期的同一套流程在开发期上演练；不是验证期结果，不构成任何证据。"""
     run = _call(services.wavewarn_v14_rehearse_validation, _ctx(), lock_draft)
     typer.echo(f"已写入演练（{run.title}）：{run.intervals} 个区间。输出目录：{run.output}")
+    typer.echo(f"逐日明细 SHA-256：压缩前 {run.daily_sha256}；gzip -n 压缩后 {run.daily_gz_sha256}。")
 
 
 @backtest_app.command("zigzag-check")

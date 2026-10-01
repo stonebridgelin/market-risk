@@ -6,7 +6,10 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import tempfile
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from market_risk.wavewarn.config import PairedParameters
@@ -38,26 +41,52 @@ from market_risk.wavewarn.validation_flow import WindowEvaluation
 from market_risk.wavewarn.validation_report import (
     DIFFERENCE_HEADER,
     DROP_HEADER,
+    GAP_HEADER,
     LEAVE_ONE_HEADER,
+    MAIN_OBJECT,
+    PRICE_OBJECT,
     SUMMARY_HEADER,
     TEST_HEADER,
     LockInfo,
     difference_rows,
     drop_rows,
+    gap_rows,
     leave_one_rows,
     report_lines,
     summary_rows,
-    test_rows,
 )
+from market_risk.wavewarn.validation_report import test_rows as main_test_rows
 
 REPORT_NAME = "评价报告.md"
 LOCK_FILE = "lock_record.json"
+DAILY_NAME = "daily_selected.csv"
+COMPRESSION = "gzip -n"
 
 
-def write_lock_info(destination: Path, lock: LockInfo, head: str) -> None:
-    """运行开始时写入：锁定记录的路径与 SHA-256、记录中的代码提交号、运行时的 HEAD。"""
+@dataclass(frozen=True)
+class DailyHashes:
+    """逐日明细压缩前后的 SHA-256。"""
+
+    raw: str
+    compressed: str
+
+
+def compress_daily(destination: Path, gzip_executable: str) -> DailyHashes:
+    """逐日明细用 gzip -n 压缩（不含文件名与时间戳），只保留 .gz；返回压缩前后的 SHA-256。"""
+    source = destination / DAILY_NAME
+    packed = destination / (DAILY_NAME + ".gz")
+    raw = file_sha256(source)
+    done = subprocess.run([gzip_executable, "-n", str(source)], capture_output=True, check=False)
+    if done.returncode != 0 or source.exists() or not packed.is_file():
+        raise OSError("gzip -n 压缩逐日明细失败")
+    return DailyHashes(raw, file_sha256(packed))
+
+
+def write_lock_info(destination: Path, lock: LockInfo, head: str, daily: DailyHashes) -> None:
+    """锁定记录的路径与 SHA-256、记录中的代码提交号、运行时的 HEAD、逐日明细压缩前后的哈希。"""
     payload = {"lock_record": lock.path, "lock_record_sha256": lock.sha256, "code_commit": lock.code_commit,
-               "head": head, "formal": lock.formal}
+               "head": head, "formal": lock.formal, "daily_selected_csv_sha256": daily.raw,
+               "daily_selected_csv_gz_sha256": daily.compressed, "compression": COMPRESSION}
     (destination / LOCK_FILE).write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
                                          encoding="utf-8")
 
@@ -94,7 +123,7 @@ def write_locked_detail(destination: Path, result: WindowEvaluation, tables: Can
     for reference in result.references:
         daily.extend(v13_daily_rows(reference_prefix(reference.name), reference.evaluated, weights,
                                     result.prepared.inputs.series))
-    write_csv(destination / "daily_selected.csv", V13_DAILY_HEADER, daily)
+    write_csv(destination / DAILY_NAME, V13_DAILY_HEADER, daily)
     for name, header, rows in (("event_ledger_selected", EVENT_HEADER, tables.events),
                                ("event_class_summary_selected", EVENT_CLASS_HEADER, tables.event_classes),
                                ("alert_ledger_selected", ALERT_HEADER, tables.alerts),
@@ -103,9 +132,22 @@ def write_locked_detail(destination: Path, result: WindowEvaluation, tables: Can
         write_csv(destination / f"{name}.csv", (*SETTING_HEADER, *header[4:]), _with_prefix(rows, prefix))
 
 
+def write_test_outputs(destination: Path, result: WindowEvaluation) -> None:
+    """主检验两种口径的结果、恒等式差的分布、日度差与逐事件剔除；演练另含 T价格 的解释性检验。"""
+    tests = [(MAIN_OBJECT, result.main_test)]
+    if result.explanatory is not None:
+        tests.append((PRICE_OBJECT, result.explanatory))
+    write_csv(destination / "main_test.csv", TEST_HEADER,
+              [row for name, test in tests for row in main_test_rows(name, test)])
+    write_csv(destination / "identity_gap.csv", GAP_HEADER,
+              [row for name, test in tests for row in gap_rows(name, test)])
+    write_csv(destination / "paired_differences.csv", DIFFERENCE_HEADER, difference_rows(result))
+    write_csv(destination / "leave_one_event.csv", LEAVE_ONE_HEADER, leave_one_rows(result.main_test))
+
+
 def write_window_outputs(destination: Path, result: WindowEvaluation, lock: LockInfo, config: ValidationConfig,
-                         params: PairedParameters) -> str:
-    """写出全部结果文件，返回未压缩逐日明细的 SHA-256。destination 须已存在。"""
+                         params: PairedParameters) -> None:
+    """写出全部结果文件（逐日明细尚未压缩）。destination 须已存在。"""
     prepared = result.prepared
     weights = configured_loss_settings(prepared.config).weights
     tables = candidate_tables(prepared, result.locked_states, result.locked, result.events, result.merged,
@@ -114,9 +156,7 @@ def write_window_outputs(destination: Path, result: WindowEvaluation, lock: Lock
     write_csv(destination / "settings_summary.csv", SUMMARY_HEADER, summary_rows(result))
     write_csv(destination / "reference_rows.csv", REFERENCE_HEADER,
               [reference_row(row) for row in result.references])
-    write_csv(destination / "main_test.csv", TEST_HEADER, test_rows(result.main_test))
-    write_csv(destination / "paired_differences.csv", DIFFERENCE_HEADER, difference_rows(result))
-    write_csv(destination / "leave_one_event.csv", LEAVE_ONE_HEADER, leave_one_rows(result.main_test))
+    write_test_outputs(destination, result)
     write_csv(destination / "big_drop_events.csv", DROP_HEADER, drop_rows(result))
     write_csv(destination / "missing_audit.csv", MISSING_HEADER, result.missing)
     write_locked_detail(destination, result, tables)
@@ -125,4 +165,22 @@ def write_window_outputs(destination: Path, result: WindowEvaluation, lock: Lock
                          tuple((label, *row[1:]) for row in tables.event_classes),
                          ((label, *tables.alert_summary[1:]),))
     (destination / REPORT_NAME).write_text("\n".join(lines), encoding="utf-8")
-    return file_sha256(destination / "daily_selected.csv")
+
+
+def publish_window(output: Path, result: WindowEvaluation, lock: LockInfo, head: str, config: ValidationConfig,
+                   params: PairedParameters, gzip_executable: str) -> DailyHashes:
+    """先在同一父目录下的临时目录写齐全部文件并压缩逐日明细，全部成功后才一次改名为正式目录。
+
+    中途任何一步失败，临时目录随即删除，output 不会被创建。
+    """
+    if output.exists():
+        raise FileExistsError(f"输出目录已存在，拒绝覆盖：{output}")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".staging_", dir=output.parent) as temporary:
+        staging = Path(temporary) / "result"
+        staging.mkdir()
+        write_window_outputs(staging, result, lock, config, params)
+        daily = compress_daily(staging, gzip_executable)
+        write_lock_info(staging, lock, head, daily)
+        staging.rename(output)
+    return daily

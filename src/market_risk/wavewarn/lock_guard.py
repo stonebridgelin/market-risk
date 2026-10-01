@@ -4,7 +4,8 @@
 (a) HEAD 相对于记录中“代码提交号”的差异恰好只有这一个锁定记录文件；
 (b) 工作区没有任何未提交改动；
 (c) 记录中各规格与配置文件的 SHA-256 与仓库（HEAD 中已提交的内容）一致；
-(d) 记录中的选定设定等于审核过的锁定设定，随机种子与重抽样次数等于配置。
+(d) 记录中的选定设定等于审核过的锁定设定，随机种子与重抽样次数等于配置；
+(e) 记录的“此前失败的运行”字段恰好列出失败记录目录中的全部失败记录（补充登记 C）。
 字段按锁定记录草稿的表格解析：取对应行里反引号内的值。
 """
 
@@ -23,8 +24,11 @@ from market_risk.wavewarn.config import PairedParameters
 from market_risk.wavewarn.config_v14 import ValidationConfig
 
 COMMIT_FIELD, SETTING_FIELD, SEED_FIELD, RESAMPLE_FIELD = "代码提交号", "选定设定", "随机种子", "重抽样次数"
+FAILURE_FIELD, NO_FAILURES = "此前失败的运行", "无"
 GIT_HINT = ("找不到 git：请把 C:\\Execute\\Git\\bin 加入 PATH，"
             "或在 config/wavewarn_v14_validation.yaml 的 git_executable 中指定路径")
+GZIP_HINT = ("找不到 gzip：请把 C:\\Execute\\Git\\usr\\bin 加入 PATH，"
+             "或在 config/wavewarn_v14_validation.yaml 的 gzip_executable 中指定路径")
 
 
 class LockError(ValueError):
@@ -40,6 +44,7 @@ class LockRecord:
     theta_p: Decimal
     seeds: frozenset[int]
     resamples: int
+    failures: frozenset[str]             # “此前失败的运行”列出的失败记录文件名；“无”为空集
 
 
 def table_fields(text: str) -> dict[str, str]:
@@ -73,6 +78,14 @@ def _file_hashes(fields: Mapping[str, str], locked_files: Mapping[str, Sequence[
     return hashes
 
 
+def listed_failures(cell: str) -> frozenset[str]:
+    """“此前失败的运行”：写“无”，或把每份失败记录的文件名写在反引号内（可带目录，只取文件名）。"""
+    names = frozenset(name.replace("\\", "/").rsplit("/", 1)[-1] for name in re.findall(r"`([^`]+)`", cell))
+    if not names and not cell.strip().startswith(NO_FAILURES):
+        raise LockError(f"锁定记录的“{FAILURE_FIELD}”既不是“{NO_FAILURES}”，也没有列出失败记录的文件名")
+    return names
+
+
 def parse_lock_record(text: str, locked_files: Mapping[str, Sequence[str]]) -> LockRecord:
     """按草稿的字段名解析；开头十行内出现“草稿”即视为草稿。"""
     fields = table_fields(text)
@@ -84,7 +97,8 @@ def parse_lock_record(text: str, locked_files: Mapping[str, Sequence[str]]) -> L
     seeds = frozenset(int(value) for value in re.findall(r"(?<!\d)(\d{8})(?!\d)", _required(fields, SEED_FIELD)))
     return LockRecord(any("草稿" in line for line in text.splitlines()[:10]), commit.group(1),
                       _file_hashes(fields, locked_files), int(setting.group(1)), Decimal(setting.group(2)) / 100,
-                      seeds, int(resamples.group(0).replace(",", "")))
+                      seeds, int(resamples.group(0).replace(",", "")),
+                      listed_failures(_required(fields, FAILURE_FIELD)))
 
 
 def static_problems(record: LockRecord, config: ValidationConfig, params: PairedParameters,
@@ -103,14 +117,39 @@ def static_problems(record: LockRecord, config: ValidationConfig, params: Paired
     return problems
 
 
-def find_git(configured: str) -> str:
+def find_executable(configured: str, name: str, hint: str) -> str:
     """先用配置中指定的路径（存在时），否则在 PATH 中查找；都找不到则拒绝。"""
     if configured and Path(configured).is_file():
         return configured
-    found = shutil.which("git")
+    found = shutil.which(name)
     if found is None:
-        raise LockError(GIT_HINT)
+        raise LockError(hint)
     return found
+
+
+def find_git(configured: str) -> str:
+    return find_executable(configured, "git", GIT_HINT)
+
+
+def find_gzip(configured: str) -> str:
+    return find_executable(configured, "gzip", GZIP_HINT)
+
+
+def failure_records(directory: Path) -> tuple[str, ...]:
+    """失败记录目录中的全部文件名；目录不存在即没有失败记录。"""
+    return tuple(sorted(path.name for path in directory.iterdir() if path.is_file())) if directory.is_dir() else ()
+
+
+def failure_problems(record: LockRecord, existing: Sequence[str]) -> list[str]:
+    """锁定记录须恰好列出全部失败记录：漏列或列出不存在的记录都拒绝。"""
+    problems = []
+    missing = sorted(set(existing) - record.failures)
+    unknown = sorted(record.failures - set(existing))
+    if missing:
+        problems.append(f"锁定记录的“{FAILURE_FIELD}”没有列出全部失败记录：" + "、".join(missing))
+    if unknown:
+        problems.append(f"锁定记录的“{FAILURE_FIELD}”列出了不存在的失败记录：" + "、".join(unknown))
+    return problems
 
 
 def run_git(executable: str, root: Path, arguments: Sequence[str]) -> subprocess.CompletedProcess[bytes]:
@@ -164,8 +203,10 @@ def verify_lock(root: Path, record_path: Path, config: ValidationConfig, params:
     if not record_path.is_file():
         raise LockError(f"锁定记录不存在：{record_path}")
     record = parse_lock_record(record_path.read_text(encoding="utf-8"), config.locked_files)
+    find_gzip(config.gzip_executable)
     history, head = git_problems(executable, root, record, relative)
-    problems = [*static_problems(record, config, params, True), *history]
+    problems = [*static_problems(record, config, params, True), *history,
+                *failure_problems(record, failure_records(root / config.failures_output))]
     if problems:
         raise LockError("拒绝运行验证期：" + "；".join(problems))
     committed = run_git(executable, root, ("show", f"HEAD:{relative}")).stdout
