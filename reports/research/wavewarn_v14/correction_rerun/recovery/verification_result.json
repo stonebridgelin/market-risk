@@ -1,0 +1,17 @@
+{
+    "date":  "2026-10-01",
+    "version":  "B_fBW",
+    "worktree":  "C:\\Users\\stone\\PycharmProjects\\market-risk-wt\\_verify\\B_fBW（新的临时工作目录，核对后已删除）",
+    "base_tag":  "v1.4-asrun",
+    "patch":  "recovery/patches/f_BW.patch",
+    "code_tree":  {
+                      "expected":  "c88614a503c73f33f94da3e08b54ecbe4747716d",
+                      "actual":  "c88614a503c73f33f94da3e08b54ecbe4747716d"
+                  },
+    "fixed_setting_sha256":  {
+                                 "expected":  "2A1969DDE3CA4A5529B56EEEC3F2996B68B05AA0906ECA96AE4D934B03CF158E",
+                                 "actual":  "2A1969DDE3CA4A5529B56EEEC3F2996B68B05AA0906ECA96AE4D934B03CF158E"
+                             },
+    "ndtw":  "主仓库 NDTW.csv 的哈希与清单一致，没有触发由原始导出重新生成的分支",
+    "result":  "一致"
+}

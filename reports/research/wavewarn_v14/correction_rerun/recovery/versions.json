@@ -1,0 +1,79 @@
+{
+  "versions": {
+    "B": {
+      "base_tag": "v1.4-asrun",
+      "base_commit": "a0a8ec041f5923d3483c77471691e87ebbf2ac89",
+      "patches": [],
+      "code_tree": "5239b960d5af979db279c0565ed35306370c832b",
+      "changed_files": [],
+      "fixed_setting_sha256": "B709D09306E3EA17599DA227A97A91FA6526CCD0E3846C12F6F5E6B3239E5B05",
+      "output_files": 39
+    },
+    "B_fBW": {
+      "base_tag": "v1.4-asrun",
+      "base_commit": "a0a8ec041f5923d3483c77471691e87ebbf2ac89",
+      "patches": [
+        {
+          "file": "f_BW.patch",
+          "sha256": "0A9479418504AEF3776EF5D770D93D139403A90B3AFFEA3FE0C7B65186A8CFE9"
+        }
+      ],
+      "code_tree": "c88614a503c73f33f94da3e08b54ecbe4747716d",
+      "changed_files": [
+        "src/market_risk/wavewarn/channels.py"
+      ],
+      "fixed_setting_sha256": "2A1969DDE3CA4A5529B56EEEC3F2996B68B05AA0906ECA96AE4D934B03CF158E",
+      "output_files": 39
+    },
+    "B_flabel": {
+      "base_tag": "v1.4-asrun",
+      "base_commit": "a0a8ec041f5923d3483c77471691e87ebbf2ac89",
+      "patches": [
+        {
+          "file": "f_label.patch",
+          "sha256": "5DF3D7BC4AF8214CBD9587561EB16917996390D54AB6E2136FCA2D874F5471FA"
+        }
+      ],
+      "code_tree": "11bd2e64a66ea73b31a343e930afee5be9291be6",
+      "changed_files": [
+        "src/market_risk/wavewarn/export.py"
+      ],
+      "fixed_setting_sha256": "B709D09306E3EA17599DA227A97A91FA6526CCD0E3846C12F6F5E6B3239E5B05",
+      "output_files": 39
+    },
+    "B_fBW_flabel": {
+      "base_tag": "v1.4-asrun",
+      "base_commit": "a0a8ec041f5923d3483c77471691e87ebbf2ac89",
+      "patches": [
+        {
+          "file": "f_BW.patch",
+          "sha256": "0A9479418504AEF3776EF5D770D93D139403A90B3AFFEA3FE0C7B65186A8CFE9"
+        },
+        {
+          "file": "f_label.patch",
+          "sha256": "5DF3D7BC4AF8214CBD9587561EB16917996390D54AB6E2136FCA2D874F5471FA"
+        }
+      ],
+      "code_tree": "cb5625030c5124969a88c056b58f60a339df646a",
+      "changed_files": [
+        "src/market_risk/wavewarn/channels.py",
+        "src/market_risk/wavewarn/export.py"
+      ],
+      "fixed_setting_sha256": "2A1969DDE3CA4A5529B56EEEC3F2996B68B05AA0906ECA96AE4D934B03CF158E",
+      "output_files": 39
+    }
+  },
+  "patches_sha256": {
+    "f_BW.patch": "0A9479418504AEF3776EF5D770D93D139403A90B3AFFEA3FE0C7B65186A8CFE9",
+    "f_label.patch": "5DF3D7BC4AF8214CBD9587561EB16917996390D54AB6E2136FCA2D874F5471FA"
+  },
+  "environment": {
+    "python": "Python 3.12.14",
+    "uv_lock_sha256": "7DE8953B7304F99CC3902F7D19DE946B599AFB4FE21730FEDBB5FAC9C5009037",
+    "platform": "Windows（固定设定汇总由 Python 文本模式写出，换行为 CRLF）",
+    "fixed_setting_script": {
+      "path": "docs/audit/attribution/fixed_setting.py",
+      "git_blob_sha256": "45AE98B59EDA26E157522DF4A6DD342EE4CB5A0C4A7E038D1842726D9EF2FFC2"
+    }
+  }
+}

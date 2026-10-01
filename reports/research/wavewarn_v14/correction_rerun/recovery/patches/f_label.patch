@@ -1,0 +1,25 @@
+diff --git a/src/market_risk/wavewarn/export.py b/src/market_risk/wavewarn/export.py
+index f88e765..33dc358 100644
+--- a/src/market_risk/wavewarn/export.py
++++ b/src/market_risk/wavewarn/export.py
+@@ -26,13 +26,17 @@ def _event_row(event: ZZEvent) -> tuple[str, ...]:
+ 
+ 
+ def read_zz_events(path: Path, cutoff: dt.date) -> dict[str, tuple[ZZEvent, ...]]:
+-    """读回已导出的分资产 ZZ 事件；高点晚于标签截止日即报错。"""
++    """读回已导出的分资产 ZZ 事件；任一日期列（高点、T0、低点、结束日）晚于标签截止日即报错。
++
++    2026-10-01 纠错 f_label：此前只核对高点日期（docs/research/v1.4_一致性审计.md 的 G-1）。
++    """
+     result: dict[str, list[ZZEvent]] = {"SPX": [], "QQQ": []}
+     with path.open(encoding="utf-8-sig", newline="") as file:
+         for row in csv.DictReader(file):
++            for name in ("peak_date", "t0_date", "trough_date", "end_date"):
++                if row[name] and dt.date.fromisoformat(row[name]) > cutoff:
++                    raise ValueError(f"ZZ 事件超出标签截止日：{name} = {row[name]}（截止日 {cutoff.isoformat()}）")
+             peak = dt.date.fromisoformat(row["peak_date"])
+-            if peak > cutoff:
+-                raise ValueError("ZZ 事件超出开发期标签截止日")
+             end = dt.date.fromisoformat(row["end_date"]) if row["end_date"] else None
+             event = ZZEvent(row["symbol"], peak, dt.date.fromisoformat(row["t0_date"]),
+                             dt.date.fromisoformat(row["trough_date"]), end,

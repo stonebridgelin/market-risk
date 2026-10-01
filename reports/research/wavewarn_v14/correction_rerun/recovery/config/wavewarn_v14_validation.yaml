@@ -1,0 +1,45 @@
+# 波段预警 v1.4 验证期工程的配置（不含任何 v1.4 规则或候选参数；规则见 wavewarn_v14.yaml）。
+# 本文件与其余配置一起由锁定记录中的代码提交号固定。
+version: v1.4-validation
+base: wavewarn_v14.yaml
+
+# 开发期选择程序选出的设定（负责人 2026-10-01 审核）；验证期命令只运行这一组，不重新选择
+locked_setting:
+  k: 5
+  theta_p: "0.025"
+
+# 验证期：所有模型自 t0 连续运行至 end；计入区间起点自 first_interval 起；事件按 P ≥ first_interval 归属
+validation:
+  first_interval: 2017-01-03
+  end: 2022-12-30
+  vix3m_file: data/research/wavewarn/v14/vix3m_cboe_validation.csv
+
+# 补充登记 A.8：开发期演练的前后两半以此固定日历日分界（验证期的分界日 2020-01-01 在 wavewarn_v121.yaml）
+rehearsal:
+  half_split: 2013-07-01
+
+# 登记第五节：SPX 跌幅不低于此值（按高点到低点的收盘价）的 ZZ 事件单列执行暴露与回撤
+big_drop_threshold: "0.15"
+
+# 登记第五节的措辞规则：主设定 p 小于此值才可写带来了额外的择时价值，否则写未证明优于200日均线
+significance: "0.05"
+
+# 锁定记录中须与仓库一致的文件：字段名 → 文件（多个文件的字段在记录里写成“`路径`：`哈希`”）
+locked_files:
+  v1.4 修订登记 SHA-256: [docs/research/波段预警研究规格_v1.4_修订登记.md]
+  v1.4 检验口径与诊断补充登记 SHA-256: [docs/research/波段预警研究规格_v1.4_检验口径与诊断补充登记.md]
+  v1.2.1 规格副本 SHA-256: [docs/research/波段预警研究规格_v1.2.1.md]
+  v1.3 修订登记 SHA-256: [docs/research/波段预警研究规格_v1.3_修订登记.md]
+  配置 SHA-256: [config/wavewarn_v14.yaml, config/wavewarn_v121.yaml, config/wavewarn_v14_validation.yaml]
+
+# git 可执行文件：先用这里指定的路径（存在时），否则在 PATH 中查找；都找不到则拒绝运行
+git_executable: C:\Execute\Git\bin\git.exe
+
+# gzip 可执行文件（逐日明细用 gzip -n 压缩，不含文件名与时间戳）：查找顺序同上；找不到则在读取任何数据之前拒绝运行
+gzip_executable: C:\Execute\Git\usr\bin\gzip.exe
+
+output:
+  validation: reports/research/wavewarn_v14/validation
+  rehearsal: reports/research/wavewarn_v14/validation_rehearsal_development
+  # 补充登记 C：验证期运行中途失败时只在这里写失败记录（不含任何数值）
+  failures: reports/research/wavewarn_v14/validation_failures

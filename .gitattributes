@@ -9,3 +9,5 @@ results/MARKET/risk_scoring/backtests/**/*.csv -text
 # 披露存档与补丁文件须逐字节保持不变（记录了 SHA-256），git 不做换行转换
 reports/research/wavewarn_v14/disclosure/** -text
 patches/** -text
+# 归因版本的恢复材料（补丁、配置、清单与重建脚本）同样逐字节保持不变
+reports/research/wavewarn_v14/correction_rerun/recovery/** -text

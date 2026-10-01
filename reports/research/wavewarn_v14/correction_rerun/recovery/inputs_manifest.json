@@ -1,0 +1,58 @@
+{
+  "base_tag": "v1.4-asrun",
+  "inputs": [
+    {
+      "path": "data/market/daily/SPX.csv",
+      "sha256": "6941AB293EDDB8201E851D873476D64C6CBD584EC9573F5FF757447173BF0B00",
+      "source": "标签 v1.4-asrun 的代码树（仓库内字节）"
+    },
+    {
+      "path": "data/market/daily/QQQ.csv",
+      "sha256": "D14E58EDCAB7EC94B4E6728CE65BBBF8A0A84565D53CE951A37A4E6143A56880",
+      "source": "标签 v1.4-asrun 的代码树（仓库内字节）"
+    },
+    {
+      "path": "data/market/daily/S5TW.csv",
+      "sha256": "4C7314850AF561BDFE2A8380F90307CC4BE4F627B5EC25AD0564EFECD6535F7F",
+      "source": "标签 v1.4-asrun 的代码树（仓库内字节）"
+    },
+    {
+      "path": "data/market/daily/VIX_CBOE.csv",
+      "sha256": "F5F69A3159E5080B4A2DFCD4CC28C58A2822253B5CC2925DC9DBC8317F116D57",
+      "source": "标签 v1.4-asrun 的代码树（仓库内字节）"
+    },
+    {
+      "path": "data/research/wavewarn/v121/vix3m_cboe_development.csv",
+      "sha256": "9E34D54D72C1B2BDD1F43EC7F8CFB7035188D8CF057DEF77522ED5AB8CCA6ABC",
+      "source": "标签 v1.4-asrun 的代码树（仓库内字节）"
+    },
+    {
+      "path": "data/research/wavewarn/v14/vix3m_cboe_validation.csv",
+      "sha256": "970FCDF54427E0B561C05BC0D59F50754888E48E12F4961183F41CA49A39E488",
+      "source": "标签 v1.4-asrun 的代码树（仓库内字节）"
+    },
+    {
+      "path": "reports/research/wavewarn_v121/zz_events_development.csv",
+      "sha256": "A543051984A14629465E8D6FE37E14A0CB119BFE4C43A683537082794601BAD8",
+      "source": "标签 v1.4-asrun 的代码树（仓库内字节）"
+    },
+    {
+      "path": "data/processed/tradingview/NDTW.csv",
+      "sha256": "691CEBFC92F368E2C5CC8A80E1A79BB0820EE84641BC13FDF4B1A6C7335DB4C3",
+      "source": "不入库（.gitignore 排除 data/processed/）；由已入库的 TradingView 原始导出经现有处理流程生成",
+      "raw_export": {
+        "path": "data/manual/tradingview/raw/2026-09-26/INDEX_NDTW, 1D.csv",
+        "sha256": "8ADC72108C62DBAAA23DC623F46F4CC299D15E745F37C4BA3CE7C2C125747734",
+        "manifest": "data/manual/tradingview/manifest.csv"
+      },
+      "regenerate": "uv run market-risk tv validate"
+    }
+  ],
+  "configs": {
+    "config/wavewarn_v121.yaml": "6DEF6358775F920E82B647617D32B80F3FF12974BE025A842FCAB746D7B09533",
+    "config/wavewarn_v13.yaml": "9B765CE5009F71045519194350995B87591D0503706D576768284BE7D7E78E9A",
+    "config/wavewarn_v14.yaml": "4546415205684211AE06B08BDF561867DDE937FB7F7019798D7F0EE882F9BB53",
+    "config/wavewarn_v14_validation.yaml": "F059ED0311470FF4CEC17BF1BA40F7A71EC2BB74007EE3ACFF1259D708B38336",
+    "config/wavewarn_v14_diagnostics.yaml": "1611DA5790593531C0A4C00647F6EDDBD33BCE47B8C86987798AE02860F5E95B"
+  }
+}

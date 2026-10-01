@@ -1,0 +1,75 @@
+version: v1.2.1
+development_end: 2016-12-30
+nl_unknown_policy: three_valued
+
+business:
+  eta: "0.5"
+  e_version: E2
+  kappa_d: "2"
+  beta: "1"
+
+channel_selection:
+  b_spx: false
+  dv_spx: true
+  b_qqq: true
+  dv_qqq: true
+
+zz:
+  spx_decline: "0.04"
+  spx_rebound: "0.05"
+  qqq_decline: "0.05"
+  qqq_rebound: "0.065"
+
+candidates:
+  k: [3, 5, 10]
+  theta_p: ["0.015", "0.02", "0.025"]
+  q: ["0.10", "0.20"]
+
+windows:
+  anchor: 63
+  anchor_audit: 126
+  new_low_prior: 19
+  new_low_min_valid: 15
+  breadth_reference: 252
+  breadth_reference_min_valid: 200
+  breadth_median: 60
+  breadth_median_min_valid: 50
+  ma50: 50
+  ma200: 200
+  breadth_repair: 3
+  volatility_exit_short: 3
+  volatility_exit_long: 10
+  e3_high_window: 252
+
+channel_thresholds:
+  breadth_min_drawdown: "0.01"
+  divergence_max_drawdown: "0.01"
+  divergence_delta10_max: "-10"
+  collapse_min_drawdown: "0.02"
+  collapse_breadth_max: "30"
+  collapse_repair_breadth: "40"
+  volatility_enter_ratio: "1"
+  volatility_exit_ratio: "0.95"
+  e3_near_high: "0.10"
+
+quiet:
+  red_days: 3
+  all_days: 5
+
+loss:
+  noise_floor: "0.02"
+  switch_cost_fraction_of_kappa_d: "0.0025"
+  mu: "0"
+  weight_spx: "0.5"
+  weight_qqq: "0.5"
+
+paired_test:
+  mean_block_length: 20
+  short_block_length: 10
+  long_block_length: 40
+  resamples: 10000
+  seed_main: 20260929
+  seed_block_10: 20260910
+  seed_block_40: 20260940
+  half_split: 2020-01-01
+  event_padding: 20
