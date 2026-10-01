@@ -154,8 +154,9 @@ def bottleneck_lines(settings: Sequence[SettingDiagnostics]) -> list[str]:
         "瓶颈只对“绿灯信号日不早于 Tr”的类别②事件判定：对每个候选条件，找出包含绿灯信号日的那一段连续成立期，"
         "取其起点；起点最晚的条件为瓶颈，起点同日时各计一次。P1·E2 用“全部通道连续5天有效且未激活”代替 (2)(3)，"
         "(2) 只列天数；(6) 只在 E2 下是候选；(7) 在事件内出现过红灯时是候选。", "",
-        f"实现口径：{NOT_RED} 按“系统不处于红灯”这一状态计。首次成立天数只在 [P, 搜索上限] 内出现过红灯时填写；"
-        "判瓶颈时，只在包含信号日的那段非红期之前的红灯日不早于 P 时参与。", ""]
+        f"条件 {NOT_RED} 的口径（负责人 2026-10-01 确认）：以“系统不处于红灯”判定。"
+        "瓶颈取包含信号日那段非红期的起点，且仅在其前一日的红灯不早于事件高点 P 时参与；"
+        "首次成立天数只在事件内（[P, 搜索上限]）出现过红灯时填写，红灯在低点前已结束记 0。", ""]
     for group in BOTTLENECK_GROUPS:
         lines.extend(_group_bottleneck_lines(_median_of(settings, group)))
     return [*lines, *_all_settings_bottleneck_lines(settings)]
