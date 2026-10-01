@@ -315,17 +315,30 @@ def test_label_generation_stops_at_the_cutoff_and_rejects_a_longer_axis() -> Non
         build_unknown_labels({"SPX": events}, DAYS[:150], {"SPX": prices}, DAYS[200])
 
 
-G1 = "审计入口防护缺口 G-1：读回标签文件时只核对高点日期，其余日期列晚于截止日不会被拒绝"
-
-
-@pytest.mark.xfail(strict=True, reason=G1)
 def test_label_file_reader_rejects_any_date_after_the_cutoff(tmp_path: Path) -> None:
-    """读回已导出的标签文件时，任何一个日期列晚于标签截止日都应拒绝，而不只是高点日期。"""
+    """读回已导出的标签文件时，任何一个日期列晚于标签截止日都应拒绝，而不只是高点日期。
+
+    审计时这是入口防护缺口 G-1（只核对高点日期），本案例当时标记为预期失败；补丁 f_label 之后必须通过。
+    高点都不晚于截止日 2016-12-30；分别让低点与结束日、只有结束日、只有 T0 之后的各列晚于截止日，都应拒绝。
+    全部日期列都不晚于截止日的一行（含结束日为空的右截尾事件）照常读入。
+    """
+    header = "symbol,peak_date,t0_date,trough_date,end_date,peak_close,trough_close,right_censored\n"
     path = tmp_path / "zz_events.csv"
-    path.write_text("symbol,peak_date,t0_date,trough_date,end_date,peak_close,trough_close,right_censored\n"
-                    "SPX,2016-12-13,2016-12-28,2017-01-05,2017-01-20,100,95,否\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="截止日"):
-        read_zz_events(path, CUTOFF)
+    late = ("SPX,2016-12-13,2016-12-28,2017-01-05,2017-01-20,100,95,否\n",
+            "SPX,2016-12-13,2016-12-20,2016-12-28,2017-01-03,100,95,否\n",
+            "SPX,2016-12-13,2017-01-03,2017-01-03,,100,95,是\n",
+            "SPX,2017-01-03,2017-01-04,2017-01-05,,100,95,是\n")
+    for row in late:
+        path.write_text(header + row, encoding="utf-8")
+        with pytest.raises(ValueError, match="截止日"):
+            read_zz_events(path, CUTOFF)
+    path.write_text(header + "SPX,2016-12-13,2016-12-20,2016-12-28,2016-12-30,100,95,否\n"
+                    "QQQ,2016-12-13,2016-12-28,2016-12-30,,100,94,是\n", encoding="utf-8")
+    events = read_zz_events(path, CUTOFF)
+    assert (events["SPX"][0].end_date, events["QQQ"][0].right_censored) == (CUTOFF, True)
+    # 现有的开发期标签文件照常读入：224 个事件。
+    stored = read_zz_events(ROOT / "reports/research/wavewarn_v121/zz_events_development.csv", CUTOFF)
+    assert len(stored["SPX"]) + len(stored["QQQ"]) == 224
 
 
 def test_stored_development_label_file_has_no_date_after_the_cutoff() -> None:
