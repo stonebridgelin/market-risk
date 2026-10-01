@@ -161,6 +161,20 @@ def wavewarn_v14_extended_history(ctx: Context) -> Any:
         raise ServiceError(str(exc)) from exc
 
 
+def wavewarn_fetch_vix3m_validation(ctx: Context) -> Any:
+    """下载 Cboe 官方 VIX3M 并保存截至 2022-12-30 的副本；不读取或保存其后的行。"""
+    from market_risk.wavewarn.data_v14 import fetch_cboe_validation
+    from market_risk.wavewarn.inputs import VALIDATION_END, VIX3M_VALIDATION_FILE
+
+    root = ctx.paths.root
+    try:
+        return fetch_cboe_validation(root / VIX3M_VALIDATION_FILE,
+                                     root / "data/research/wavewarn/v121/vix3m_cboe_development.csv",
+                                     VALIDATION_END, dt.datetime.now(dt.UTC))
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
 # ---------------------------------------------------------------------------
 # 日期与样本
 # ---------------------------------------------------------------------------

@@ -400,13 +400,22 @@ def prepare_grid(config: WavewarnConfig, inputs: DevelopmentInputs,
 
 def development_labels(prepared: PreparedEvaluation) -> tuple[dict[str, tuple[ZZEvent, ...]], UnknownLabels]:
     """只从已截断开发期价格生成本次评价的资产标签与尾段未定集合。"""
-    thresholds = prepared.config.zz_thresholds()
-    events = {symbol: find_zz_events(symbol, prepared.inputs.days, prepared.inputs.series[symbol],
-                                     prepared.config.development_end(), thresholds)
+    return period_labels(prepared.config, prepared.inputs, prepared.config.development_end())
+
+
+def period_labels(config: WavewarnConfig, inputs: DevelopmentInputs,
+                  label_end: dt.date) -> tuple[dict[str, tuple[ZZEvent, ...]], UnknownLabels]:
+    """用截至 label_end 的价格生成两资产的 ZZ 标签与尾段未定集合；label_end 须是输入的最后一个交易日。
+
+    开发期的 label_end 为 2016-12-30；验证期为 2022-12-30（只在正式验证期运行中使用）。
+    """
+    if inputs.days[-1] != label_end:
+        raise ValueError("标签截止日须等于输入的最后一个交易日，不得用其后的价格生成标签")
+    thresholds = config.zz_thresholds()
+    events = {symbol: find_zz_events(symbol, inputs.days, inputs.series[symbol], label_end, thresholds)
               for symbol in SYMBOLS}
-    unknown = build_unknown_labels(events, prepared.inputs.days,
-                                   {symbol: prepared.inputs.series[symbol] for symbol in events},
-                                   prepared.config.development_end())
+    unknown = build_unknown_labels(events, inputs.days, {symbol: inputs.series[symbol] for symbol in events},
+                                   label_end)
     return events, unknown
 
 

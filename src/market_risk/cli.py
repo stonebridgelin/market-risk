@@ -668,6 +668,14 @@ def wavewarn_v14_extended_history() -> None:
     typer.echo(f"已写入 v1.4 补充历史：t0′={run.t0}，τ′={run.tau}，j₀′={run.first_loss_day}。输出目录：{run.output}")
 
 
+@wavewarn_app.command("fetch-vix3m-validation")
+def wavewarn_fetch_vix3m_validation() -> None:
+    """下载 Cboe 官方 VIX3M，保存截至 2022-12-30 的副本（不含其后的行）。"""
+    meta = _call(services.wavewarn_fetch_vix3m_validation, _ctx())
+    typer.echo(f"已保存 VIX3M 副本：{meta['first_date']} 至 {meta['last_date']}，{meta['rows']} 行，"
+               f"SHA-256 {meta['sha256']}。")
+
+
 @backtest_app.command("zigzag-check")
 def backtest_zigzag_check(
     symbol: Annotated[str, typer.Option("--symbol", help="SPX 或 QQQ")],
