@@ -14,7 +14,13 @@ from market_risk.wavewarn.convergence import loss_start, system_convergence
 from market_risk.wavewarn.execution import ExecutionDay, execute_asset, exposure
 from market_risk.wavewarn.features import AssetFeatures, asset_features, vix_term_ratio
 from market_risk.wavewarn.input_model import DevelopmentInputs
-from market_risk.wavewarn.labels_zz import UnknownLabels, ZZEvent, build_unknown_labels, find_zz_events
+from market_risk.wavewarn.labels_zz import (
+    MergedZZEvent,
+    UnknownLabels,
+    ZZEvent,
+    build_unknown_labels,
+    find_zz_events,
+)
 from market_risk.wavewarn.loss import (
     AssetLossDay,
     LossSettings,
@@ -225,6 +231,30 @@ def ledger_included(days: Sequence[dt.date], peak_date: dt.date, right_censored:
     peak = days.index(peak_date)
     return (not right_censored and peak_date >= rule.ledger_peak_floor and peak >= LEDGER_LOOKBACK
             and days[peak - LEDGER_LOOKBACK] >= rule.ledger_lookback_floor)
+
+
+TAIL_PEAK_REASON = "尾段（寻峰）"
+
+
+def touches_tail_unknown(peak_date: dt.date, trough_date: dt.date, unknown: UnknownLabels) -> bool:
+    """合并事件的闭区间 [P, Tr] 是否与任一资产的尾段（寻峰）未定区间相交（端点相接也算）。
+
+    尾段未定区间从该资产的候选高点延伸到标签截止日；相交时那个资产可能正在形成一件会并进来的事件，
+    合并事件的成员尚未确定，不纳入事件账（负责人 2026-10-01 确认）。
+    """
+    for reasons in unknown.reasons_by_asset.values():
+        tail = [day for day, reason in reasons.items() if reason == TAIL_PEAK_REASON]
+        if tail and peak_date <= unknown.label_end and trough_date >= min(tail):
+            return True
+    return False
+
+
+def merged_ledger_included(days: Sequence[dt.date], event: MergedZZEvent, rule: ScopeRule,
+                           unknown: UnknownLabels) -> bool:
+    """合并事件进事件账：最早高点前 20 个交易日不早于 τ，无右截尾成员，且不与尾段未定区间相交。"""
+    censored = any(member.right_censored for member in event.members)
+    return (ledger_included(days, event.peak_date, censored, rule)
+            and not touches_tail_unknown(event.peak_date, event.trough_date, unknown))
 
 
 def event_scope(days: Sequence[dt.date], event: ZZEvent, rule: ScopeRule) -> EventScope:

@@ -27,6 +27,7 @@ from market_risk.wavewarn.evaluation import (
     evaluate_candidate,
     event_scope,
     first_loss_interval,
+    merged_ledger_included,
     reference_evaluation,
     validation_scope_rule,
 )
@@ -328,7 +329,7 @@ def test_event_ledger_covers_asset_and_merged_events() -> None:
     states = _states(days, signals)
     rule = development_scope_rule(prepared.tau, prepared.first_loss_day)
     entries = (*asset_ledger_entries(prepared, states, events, rule),
-               *merged_ledger_entries(prepared, states, merged, rule))
+               *merged_ledger_entries(prepared, states, merged, rule, _no_unknown(days)))
     # SPX：S_{T0−1}=下标26 非绿，警报段起点 26 在 [T0−20,T0−1] 内 → 新警报；S_{T0−2}=下标25 为绿 → 未执行。
     # QQQ：S_{T0−1}=下标27 为绿，[T0,Tr−1]=28…31 全绿，但 [P−20,T0−2]=6…26 含下标26 非绿 → 中断。
     # 合并事件 T0 同 SPX → 新警报。
@@ -340,6 +341,33 @@ def test_event_ledger_covers_asset_and_merged_events() -> None:
     counts = {row[4]: row[7:13] for row in ledger_class_rows(("P1", 3, Decimal("0.015"), ""), entries)}
     # 各列：事件账纳入数、新警报、持续覆盖、迟到、中断、漏报。
     assert counts == {"SPX": (1, 1, 0, 0, 0, 0), "QQQ": (1, 0, 0, 0, 1, 0), "合并": (1, 1, 0, 0, 0, 0)}
+
+
+def test_merged_event_ledger_inclusion_three_cases() -> None:
+    days = _days(40)
+    rule = development_scope_rule(days[0], days[2])                     # τ=下标0，j₀=下标2
+    spx = ZZEvent("SPX", days[25], days[27], days[30], days[34], Decimal(100), Decimal(90), False)
+    qqq = ZZEvent("QQQ", days[26], days[28], days[32], days[36], Decimal(100), Decimal(90), False)
+    # 情形一：无右截尾成员，且不与尾段未定区间相交。合并区间为下标 25…32，最早高点前20天=下标5≥τ → 纳入。
+    (merged,) = merge_zz_events((spx, qqq))
+    assert merged_ledger_included(days, merged, rule, _no_unknown(days))
+    # 情形二：QQQ 成员改为右截尾（无结束日）→ 不纳入。
+    censored = ZZEvent("QQQ", days[26], days[28], days[32], None, Decimal(100), Decimal(90), True)
+    (with_censored,) = merge_zz_events((spx, censored))
+    assert not merged_ledger_included(days, with_censored, rule, _no_unknown(days))
+    # 情形三：成员都已确认，但 QQQ 的尾段（寻峰）未定区间从下标32起（候选高点=下标32）延伸到标签截止日，
+    # 与合并区间 [25, 32] 在端点 32 相接 → 不纳入。
+    tail = {day: "尾段（寻峰）" for day in days[32:39]}
+    touching = UnknownLabels(days[-1], {"SPX": frozenset(), "QQQ": frozenset(tail)}, {"SPX": {}, "QQQ": tail})
+    assert not merged_ledger_included(days, merged, rule, touching)
+    # 尾段从下标33起：与 [25, 32] 不相交 → 仍纳入。
+    later = {day: "尾段（寻峰）" for day in days[33:39]}
+    apart = UnknownLabels(days[-1], {"SPX": frozenset(), "QQQ": frozenset(later)}, {"SPX": {}, "QQQ": later})
+    assert merged_ledger_included(days, merged, rule, apart)
+    # 右截尾（寻底）的未定区间不属于尾段（寻峰），不触发这一条（右截尾事件本身已由成员规则排除）。
+    seeking = {day: "右截尾（寻底）" for day in days[30:39]}
+    bottom = UnknownLabels(days[-1], {"SPX": frozenset(), "QQQ": frozenset(seeking)}, {"SPX": {}, "QQQ": seeking})
+    assert merged_ledger_included(days, merged, rule, bottom)
 
 
 def _summary(model: str, loss: str, non_green: int, switches: int, order: int) -> ModelSummary:

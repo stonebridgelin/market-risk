@@ -27,11 +27,11 @@ from market_risk.wavewarn.evaluation import (
     ScopeRule,
     allocated_asset_days,
     event_scope,
-    ledger_included,
+    merged_ledger_included,
 )
 from market_risk.wavewarn.execution import execute_asset
 from market_risk.wavewarn.exit_costs import ExitCostEvent, exit_cost_for_event
-from market_risk.wavewarn.labels_zz import MergedZZEvent, ZZEvent
+from market_risk.wavewarn.labels_zz import MergedZZEvent, UnknownLabels, ZZEvent
 from market_risk.wavewarn.ledgers import (
     EVENT_CLASSES,
     AlertLedgerRow,
@@ -174,14 +174,15 @@ def asset_ledger_entries(prepared: PreparedEvaluation, states: CandidateStates,
 
 
 def merged_ledger_entries(prepared: PreparedEvaluation, states: CandidateStates,
-                          merged: Sequence[MergedZZEvent], rule: ScopeRule) -> tuple[LedgerEntry, ...]:
+                          merged: Sequence[MergedZZEvent], rule: ScopeRule,
+                          unknown: UnknownLabels) -> tuple[LedgerEntry, ...]:
     """合并事件只做五类判定（用最早的 P、T0 与最晚的 Tr）；不合并价格，故无转绿价格明细。"""
     axis = prepared.inputs.days[prepared.inputs.days.index(prepared.t0):]
     lights = tuple(row.light for row in states.rows)
     entries: list[LedgerEntry] = []
     for event in merged:
         censored = any(member.right_censored for member in event.members)
-        included = ledger_included(prepared.inputs.days, event.peak_date, censored, rule)
+        included = merged_ledger_included(prepared.inputs.days, event, rule, unknown)
         classified = classify_merged_event(axis, lights, event) if included else None  # type: ignore[arg-type]
         entries.append(LedgerEntry("合并", event.source, event.peak_date, event.t0_date, event.trough_date,
                                    censored, None, included, classified, None))
@@ -445,11 +446,12 @@ class CandidateTables:
 
 def candidate_tables(prepared: PreparedEvaluation, states: CandidateStates, evaluated: CandidateEvaluation,
                      events: Mapping[str, Sequence[ZZEvent]], merged: Sequence[MergedZZEvent],
-                     rule: ScopeRule, weights: Mapping[str, Decimal]) -> CandidateTables:
+                     rule: ScopeRule, weights: Mapping[str, Decimal],
+                     unknown: UnknownLabels) -> CandidateTables:
     """把一个设定的评价结果整理成各张表的行；不做任何读写。"""
     prefix = setting_prefix(states.candidate)
     entries = (*asset_ledger_entries(prepared, states, events, rule),
-               *merged_ledger_entries(prepared, states, merged, rule))
+               *merged_ledger_entries(prepared, states, merged, rule, unknown))
     ledger = alert_ledger(evaluated, events, weights)
     return CandidateTables(
         model_summary(states, evaluated), daily_rows(evaluated, weights, prepared.inputs.series),

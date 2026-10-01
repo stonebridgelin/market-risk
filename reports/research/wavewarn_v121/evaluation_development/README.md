@@ -2,7 +2,7 @@
 
 只使用截至 2016-12-30 的开发期输入；不是历史预警效果。t0=2009-10-01，τ=2009-12-31，j₀=2009-12-31。
 
-## `daily_asset_intervals.csv`：每个模型设定 × 资产 × 区间一行
+## `daily_asset_intervals.csv`（入库为 `.csv.gz`）：每个模型设定 × 资产 × 区间一行
 
 - `date`→`next_date`：价格区间的起点与终点（交易日）。`close`、`next_close`：两端的不复权收盘价（指数点或美元）。
 - `signal_light`：当日收盘产生的信号灯色 S_j。`system_executed_light`：当日收盘执行的系统灯色 S_{j−1}，决定本区间暴露。`executed_light`：该资产当日收盘后的实际灯色（缺价日保持前值）。
@@ -30,3 +30,11 @@
 - `missing_audit.csv`：沿用日与被排除区间的数量及首末日期。
 - `n_exit_costs.csv`、`n_exit_cost_summary.csv`：N 各设定的 E2 退出代价描述，不作范围判定。
 - `开发期评价报告.md`：主损失、事件账、警报账、缺值四部分。
+
+## 逐日明细的入库形式
+
+- 程序写出未压缩的 `daily_asset_intervals.csv`，SHA-256：`7587646EDC86D7901236681AF16B6431A587281FAF8AD76055AF42256CE157A9`。
+- 入库的是用 Git 自带 gzip 执行 `gzip -n daily_asset_intervals.csv` 得到的 `daily_asset_intervals.csv.gz`（不含文件名与时间戳）。压缩后的 SHA-256 在压缩后追加于本节末尾，不由程序生成。
+- 解压：`gzip -dk daily_asset_intervals.csv.gz`，解压后的 SHA-256 应与上面一致。
+- 重算：把本目录改名或移走后运行 `uv run market-risk wavewarn evaluate-development`，再比较新写出的 `daily_asset_intervals.csv` 的 SHA-256。
+- 压缩后 `daily_asset_intervals.csv.gz` 的 SHA-256：`DF62698BA7E4F82C24674476CF64BEBC82ACA047BF254341ADAB1668B301157C`（gzip 1.13，8,084,401 字节；本行在压缩后追加）。

@@ -163,7 +163,9 @@ def event_lines(rows: Sequence[Row]) -> list[str]:
                for name in (f"{scope} 纳入", f"{scope} 五类", f"{scope} T0前信号/已执行")]
     return ["## 二、事件账", "",
             "五类依次为 " + "/".join(EVENT_CLASSES) + "，只统计纳入事件账的已确认事件（资产事件与合并事件"
-            "都按各自的 P 前 20 个交易日不早于 τ 纳入）。“T0前信号/已执行”是 S_{T0−1} 非绿与 S_{T0−2} 非绿的件数。"
+            "都按各自的 P 前 20 个交易日不早于 τ 纳入；合并事件另要求没有右截尾成员，"
+            "且闭区间 [P, Tr] 不与任一资产的尾段（寻峰）未定区间相交）。"
+            "“T0前信号/已执行”是 S_{T0−1} 非绿与 S_{T0−2} 非绿的件数。"
             "末列为首个警报段在最终低点之前就已转绿的事件数（SPX/QQQ）。"
             "转绿后 5、10、20 日表现、首次亮灯与解除时的通道逐件见 `event_ledger.csv`。", "",
             *_table(("模型", "K", "θ_P", "q", *columns, "低点前转绿"), body), ""]
@@ -204,14 +206,24 @@ def report_lines(prepared: PreparedEvaluation, tables: ReportTables, settings: L
             *missing_lines(tables.missing, len(tables.summaries))]
 
 
-def readme_lines(prepared: PreparedEvaluation, settings: LossSettings) -> list[str]:
+def storage_lines(name: str, sha256: str, command: str) -> list[str]:
+    """逐日明细的入库形式：未压缩哈希由程序写入，压缩后的哈希在压缩后追加。"""
+    return ["## 逐日明细的入库形式", "",
+            f"- 程序写出未压缩的 `{name}`，SHA-256：`{sha256}`。",
+            f"- 入库的是用 Git 自带 gzip 执行 `gzip -n {name}` 得到的 `{name}.gz`（不含文件名与时间戳）。"
+            "压缩后的 SHA-256 在压缩后追加于本节末尾，不由程序生成。",
+            f"- 解压：`gzip -dk {name}.gz`，解压后的 SHA-256 应与上面一致。",
+            f"- 重算：把本目录改名或移走后运行 `{command}`，再比较新写出的 `{name}` 的 SHA-256。", ""]
+
+
+def readme_lines(prepared: PreparedEvaluation, settings: LossSettings, daily_sha256: str) -> list[str]:
     """逐日明细的列名、单位与公式，以及本目录各文件的用途。"""
     gamma = settings.parameters.gamma
     return [
         f"# 开发期 v1.2.1 评价输出说明（{STATUS_NOTE}）", "",
         f"只使用截至 {prepared.config.development_end()} 的开发期输入；不是历史预警效果。"
         f"t0={prepared.t0}，τ={prepared.tau}，j₀={prepared.first_loss_day}。", "",
-        "## `daily_asset_intervals.csv`：每个模型设定 × 资产 × 区间一行", "",
+        "## `daily_asset_intervals.csv`（入库为 `.csv.gz`）：每个模型设定 × 资产 × 区间一行", "",
         "- `date`→`next_date`：价格区间的起点与终点（交易日）。"
         "`close`、`next_close`：两端的不复权收盘价（指数点或美元）。",
         "- `signal_light`：当日收盘产生的信号灯色 S_j。`system_executed_light`：当日收盘执行的系统灯色 S_{j−1}，"
@@ -245,4 +257,6 @@ def readme_lines(prepared: PreparedEvaluation, settings: LossSettings) -> list[s
         "（年度非绿天数按信号灯色，年度切换含窗口末日那一次）。",
         "- `missing_audit.csv`：沿用日与被排除区间的数量及首末日期。",
         "- `n_exit_costs.csv`、`n_exit_cost_summary.csv`：N 各设定的 E2 退出代价描述，不作范围判定。",
-        "- `开发期评价报告.md`：主损失、事件账、警报账、缺值四部分。", ""]
+        "- `开发期评价报告.md`：主损失、事件账、警报账、缺值四部分。", "",
+        *storage_lines("daily_asset_intervals.csv", daily_sha256,
+                       "uv run market-risk wavewarn evaluate-development")]

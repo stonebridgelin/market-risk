@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import csv
 import datetime as dt
+import hashlib
 import tempfile
 from collections.abc import Mapping, Sequence
 from contextlib import ExitStack
@@ -77,6 +78,15 @@ class EvaluationRun:
     first_loss_day: dt.date
 
 
+def file_sha256(path: Path) -> str:
+    """分块读取，返回大写十六进制 SHA-256。"""
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for block in iter(lambda: file.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest().upper()
+
+
 def write_csv(path: Path, header: Sequence[str], rows: Sequence[Row]) -> None:
     with path.open("w", encoding="utf-8", newline="") as file:
         writer = csv.writer(file)
@@ -102,7 +112,7 @@ def _write_streamed(destination: Path, prepared: PreparedEvaluation, events: Map
             evaluated = evaluate_candidate(prepared, states, events, unknown)
             if evaluated.days != axis:
                 raise ValueError("模型评价日期轴不一致")
-            tables = candidate_tables(prepared, states, evaluated, events, merged, rule, weights)
+            tables = candidate_tables(prepared, states, evaluated, events, merged, rule, weights, unknown)
             writers["daily_asset_intervals"].writerows(tables.daily)
             writers["event_ledger"].writerows(tables.events)
             writers["alert_ledger"].writerows(tables.alerts)
@@ -159,7 +169,9 @@ def write_development_evaluation(prepared: PreparedEvaluation, destination: Path
     write_csv(destination / "event_class_summary.csv", EVENT_CLASS_HEADER, tables.event_classes)
     write_csv(destination / "alert_summary.csv", ALERT_SUMMARY_HEADER, tables.alert_summaries)
     (destination / REPORT_NAME).write_text("\n".join(report_lines(prepared, tables, settings)), encoding="utf-8")
-    (destination / "README.md").write_text("\n".join(readme_lines(prepared, settings)), encoding="utf-8")
+    daily_sha256 = file_sha256(destination / "daily_asset_intervals.csv")
+    (destination / "README.md").write_text("\n".join(readme_lines(prepared, settings, daily_sha256)),
+                                           encoding="utf-8")
     return tables
 
 
