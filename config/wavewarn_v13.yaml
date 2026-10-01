@@ -1,0 +1,38 @@
+# 波段预警 v1.3 修订登记的新增项（docs/research/波段预警研究规格_v1.3_修订登记.md，负责人 2026-10-01 确认）。
+# 其余参数全部沿用 base 指向的 v1.2.1 配置；v1.2.1 配置及其校验不改。
+version: v1.3
+base: wavewarn_v121.yaml
+
+# 第三节 可行条件（开发期）
+feasibility:
+  non_green_share_max: "0.60"      # 非绿占比上限（警戒时间上限）
+  r_median_max: "0.60"             # R 中位数上限（主口径，类别②，SPX、QQQ 分别成立）
+  r_p75_max: "1.00"                # R 第75百分位上限（同上）
+
+# 第四节 退出版本：按此顺序取第一个至少一组 P1 可行的版本；不以 T 挑选
+exit_versions: [E2, X1, X2]
+
+# 第五节 N′ 后备：两侧去掉 B、DV，只留 P、PR、BW、V
+n_prime_channels:
+  b_spx: false
+  dv_spx: false
+  b_qqq: false
+  dv_qqq: false
+
+# 第六节 描述性补充：补充历史期间
+extended_history:
+  fixed_delay:
+    spx_start: 1990-01-02
+    qqq_start: 1999-03-10
+    end: 2009-09-30
+    delays: [0, 1, 2, 3, 5, 8, 10, 15]
+  p0_robustness:
+    start: 1999-03-10
+    end: 2009-09-30
+
+# 第六节 200日均线参照：SPX 收盘价不低于其200日均线为绿，否则为红；两资产共用；次日收盘执行
+ma200_reference:
+  symbol: SPX
+  window: 200
+  at_or_above: 绿
+  below: 红
