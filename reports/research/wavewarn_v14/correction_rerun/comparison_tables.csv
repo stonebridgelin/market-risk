@@ -1,0 +1,213 @@
+table,row,column,original,corrected
+evaluation_development/selection_trace.csv,结果／选定设定的 T,value,-0.232542095514648752300009333,-0.245690087369241285672023847
+evaluation_development/convergence.csv,v1.4／F／3／0.015／,convergence_date,2009-10-21,2009-10-20
+evaluation_development/convergence.csv,v1.4／F／3／0.02／,convergence_date,2009-10-22,2009-10-20
+evaluation_development/convergence.csv,v1.4／F／3／0.025／,convergence_date,2009-10-22,2009-10-20
+evaluation_development/convergence.csv,v1.4／F／5／0.015／,convergence_date,2009-10-21,2009-10-20
+evaluation_development/convergence.csv,v1.4／F／5／0.02／,convergence_date,2009-10-22,2009-10-20
+evaluation_development/convergence.csv,v1.4／F／5／0.025／,convergence_date,2009-10-22,2009-10-20
+evaluation_development/convergence.csv,v1.4／F／10／0.015／,convergence_date,2009-10-21,2009-10-20
+evaluation_development/convergence.csv,v1.4／F／10／0.02／,convergence_date,2009-10-22,2009-10-20
+evaluation_development/convergence.csv,v1.4／F／10／0.025／,convergence_date,2009-10-22,2009-10-20
+evaluation_development/convergence.csv,v1.4 去掉 MR／F／3／0.015／,convergence_date,2009-10-21,2009-10-20
+evaluation_development/convergence.csv,v1.4 去掉 MR／F／3／0.02／,convergence_date,2009-10-22,2009-10-20
+evaluation_development/convergence.csv,v1.4 去掉 MR／F／3／0.025／,convergence_date,2009-10-22,2009-10-20
+evaluation_development/convergence.csv,v1.4 去掉 MR／F／5／0.015／,convergence_date,2009-10-21,2009-10-20
+evaluation_development/convergence.csv,v1.4 去掉 MR／F／5／0.02／,convergence_date,2009-10-22,2009-10-20
+evaluation_development/convergence.csv,v1.4 去掉 MR／F／5／0.025／,convergence_date,2009-10-22,2009-10-20
+evaluation_development/convergence.csv,v1.4 去掉 MR／F／10／0.015／,convergence_date,2009-10-21,2009-10-20
+evaluation_development/convergence.csv,v1.4 去掉 MR／F／10／0.02／,convergence_date,2009-10-22,2009-10-20
+evaluation_development/convergence.csv,v1.4 去掉 MR／F／10／0.025／,convergence_date,2009-10-22,2009-10-20
+evaluation_development/event_scope_counts.csv,无变化,,,
+evaluation_development/reference_rows.csv,无变化,,,
+evaluation_development/event_class_summary_selected.csv,无变化,,,
+evaluation_development/alert_summary_selected.csv,v1.4／F／5／0.025／,segments,66,67
+evaluation_development/alert_summary_selected.csv,v1.4／F／5／0.025／,no_event,18,19
+evaluation_development/alert_summary_selected.csv,v1.4／F／5／0.025／,signal_non_green_days,843,834
+evaluation_development/alert_summary_selected.csv,v1.4／F／5／0.025／,outside_danger_days,384,376
+evaluation_development/alert_summary_selected.csv,v1.4／F／5／0.025／,net_opportunity_cost,2.033273981370925125854006309,2.025570135817120182342428347
+evaluation_development/yearly_alert_selected.csv,v1.4／F／5／0.025／／2010,signal_non_green_days,123,120
+evaluation_development/yearly_alert_selected.csv,v1.4／F／5／0.025／／2010,signal_non_green_ratio,0.4880952380952380952380952381,0.4761904761904761904761904762
+evaluation_development/yearly_alert_selected.csv,v1.4／F／5／0.025／／2010,executed_switches,24,27
+evaluation_development/yearly_alert_selected.csv,v1.4／F／5／0.025／／2010,active_channel_days,BW_QQQ:71;BW_SPX:88;MR_SPX:66;PR_QQQ:56;PR_SPX:54;P_QQQ:60;P_SPX:63;V:50,BW_QQQ:70;BW_SPX:79;MR_SPX:66;PR_QQQ:56;PR_SPX:54;P_QQQ:60;P_SPX:63;V:50
+evaluation_development/yearly_alert_selected.csv,v1.4／F／5／0.025／／2011,active_channel_days,BW_QQQ:101;BW_SPX:84;MR_SPX:100;PR_QQQ:53;PR_SPX:51;P_QQQ:74;P_SPX:73;V:90,BW_QQQ:101;BW_SPX:82;MR_SPX:100;PR_QQQ:53;PR_SPX:51;P_QQQ:74;P_SPX:73;V:90
+evaluation_development/yearly_alert_selected.csv,v1.4／F／5／0.025／／2012,signal_non_green_days,107,105
+evaluation_development/yearly_alert_selected.csv,v1.4／F／5／0.025／／2012,signal_non_green_ratio,0.428,0.42
+evaluation_development/yearly_alert_selected.csv,v1.4／F／5／0.025／／2012,active_channel_days,BW_QQQ:70;BW_SPX:60;MR_SPX:10;PR_QQQ:59;PR_SPX:26;P_QQQ:72;P_SPX:53;V:2,BW_QQQ:69;BW_SPX:58;MR_SPX:10;PR_QQQ:59;PR_SPX:26;P_QQQ:72;P_SPX:53;V:2
+evaluation_development/yearly_alert_selected.csv,v1.4／F／5／0.025／／2013,signal_non_green_days,72,71
+evaluation_development/yearly_alert_selected.csv,v1.4／F／5／0.025／／2013,signal_non_green_ratio,0.2857142857142857142857142857,0.2817460317460317460317460317
+evaluation_development/yearly_alert_selected.csv,v1.4／F／5／0.025／／2013,active_channel_days,BW_QQQ:53;BW_SPX:44;PR_QQQ:9;PR_SPX:5;P_QQQ:44;P_SPX:48;V:28,BW_QQQ:41;BW_SPX:44;PR_QQQ:9;PR_SPX:5;P_QQQ:44;P_SPX:48;V:28
+evaluation_development/yearly_alert_selected.csv,v1.4／F／5／0.025／／2014,executed_switches,24,26
+evaluation_development/yearly_alert_selected.csv,v1.4／F／5／0.025／／2014,active_channel_days,BW_QQQ:73;BW_SPX:56;MR_SPX:6;PR_QQQ:31;PR_SPX:13;P_QQQ:70;P_SPX:49;V:40,BW_QQQ:71;BW_SPX:55;MR_SPX:6;PR_QQQ:31;PR_SPX:13;P_QQQ:70;P_SPX:49;V:40
+evaluation_development/yearly_alert_selected.csv,v1.4／F／5／0.025／／2015,signal_non_green_days,159,157
+evaluation_development/yearly_alert_selected.csv,v1.4／F／5／0.025／／2015,signal_non_green_ratio,0.6309523809523809523809523810,0.6230158730158730158730158730
+evaluation_development/yearly_alert_selected.csv,v1.4／F／5／0.025／／2015,active_channel_days,BW_QQQ:102;BW_SPX:102;MR_SPX:65;PR_QQQ:20;PR_SPX:12;P_QQQ:63;P_SPX:54;V:50,BW_QQQ:96;BW_SPX:94;MR_SPX:65;PR_QQQ:20;PR_SPX:12;P_QQQ:63;P_SPX:54;V:50
+evaluation_development/yearly_alert_selected.csv,v1.4／F／5／0.025／／2016,signal_non_green_days,120,119
+evaluation_development/yearly_alert_selected.csv,v1.4／F／5／0.025／／2016,signal_non_green_ratio,0.4761904761904761904761904762,0.4722222222222222222222222222
+evaluation_development/yearly_alert_selected.csv,v1.4／F／5／0.025／／2016,active_channel_days,BW_QQQ:81;BW_SPX:72;MR_SPX:49;PR_QQQ:40;PR_SPX:27;P_QQQ:60;P_SPX:63;V:36,BW_QQQ:77;BW_SPX:64;MR_SPX:49;PR_QQQ:40;PR_SPX:27;P_QQQ:60;P_SPX:63;V:36
+evaluation_development/missing_audit.csv,无变化,,,
+evaluation_development/event_ledger_selected.csv,SPX／SPX／2012-04-02,first_green_date,2012-03-14,2012-03-13
+evaluation_development/event_ledger_selected.csv,SPX／SPX／2012-04-02,rebound_from_trough_pct,9.095176989765578542142655900,9.225845826421708240743638700
+evaluation_development/event_ledger_selected.csv,SPX／SPX／2012-04-02,decline_after_green_5_pct,0.596723757064578133516940600,-0.1196317919696264192843583200
+evaluation_development/event_ledger_selected.csv,SPX／SPX／2012-04-02,decline_after_green_10_pct,-0.1075824081246234615715638200,-0.2270854973315663168451592100
+evaluation_development/event_ledger_selected.csv,SPX／SPX／2012-04-02,decline_after_green_20_pct,-2.559744097311874228992741770,-2.676313621548049715247680790
+evaluation_development/event_ledger_selected.csv,SPX／SPX／2013-05-21,first_green_date,2013-04-29,2013-04-26
+evaluation_development/event_ledger_selected.csv,SPX／SPX／2013-05-21,rebound_from_trough_pct,1.304439034003140316192970500,0.581657756390289176080198800
+evaluation_development/event_ledger_selected.csv,SPX／SPX／2013-05-21,decline_after_green_5_pct,-0.6846091578240598389819341000,0.029072707048235413085246200
+evaluation_development/event_ledger_selected.csv,SPX／SPX／2013-05-21,decline_after_green_10_pct,-0.6846091578240598389819341000,0.029072707048235413085246200
+evaluation_development/event_ledger_selected.csv,SPX／SPX／2013-05-21,decline_after_green_20_pct,-0.6846091578240598389819341000,0.029072707048235413085246200
+evaluation_development/event_ledger_selected.csv,QQQ／QQQ／2012-04-02,first_green_date,2012-03-14,2012-03-13
+evaluation_development/event_ledger_selected.csv,QQQ／QQQ／2012-04-02,rebound_from_trough_pct,10.06455884787286873034265850,9.683827180930309551398775000
+evaluation_development/event_ledger_selected.csv,QQQ／QQQ／2012-04-02,decline_after_green_5_pct,0.045119566852158219281094900,0.347117416239058255357681900
+evaluation_development/event_ledger_selected.csv,QQQ／QQQ／2012-04-02,decline_after_green_10_pct,0.045119566852158219281094900,0.347117416239058255357681900
+evaluation_development/event_ledger_selected.csv,QQQ／QQQ／2012-04-02,decline_after_green_20_pct,-0.5414348022258986313731388200,-0.1961968004829459704195593100
+evaluation_development/event_ledger_selected.csv,QQQ／QQQ／2013-05-17,first_green_date,2013-04-29,2013-04-26
+evaluation_development/event_ledger_selected.csv,QQQ／QQQ／2013-05-17,rebound_from_trough_pct,0.688369424924709594148859900,-0.2294564749749031980496199600
+evaluation_development/event_ledger_selected.csv,QQQ／QQQ／2013-05-17,decline_after_green_5_pct,0.256373735935051986896453500,0.919936754348138565473623700
+evaluation_development/event_ledger_selected.csv,QQQ／QQQ／2013-05-17,decline_after_green_10_pct,0.256373735935051986896453500,0.919936754348138565473623700
+evaluation_development/event_ledger_selected.csv,QQQ／QQQ／2013-05-17,decline_after_green_20_pct,0.256373735935051986896453500,0.919936754348138565473623700
+evaluation_development/event_ledger_selected.csv,QQQ／QQQ／2014-03-05,light_switches,13,15
+evaluation_development/event_ledger_selected.csv,QQQ／QQQ／2015-07-20,light_switches,13,12
+evaluation_development/event_ledger_selected.csv,QQQ／QQQ／2015-07-20,first_green_date,2015-06-23,2015-06-22
+evaluation_development/event_ledger_selected.csv,QQQ／QQQ／2015-07-20,rebound_from_trough_pct,12.94729330206952798450402690,12.85554082985013762870832910
+evaluation_development/event_ledger_selected.csv,QQQ／QQQ／2015-07-20,decline_after_green_5_pct,-3.700695008574781117429370880,-3.622402890695573622402890700
+evaluation_development/event_ledger_selected.csv,QQQ／QQQ／2015-07-20,decline_after_green_10_pct,-4.242260131780846646809278820,-3.622402890695573622402890700
+evaluation_development/event_ledger_selected.csv,QQQ／QQQ／2015-07-20,decline_after_green_20_pct,-4.296416644101453199747269610,-4.218608852755194218608852760
+evaluation_development/event_ledger_selected.csv,合并／QQQ／2014-03-05,light_switches,13,15
+diagnostics_round2/objects.csv,选定的 v1.4,mean_exposure,0.5468217934165720771850170261,0.5527809307604994324631101022
+diagnostics_round2/objects.csv,选定的 v1.4,timing_score,-0.232542095514648752300009333,-0.245690087369241285672023847
+diagnostics_round2/objects.csv,选定的 v1.4,price_score,-1.202542095514648752300009333,-1.240690087369241285672023847
+diagnostics_round2/objects.csv,选定的 v1.4,switch_cost,0.9700,0.9950
+diagnostics_round2/objects.csv,选定的 v1.4,switches,194,199
+diagnostics_round2/objects.csv,选定的 v1.4,break_even_gamma_vs_ma200,0.003813835243900147055202185513,0.003936924377029771559047369942
+diagnostics_round2/objects.csv,选定的 v1.4,exposure_change_total,116.0,119.0
+diagnostics_round2/objects.csv,选定的 v1.4,exposure_change_per_year,16.59023836549375709421112372,17.01929625425652667423382520
+diagnostics_round2/objects.csv,选定的 v1.4,switches_excluding_first_day,194,199
+diagnostics_round2/objects.csv,选定的 v1.4,exposure_change_excluding_first_day,116.0,119.0
+diagnostics_round2/objects.csv,v1.4 去掉 MR（同参数）,mean_exposure,0.5797389330306469920544835414,0.5862656072644721906923950057
+diagnostics_round2/objects.csv,v1.4 去掉 MR（同参数）,timing_score,-0.382828794692582522264671463,-0.379304395111170914253194479
+diagnostics_round2/objects.csv,v1.4 去掉 MR（同参数）,price_score,-1.362828794692582522264671463,-1.384304395111170914253194479
+diagnostics_round2/objects.csv,v1.4 去掉 MR（同参数）,switch_cost,0.9800,1.0050
+diagnostics_round2/objects.csv,v1.4 去掉 MR（同参数）,switches,196,201
+diagnostics_round2/objects.csv,v1.4 去掉 MR（同参数）,break_even_gamma_vs_ma200,0.004818170958966814659506512875,0.004801513287780536434608362885
+diagnostics_round2/objects.csv,v1.4 去掉 MR（同参数）,exposure_change_total,117.0,120.0
+diagnostics_round2/objects.csv,v1.4 去掉 MR（同参数）,exposure_change_per_year,16.73325766174801362088535755,17.16231555051078320090805902
+diagnostics_round2/objects.csv,v1.4 去掉 MR（同参数）,switches_excluding_first_day,196,201
+diagnostics_round2/objects.csv,v1.4 去掉 MR（同参数）,exposure_change_excluding_first_day,117.0,120.0
+diagnostics_round2/switch_by_year.csv,选定的 v1.4／2010,switches,24,27
+diagnostics_round2/switch_by_year.csv,选定的 v1.4／2014,switches,24,26
+diagnostics_round2/switch_by_year.csv,v1.4 去掉 MR（同参数）／2010,switches,22,25
+diagnostics_round2/switch_by_year.csv,v1.4 去掉 MR（同参数）／2014,switches,24,26
+diagnostics_round2/switch_by_type.csv,选定的 v1.4／黄／绿,switches,66,67
+diagnostics_round2/switch_by_type.csv,选定的 v1.4／黄／红,switches,12,13
+diagnostics_round2/switch_by_type.csv,选定的 v1.4／红／黄,switches,50,52
+diagnostics_round2/switch_by_type.csv,选定的 v1.4／绿／红,switches,38,39
+diagnostics_round2/switch_by_type.csv,v1.4 去掉 MR（同参数）／黄／绿,switches,68,69
+diagnostics_round2/switch_by_type.csv,v1.4 去掉 MR（同参数）／黄／红,switches,11,12
+diagnostics_round2/switch_by_type.csv,v1.4 去掉 MR（同参数）／红／黄,switches,49,51
+diagnostics_round2/switch_by_type.csv,v1.4 去掉 MR（同参数）／绿／红,switches,38,39
+diagnostics_round2/switch_reversals.csv,选定的 v1.4／5,switches,194,199
+diagnostics_round2/switch_reversals.csv,选定的 v1.4／5,reversed_within_window,78,84
+diagnostics_round2/switch_reversals.csv,选定的 v1.4／5,share,0.4020618556701030927835051546,0.4221105527638190954773869347
+diagnostics_round2/switch_reversals.csv,选定的 v1.4／10,switches,194,199
+diagnostics_round2/switch_reversals.csv,选定的 v1.4／10,reversed_within_window,109,118
+diagnostics_round2/switch_reversals.csv,选定的 v1.4／10,share,0.5618556701030927835051546392,0.5929648241206030150753768844
+diagnostics_round2/switch_reversals.csv,v1.4 去掉 MR（同参数）／5,switches,196,201
+diagnostics_round2/switch_reversals.csv,v1.4 去掉 MR（同参数）／5,reversed_within_window,76,82
+diagnostics_round2/switch_reversals.csv,v1.4 去掉 MR（同参数）／5,share,0.3877551020408163265306122449,0.4079601990049751243781094527
+diagnostics_round2/switch_reversals.csv,v1.4 去掉 MR（同参数）／10,switches,196,201
+diagnostics_round2/switch_reversals.csv,v1.4 去掉 MR（同参数）／10,reversed_within_window,107,116
+diagnostics_round2/switch_reversals.csv,v1.4 去掉 MR（同参数）／10,share,0.5459183673469387755102040816,0.5771144278606965174129353234
+diagnostics_round2/holding_summary.csv,选定的 v1.4／绿,segments,67,68
+diagnostics_round2/holding_summary.csv,选定的 v1.4／绿,p25,2.50,2.00
+diagnostics_round2/holding_summary.csv,选定的 v1.4／黄,segments,78,80
+diagnostics_round2/holding_summary.csv,选定的 v1.4／红,segments,50,52
+diagnostics_round2/holding_summary.csv,选定的 v1.4／红,median,11.5,9.5
+diagnostics_round2/holding_summary.csv,选定的 v1.4／红,p25,6.25,5.00
+diagnostics_round2/holding_summary.csv,v1.4 去掉 MR（同参数）／绿,segments,69,70
+diagnostics_round2/holding_summary.csv,v1.4 去掉 MR（同参数）／黄,segments,79,81
+diagnostics_round2/holding_summary.csv,v1.4 去掉 MR（同参数）／红,segments,49,51
+diagnostics_round2/holding_summary.csv,v1.4 去掉 MR（同参数）／红,median,12,10
+diagnostics_round2/holding_summary.csv,v1.4 去掉 MR（同参数）／红,p25,7,6.50
+diagnostics_round2/green_summary.csv,v1.4 去掉 MR（同参数）／QQQ,median_delay_class_2,8,7
+diagnostics_round2/green_events.csv,选定的 v1.4／SPX／2016-06-08,first_green_execution,2016-07-08,2016-07-07
+diagnostics_round2/green_events.csv,选定的 v1.4／SPX／2016-06-08,delay,8,7
+diagnostics_round2/green_events.csv,选定的 v1.4／QQQ／2016-04-18,first_green_execution,2016-07-08,2016-07-07
+diagnostics_round2/green_events.csv,选定的 v1.4／QQQ／2016-04-18,delay,8,7
+diagnostics_round2/green_events.csv,v1.4 去掉 MR（同参数）／SPX／2016-06-08,first_green_execution,2016-07-08,2016-07-07
+diagnostics_round2/green_events.csv,v1.4 去掉 MR（同参数）／SPX／2016-06-08,delay,8,7
+diagnostics_round2/green_events.csv,v1.4 去掉 MR（同参数）／QQQ／2015-12-01,deepest_decline_after_early_green,0.1389236545682102628285356696,0.1496424472499337865277655160
+diagnostics_round2/green_events.csv,v1.4 去掉 MR（同参数）／QQQ／2016-04-18,first_green_execution,2016-07-08,2016-07-07
+diagnostics_round2/green_events.csv,v1.4 去掉 MR（同参数）／QQQ／2016-04-18,delay,8,7
+diagnostics_round2/nav_metrics.csv,选定的 v1.4／双资产,cumulative_return,0.185455388379925292220161756,0.203486450595609397781531242
+diagnostics_round2/nav_metrics.csv,选定的 v1.4／双资产,annualized_return,0.024629868079612343722706899,0.026844413169186966978897255
+diagnostics_round2/nav_metrics.csv,选定的 v1.4／双资产,max_drawdown,0.2606234271276560875123539424,0.2642111837271061469729645170
+diagnostics_round2/nav_metrics.csv,选定的 v1.4／双资产,worst_60_return,-0.1256493293105358717878453481,-0.1280741211873431089976265274
+diagnostics_round2/nav_metrics.csv,选定的 v1.4／双资产,worst_120_return,-0.1780187824201566920877577404,-0.1820073704363275068501118236
+diagnostics_round2/nav_metrics.csv,选定的 v1.4／双资产,annualized_volatility,0.08240361220876781538163392259,0.08273110973874878369861569355
+diagnostics_round2/nav_metrics.csv,选定的 v1.4／双资产,switches,194,199
+diagnostics_round2/nav_metrics.csv,选定的 v1.4／双资产,exposure_change,116.0,119.0
+diagnostics_round2/nav_metrics.csv,选定的 v1.4／SPX,cumulative_return,0.104047119210171608905381508,0.114019448909736516046948252
+diagnostics_round2/nav_metrics.csv,选定的 v1.4／SPX,annualized_return,0.014257102418029552198267440,0.015562302088699541563417048
+diagnostics_round2/nav_metrics.csv,选定的 v1.4／SPX,max_drawdown,0.2425841135085247589366369783,0.2462551267301921666528485572
+diagnostics_round2/nav_metrics.csv,选定的 v1.4／SPX,worst_60_return,-0.1126518549776066995257262451,-0.1156452802352006853274608399
+diagnostics_round2/nav_metrics.csv,选定的 v1.4／SPX,worst_120_return,-0.1652271108653579128932875680,-0.1692730549335475400674423039
+diagnostics_round2/nav_metrics.csv,选定的 v1.4／SPX,annualized_volatility,0.07795765129620386935258561908,0.07831492864323261557598987119
+diagnostics_round2/nav_metrics.csv,选定的 v1.4／SPX,switches,194,199
+diagnostics_round2/nav_metrics.csv,选定的 v1.4／SPX,exposure_change,116.0,119.0
+diagnostics_round2/nav_metrics.csv,选定的 v1.4／QQQ,cumulative_return,0.268952596212366507665834031,0.296116701458334182886255401
+diagnostics_round2/nav_metrics.csv,选定的 v1.4／QQQ,annualized_return,0.034652920847382043567886310,0.037791910042717574148145882
+diagnostics_round2/nav_metrics.csv,选定的 v1.4／QQQ,max_drawdown,0.2832482884950682271981057090,0.2867338928505815117250597219
+diagnostics_round2/nav_metrics.csv,选定的 v1.4／QQQ,worst_60_return,-0.1385457299059037112994149094,-0.1404181982418219978025360263
+diagnostics_round2/nav_metrics.csv,选定的 v1.4／QQQ,worst_120_return,-0.1907901410077742235156283272,-0.1947253745952955353490922813
+diagnostics_round2/nav_metrics.csv,选定的 v1.4／QQQ,annualized_volatility,0.09155326303027364374173211659,0.09186693182979096632731776704
+diagnostics_round2/nav_metrics.csv,选定的 v1.4／QQQ,switches,194,199
+diagnostics_round2/nav_metrics.csv,选定的 v1.4／QQQ,exposure_change,116.0,119.0
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／双资产,cumulative_return,0.319072181487716804794780540,0.326373788255323944127362206
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／双资产,annualized_return,0.040400913900154038063791965,0.041222621777899801720164283
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／双资产,max_drawdown,0.2143130721743205252470887701,0.2255767138403855554535551358
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／双资产,worst_60_return,-0.1256493293105358717878453496,-0.1280741211873431089976265284
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／双资产,worst_120_return,-0.1780187824201566920877577415,-0.1820073704363275068501118252
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／双资产,annualized_volatility,0.08754874353870203970582065997,0.08794460835889849410685020351
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／双资产,switches,196,201
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／双资产,exposure_change,117.0,120.0
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／SPX,cumulative_return,0.221768262743579220874040168,0.222547328778463360596111655
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／SPX,annualized_return,0.029060912941710888448648002,0.029154734473535781847893118
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／SPX,max_drawdown,0.2217956771499425762426113322,0.2320105083779132609778738280
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／SPX,worst_60_return,-0.1126518549776066995257262474,-0.1156452802352006853274608409
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／SPX,worst_120_return,-0.1652271108653579128932875695,-0.1692730549335475400674423066
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／SPX,annualized_volatility,0.08297955464442259279748762762,0.08338443633969945152616902963
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／SPX,switches,196,201
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／SPX,exposure_change,117.0,120.0
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／QQQ,cumulative_return,0.419379913817531611786943655,0.434192959082865821516294818
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／QQQ,annualized_return,0.051363855840780037468916449,0.052926137844755191119986946
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／QQQ,max_drawdown,0.2175668384041816995298585960,0.2224019522300444401971789225
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／QQQ,drawdown_trough_date,2015-08-21,2016-02-23
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／QQQ,drawdown_decline_days,183,309
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／QQQ,days_from_trough_to_window_end,343,217
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／QQQ,worst_60_return,-0.1385457299059037112994149094,-0.1404181982418219978025360269
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／QQQ,worst_120_return,-0.1907901410077742235156283280,-0.1947253745952955353490922802
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／QQQ,annualized_volatility,0.09694123971758605263750072013,0.09733944317652862908584004042
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／QQQ,switches,196,201
+diagnostics_round2/nav_metrics.csv,v1.4 去掉 MR（同参数）／QQQ,exposure_change,117.0,120.0
+diagnostics_round2/nav_metrics.csv,恒定暴露 ē（取选定的 v1.4的 ē）／双资产,cumulative_return,0.608521641953140996965450985,0.616389667184473278338080383
+diagnostics_round2/nav_metrics.csv,恒定暴露 ē（取选定的 v1.4的 ē）／双资产,annualized_return,0.070343143053699522344417293,0.071090362288566208639369482
+diagnostics_round2/nav_metrics.csv,恒定暴露 ē（取选定的 v1.4的 ē）／双资产,max_drawdown,0.0911181844208277612084759688,0.0920971435303705912060797499
+diagnostics_round2/nav_metrics.csv,恒定暴露 ē（取选定的 v1.4的 ē）／双资产,worst_20_return,-0.0905492324953928764840987812,-0.0915147415063593441998258856
+diagnostics_round2/nav_metrics.csv,恒定暴露 ē（取选定的 v1.4的 ē）／双资产,worst_60_return,-0.0877013635414134001522574522,-0.0886326719597111742280506150
+diagnostics_round2/nav_metrics.csv,恒定暴露 ē（取选定的 v1.4的 ē）／双资产,worst_120_return,-0.0824683490287775019460715053,-0.0833607177525971555544606393
+diagnostics_round2/nav_metrics.csv,恒定暴露 ē（取选定的 v1.4的 ē）／双资产,annualized_volatility,0.08815281546731189064486744086,0.08911348444749536220871913574
+diagnostics_round2/nav_metrics.csv,恒定暴露 ē（取选定的 v1.4的 ē）／SPX,cumulative_return,0.495036996555764771291061249,0.501184501762646795124904983
+diagnostics_round2/nav_metrics.csv,恒定暴露 ē（取选定的 v1.4的 ē）／SPX,annualized_return,0.059201525399651237993334933,0.059823333355826532087530399
+diagnostics_round2/nav_metrics.csv,恒定暴露 ē（取选定的 v1.4的 ē）／SPX,max_drawdown,0.1075868981914415842698455079,0.1087407002988510316249525089
+diagnostics_round2/nav_metrics.csv,恒定暴露 ē（取选定的 v1.4的 ē）／SPX,worst_20_return,-0.0917348303269150724210004790,-0.0927127078919177572899842969
+diagnostics_round2/nav_metrics.csv,恒定暴露 ē（取选定的 v1.4的 ē）／SPX,worst_60_return,-0.1008193458380667502782496682,-0.1019026245653231350575974029
+diagnostics_round2/nav_metrics.csv,恒定暴露 ē（取选定的 v1.4的 ē）／SPX,worst_120_return,-0.0909004769209018137417260171,-0.0918749655316003584274296996
+diagnostics_round2/nav_metrics.csv,恒定暴露 ē（取选定的 v1.4的 ē）／SPX,annualized_volatility,0.08497668566310009379233786048,0.08590274191578566824466743784
+diagnostics_round2/nav_metrics.csv,恒定暴露 ē（取选定的 v1.4的 ē）／QQQ,cumulative_return,0.726899830351422523266976918,0.736612155300185640578316538
+diagnostics_round2/nav_metrics.csv,恒定暴露 ē（取选定的 v1.4的 ē）／QQQ,annualized_return,0.081269070773399590461076448,0.082136712135538207570414097
+diagnostics_round2/nav_metrics.csv,恒定暴露 ē（取选定的 v1.4的 ē）／QQQ,max_drawdown,0.0917001547275898446901515413,0.0926686494694915784327330333
+diagnostics_round2/nav_metrics.csv,恒定暴露 ē（取选定的 v1.4的 ē）／QQQ,worst_20_return,-0.0893880292158901004508795732,-0.0903416799467579095252802149
+diagnostics_round2/nav_metrics.csv,恒定暴露 ē（取选定的 v1.4的 ē）／QQQ,worst_60_return,-0.0827185401327145262397996292,-0.0836014961114205511970659180
+diagnostics_round2/nav_metrics.csv,恒定暴露 ē（取选定的 v1.4的 ē）／QQQ,worst_120_return,-0.0741512527547481980591546562,-0.0749575352200505194144992204
+diagnostics_round2/nav_metrics.csv,恒定暴露 ē（取选定的 v1.4的 ē）／QQQ,annualized_volatility,0.09452766715771777250446384953,0.09555780779617759254732515758

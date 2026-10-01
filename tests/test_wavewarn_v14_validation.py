@@ -107,10 +107,12 @@ def _normalised(data: bytes) -> bytes:
     return data.replace(b"\r\n", b"\n")
 
 
-@pytest.mark.xfail(strict=True, reason="补丁 f_BW 已纠正 BW 退出谓词，已入库的开发期输出仍是原实现的结果；"
-                                       "机械重跑的输出入库后去掉本标记")
 def test_development_outputs_are_reproduced_through_validation_entry(tmp_path: Path) -> None:
-    """防未来信息 (b)：经新入口把输入截断到 2016-12-30 重跑，状态、灯色、损失与入库的开发期输出逐字节相同。"""
+    """防未来信息 (b)：经新入口把输入截断到 2016-12-30 重跑，状态、灯色、损失与入库的开发期输出逐字节相同。
+
+    入库的是两处修正（f_BW、f_label）之后机械重跑的输出，在独立工作目录里由“标签 v1.4-asrun + 两个补丁”写出；
+    本案例同时核对主仓库当前的源码重新写出的结果与它相同。原实现的输出在 superseded/ 下。
+    """
     config = load_v14_config(ROOT / "config/wavewarn_v14.yaml")
     inputs = load_inputs_until(ROOT, DEVELOPMENT_END, VIX3M_VALIDATION_FILE)
     destination = tmp_path / "result"

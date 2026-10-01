@@ -46,6 +46,7 @@ MODEL = VALIDATION.model
 FIXED = MODEL.base.fixed_parameters()
 CUTOFF = dt.date(2016, 12, 30)
 STORED = ROOT / "reports/research/wavewarn_v14/evaluation_development"
+STORED_ASRUN = STORED / "superseded/2026-10-01_修正前_v1.4-asrun"       # 原实现（标签 v1.4-asrun）的输出
 D = Decimal
 ZZ_LEVELS = {"SPX": (D("0.04"), D("0.05")), "QQQ": (D("0.05"), D("0.065"))}
 DAYS = tuple(dt.date(2012, 1, 2) + dt.timedelta(days=index) for index in range(300))
@@ -478,11 +479,28 @@ def test_bw_deviation_layer_three_and_four_system_light_and_executed_exposure(la
     assert spread == [17, 21, 21, 17, 19, 19, 8, 10, 10]
 
 
-def test_stored_selected_setting_matches_the_legacy_formula(layers: _Layers) -> None:
-    """已入库的开发期逐日明细（选定设定）的执行灯色，逐日等于“现行写法”重算的结果：四层统计的基准就是已入库的输出。"""
-    base = _lights(layers, 5, "0.025", frozenset())
-    with gzip.open(STORED / "daily_selected.csv.gz", "rt", encoding="utf-8", newline="") as file:
-        rows = [row for row in csv.DictReader(io.StringIO(file.read()))
+def _stored_executed(folder: Path) -> list[str]:
+    with gzip.open(folder / "daily_selected.csv.gz", "rt", encoding="utf-8", newline="") as file:
+        return [row["system_executed_light"] for row in csv.DictReader(io.StringIO(file.read()))
                 if (row["model"], row["symbol"]) == ("v1.4", "SPX")]
-    assert [row["system_executed_light"] for row in rows] == ["绿", *base[:-1]][63:]
+
+
+def test_stored_selected_setting_matches_the_legacy_formula(layers: _Layers) -> None:
+    """原实现写出的开发期逐日明细（选定设定，现存于 superseded/）的执行灯色，逐日等于“审计时写法”重算的结果：
+
+    四层统计的基准就是原实现的输出。
+    """
+    base = _lights(layers, 5, "0.025", frozenset())
+    assert _stored_executed(STORED_ASRUN) == ["绿", *base[:-1]][63:]
     assert configured_loss_settings(MODEL.base).parameters.eta == D("0.5")
+
+
+def test_stored_corrected_selected_setting_matches_the_spec_formula(layers: _Layers) -> None:
+    """机械重跑后入库的逐日明细（重选的设定仍是 K=5、θ_P=2.5%）的执行灯色，逐日等于“规格写法”另算的结果，
+
+    与原实现的输出相差 19 个区间（与四层统计的执行层一致）。
+    """
+    fixed = _lights(layers, 5, "0.025", frozenset(SYMBOLS))
+    stored = _stored_executed(STORED)
+    assert stored == ["绿", *fixed[:-1]][63:]
+    assert sum(a != b for a, b in zip(stored[:-1], _stored_executed(STORED_ASRUN)[:-1], strict=True)) == 19

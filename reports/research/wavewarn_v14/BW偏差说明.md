@@ -11,9 +11,9 @@
 ## 本目录中受影响与不受影响的内容
 
 - 受影响（基于原实现）：
-  - 原始开发期评价输出：v1.4 九组、去掉 MR 九组、N′·X2 与 N·E2 中位设定的全部结果与选择追踪。机械重跑之后，原输出在 `evaluation_development/superseded/`，修正实现下的结果在 `evaluation_development/`，逐项对比见其中的 `BW修正对比报告.md`。
+  - 原始开发期评价输出：v1.4 九组、去掉 MR 九组、N′·X2 与 N·E2 中位设定的全部结果与选择追踪。机械重跑之后，原输出在 `evaluation_development/superseded/`，修正实现下的结果在 `evaluation_development/`（见其中的 `纠错重跑说明.md`），逐项对比见 `correction_rerun/对比报告.md`。
   - `validation_rehearsal_development/`（开发期演练，含其 `superseded/`）：选定设定的全部结果。演练不重跑，随候选恢复时再做。
-  - 第二轮诊断中基于原实现的各版输出（`diagnostics_round2/superseded/`）：选定设定与“v1.4 去掉 MR”两个对象。
+  - 第二轮诊断中基于原实现的各版输出（`diagnostics_round2/superseded/`）：选定设定与“v1.4 去掉 MR”两个对象。修正实现下的诊断在 `diagnostics_round2/`。
   - `disclosure/trial_run_2026-10-01/`：未核对的试跑，不得引用其中的数值。
 - 不受影响：`evaluation_development/extended_history/` 与 `extended_nav/`（纯价格版，不含 BW）；各目录中的 200 日均线、带缓冲带的均线、满仓、现金、恒定暴露与始终绿、黄、红各行；P1·E2 中位设定。
 - 重跑结果只作纠错证据，不自动恢复候选资格。v1.4 继续暂停。
