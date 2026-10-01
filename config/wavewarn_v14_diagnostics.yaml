@@ -15,3 +15,11 @@ rolling_windows: [20, 60, 120]
 trading_days_per_year: 252
 
 output: reports/research/wavewarn_v14/diagnostics_round2
+
+# 补充登记 G：描述性对照“带缓冲带的 200 日均线”。高于均线的 (1+band) 倍转绿，低于 (1−band) 倍转红，
+# 区间内保持前状态；1% 为固定参考值，不扫描其他变体
+buffered_ma200:
+  band: "0.01"
+
+# 补充历史（j₀′ 至 2009-09-30）的真实净值：只用 SPX、QQQ 的收盘价
+extended_nav_output: reports/research/wavewarn_v14/extended_nav

@@ -187,6 +187,8 @@ class Round2Config:
     rolling_windows: tuple[int, ...]       # 最差滚动收益的窗口（交易日）
     trading_days_per_year: int             # 年化收益、年化波动率与“年均”所用的年交易日数
     output: str
+    buffer_band: Decimal                   # 带缓冲带的 200 日均线的带宽（补充登记 G：固定参考值 1%）
+    extended_nav_output: str               # 补充历史真实净值的输出目录
 
 
 def parse_round2_config(raw: dict[str, Any]) -> Round2Config:
@@ -195,9 +197,13 @@ def parse_round2_config(raw: dict[str, Any]) -> Round2Config:
         raise ValueError("wavewarn v1.4 第二轮诊断配置版本错误")
     config = Round2Config(tuple(int(item) for item in raw.get("reversal_windows", ())), int(raw.get("green_window", 0)),
                           tuple(int(item) for item in raw.get("rolling_windows", ())),
-                          int(raw.get("trading_days_per_year", 0)), str(raw.get("output")))
+                          int(raw.get("trading_days_per_year", 0)), str(raw.get("output")),
+                          Decimal(str(raw.get("buffered_ma200", {}).get("band"))),
+                          str(raw.get("extended_nav_output")))
     if (config.reversal_windows, config.green_window, config.rolling_windows) != ((5, 10), 8, (20, 60, 120)):
         raise ValueError("短期反转、转绿观察或滚动收益的窗口与补充登记不一致")
+    if config.buffer_band != Decimal("0.01"):
+        raise ValueError("带缓冲带的200日均线的带宽与补充登记不一致（固定参考值 1%，不扫描其他变体）")
     if config.trading_days_per_year <= 0:
         raise ValueError("年交易日数必须为正")
     return config

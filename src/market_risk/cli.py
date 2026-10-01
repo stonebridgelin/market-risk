@@ -713,6 +713,15 @@ def wavewarn_v14_diagnostics_round2() -> None:
     typer.echo(f"报告 SHA-256 {run.report_sha256}。输出目录：{run.output}")
 
 
+@wavewarn_app.command("v14-extended-nav")
+def wavewarn_v14_extended_nav() -> None:
+    """v1.4 补充历史的真实净值（纯价格版、200 日均线、带缓冲带的 200 日均线等）；只作描述。"""
+    run = _call(services.wavewarn_v14_extended_nav, _ctx())
+    typer.echo(f"已写入 v1.4 补充历史的真实净值：t0′={run.t0}，{run.intervals} 个区间，"
+               f"{run.first_interval} 至 {run.last_day}。")
+    typer.echo(f"报告 SHA-256 {run.report_sha256}。输出目录：{run.output}")
+
+
 @backtest_app.command("zigzag-check")
 def backtest_zigzag_check(
     symbol: Annotated[str, typer.Option("--symbol", help="SPX 或 QQQ")],

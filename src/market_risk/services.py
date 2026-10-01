@@ -218,6 +218,16 @@ def wavewarn_v14_diagnostics_round2(ctx: Context) -> Any:
         raise ServiceError(str(exc)) from exc
 
 
+def wavewarn_v14_extended_nav(ctx: Context) -> Any:
+    """v1.4 补充历史的真实净值：只用 2009-09-30 以前的 SPX、QQQ 收盘价，只作描述，不参与任何判定。"""
+    from market_risk.wavewarn.extended_nav_run import run_v14_extended_nav
+
+    try:
+        return run_v14_extended_nav(ctx.paths.root)
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
 # ---------------------------------------------------------------------------
 # 日期与样本
 # ---------------------------------------------------------------------------

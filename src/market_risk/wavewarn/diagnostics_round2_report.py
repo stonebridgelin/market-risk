@@ -44,7 +44,7 @@ def _yes(value: bool) -> str:
     return "是" if value else "否"
 
 
-def _plain(value: object) -> str:
+def plain(value: object) -> str:
     """报告里的计数类数值：去掉无意义的尾随零；空值显示为“—”。"""
     if value is None or value == "":
         return "—"
@@ -195,14 +195,14 @@ def nav_daily(result: Round2Result, places: Decimal) -> tuple[tuple[str, ...], t
                          for index, day in enumerate(result.days))
 
 
-def _percent(value: Decimal | None) -> str:
+def percent(value: Decimal | None) -> str:
     return "—" if value is None else f"{value * 100:.2f}%"
 
 
 def scope_lines(result: Round2Result, config: Round2Config) -> list[str]:
     first, last = result.days[0], result.days[-1]
     rows = [(item.name, item.timing.intervals, item.timing.mean_exposure, item.initial_light,
-             _plain(item.initial_exposure)) for item in result.objects]
+             plain(item.initial_exposure)) for item in result.objects]
     return [
         "# v1.4 第二轮开发期诊断（描述性，不参与任何判定）", "", OPENING, "",
         f"- 评价窗口：j₀ = {first} 至最后一个 next_date ≤ {last} 的区间（最后一个区间为 {result.days[-2]} 收盘至 "
@@ -246,13 +246,13 @@ def switch_count_lines(result: Round2Result, config: Round2Config) -> list[str]:
 
 def holding_lines(result: Round2Result, config: Round2Config) -> list[str]:
     """执行段持有时长与目标暴露变化量。"""
-    holding = [(row[0], row[1], row[2], _plain(row[3]), _plain(row[4]), _plain(row[5]), _plain(row[6]), row[7])
+    holding = [(row[0], row[1], row[2], plain(row[3]), plain(row[4]), plain(row[5]), plain(row[6]), row[7])
                for row in holding_rows(result)]
     ends = [(item.name, f"{item.segments[0].light}，{item.segments[0].length} 个区间，"
              f"{'被窗口起点截断' if item.segments[0].truncated else '未截断'}",
              f"{item.segments[-1].light}，{item.segments[-1].length} 个区间，"
              f"{'被窗口末日截断' if item.segments[-1].truncated else '未截断'}") for item in result.objects]
-    change = [(row[0], row[8], _plain(row[10]), f"{row[11]:.2f}") for row in object_rows(result, config)]
+    change = [(row[0], row[8], plain(row[10]), f"{row[11]:.2f}") for row in object_rows(result, config)]
     return ["### 执行段持有时长", "",
             "每段连续相同执行灯色的长度（区间数，即持有的交易日数）；分位数为线性插值。首段与末段若被评价窗口截断，"
             "真实时长不短于表中数值；它们仍计入分布，并在“其中被截断”一列标出。", "",
@@ -292,7 +292,7 @@ def green_lines(result: Round2Result, config: Round2Config) -> list[str]:
     window = config.green_window
     summary = [(row[0], row[1], row[2], f"{row[3]}（{share(row[6])}）", f"{row[4]}（{share(row[7])}）",
                 f"{row[5]}（{share(row[8])}）", f"{row[9]} / {row[10]}", share(row[11]), row[12],
-                f"{row[13]}（{share(row[14])}）", f"{row[15]}（{share(row[16])}）", _plain(row[17]), _plain(row[18]))
+                f"{row[13]}（{share(row[14])}）", f"{row[15]}（{share(row[16])}）", plain(row[17]), plain(row[18]))
                for row in green_summary_rows(result)]
     lines = ["## 三、转绿双层报告", "",
              "纳入高点 P ≥ τ 的已确认事件（同开发期评价）。类别①“低点前已绿”单列：它不是转绿迟到，不进入延迟分布。"
@@ -350,11 +350,11 @@ def nav_lines(result: Round2Result, config: Round2Config) -> list[str]:
             if row.scope != scope:
                 continue
             metrics = row.metrics
-            drawdown = (f"{_percent(metrics.drawdown.depth)}（{metrics.drawdown.peak_date} 至 "
+            drawdown = (f"{percent(metrics.drawdown.depth)}（{metrics.drawdown.peak_date} 至 "
                         f"{metrics.drawdown.trough_date}）" if metrics.drawdown.depth else "0.00%")
-            rows.append((row.name, _percent(metrics.cumulative), _percent(metrics.annualized), drawdown,
-                         *(_percent(item.value) for item in metrics.rolling), _percent(metrics.volatility),
-                         row.switches, _plain(row.exposure_change)))
+            rows.append((row.name, percent(metrics.cumulative), percent(metrics.annualized), drawdown,
+                         *(percent(item.value) for item in metrics.rolling), percent(metrics.volatility),
+                         row.switches, plain(row.exposure_change)))
         lines.extend([f"### {scope}", "", *table(header, rows), ""])
     lines.extend(["最差滚动收益的起止日、逐日净值见 `nav_metrics.csv` 与 `nav_daily.csv.gz`。", ""])
     return lines
