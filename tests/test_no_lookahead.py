@@ -158,7 +158,7 @@ AUDIT_MODULES = ("market_risk.data.price_review", "market_risk.data.price_review
                  "market_risk.backtest.report", "market_risk.research.analysis", "market_risk.research.io",
                  "market_risk.research.pullback", "market_risk.research.groups", "market_risk.research.features",
                  "market_risk.research.statistics", "market_risk.research.quality",
-                 "market_risk.research.development_audit")
+                 "market_risk.research.development_audit", "market_risk.research.zz_v121")
 
 
 def test_scoring_path_does_not_load_audit_modules_transitively():
@@ -198,7 +198,8 @@ def test_wavewarn_and_original_research_do_not_import_each_other_transitively():
     import sys
 
     for imported, forbidden in (("market_risk.wavewarn.development", "market_risk.research"),
-                                ("market_risk.research.analysis", "market_risk.wavewarn")):
+                                ("market_risk.research.analysis", "market_risk.wavewarn"),
+                                ("market_risk.research.zz_v121", "market_risk.wavewarn")):
         code = ("import importlib, json, sys\n"
                 f"importlib.import_module({imported!r})\n"
                 f"print(json.dumps([m for m in sys.modules if m.startswith({forbidden!r})]))\n")

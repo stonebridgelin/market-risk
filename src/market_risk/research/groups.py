@@ -33,9 +33,11 @@ class Observation:
 
 
 def classify_candidates(engine: FeatureEngine, periods: Sequence[DangerPeriod],
-                        development_days: Sequence[dt.date], threshold: Decimal) -> tuple[Candidate, ...]:
+                        development_days: Sequence[dt.date], threshold: Decimal,
+                        symbol: str = "SPX", unknown_days: frozenset[dt.date] = frozenset()
+                        ) -> tuple[Candidate, ...]:
     """优先排除窗口不完整与起点当天；样本允许映射至多个危险时段。"""
-    candidates = high_position_days(engine, development_days, threshold)
+    candidates = high_position_days(engine, development_days, threshold, symbol)
     index = {day: i for i, day in enumerate(development_days)}
     starts = {period.start for period in periods if period.period == "开发期"}
     result = []
@@ -45,7 +47,9 @@ def classify_candidates(engine: FeatureEngine, periods: Sequence[DangerPeriod],
         after5 = tuple(d for d in development_days[i + 1:i + 6] if d in starts)
         after20 = tuple(d for d in development_days[i + 1:i + 21] if d in starts)
         inside = any(period.start <= day <= period.end for period in periods if period.period == "开发期")
-        if not complete20:
+        if day in unknown_days:
+            category = "期末尾段危险归属未定"
+        elif not complete20:
             category = "后续20日窗口不完整"
         elif day in starts:
             category = "起点当天"

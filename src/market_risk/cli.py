@@ -601,6 +601,13 @@ def research_audit_pullback_development() -> None:
                f"重复映射候选日 {result.duplicate_candidate_dates} 个，特征 {result.feature_count} 项。")
 
 
+@research_app.command("zz-v121-sides")
+def research_zz_v121_sides() -> None:
+    """运行 ZZ v1.2.1 开发期 B、DV 分侧前瞻研究。"""
+    result = _call(services.research_zz_v121_sides, _ctx())
+    typer.echo(f"已写入 {result.report_path}；ZZ 危险时段 {result.danger_periods} 个。")
+
+
 @backtest_app.command("zigzag-check")
 def backtest_zigzag_check(
     symbol: Annotated[str, typer.Option("--symbol", help="SPX 或 QQQ")],

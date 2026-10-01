@@ -81,6 +81,16 @@ def research_audit_pullback_development(ctx: Context) -> Any:
         raise ServiceError(str(exc)) from exc
 
 
+def research_zz_v121_sides(ctx: Context) -> Any:
+    """开发期 ZZ 口径 B、DV 分侧预登记研究；不执行模型损失或选参。"""
+    from market_risk.research.zz_v121 import run_zz_side_study
+
+    try:
+        return run_zz_side_study(ctx.paths)
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
 # ---------------------------------------------------------------------------
 # 日期与样本
 # ---------------------------------------------------------------------------

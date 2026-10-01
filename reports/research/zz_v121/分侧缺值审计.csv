@@ -1,0 +1,5 @@
+﻿side,feature,raw_days,valid_days,single_value_stage_days,missing_序列未开始,missing_窗口不足,missing_缺口,missing_单值阶段
+SPX,S5TW_change_20,476,476,111,0,0,0,0
+SPX,S5TW_change_10,476,476,102,0,0,0,0
+QQQ,NDTW_change_20,428,428,109,0,0,0,0
+QQQ,NDTW_change_10,428,428,100,0,0,0,0

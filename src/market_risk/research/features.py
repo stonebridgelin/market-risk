@@ -161,13 +161,14 @@ class FeatureEngine:
         return result
 
 
-def high_position_days(engine: FeatureEngine, days: Sequence[dt.date], threshold: Decimal) -> tuple[dt.date, ...]:
-    """高位判定只比较当日 SPX 与此前59日，缺价留空。"""
+def high_position_days(engine: FeatureEngine, days: Sequence[dt.date], threshold: Decimal,
+                       symbol: str = "SPX") -> tuple[dt.date, ...]:
+    """高位判定比较指定指数的当日价与含当日60日最高价；缺价留空。"""
     result = []
     for day in days:
         window = engine.window(day, 60)
-        values = [engine.value("SPX", d) for d in window]
-        today = engine.value("SPX", day)
+        values = [engine.value(symbol, d) for d in window]
+        today = engine.value(symbol, day)
         if len(values) == 60 and all(value is not None for value in values) and today >= max(values) * threshold:
             result.append(day)
     return tuple(result)
