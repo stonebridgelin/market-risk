@@ -1,0 +1,33 @@
+{
+  "nav_daily": {
+    "file": "reports/research/wavewarn_v14/extended_nav/nav_daily.csv.gz",
+    "sha256": "73BE36EAF5F2EA633BBDED80B9C47015DCCFC4B59D79E89B33652F00887A7E42",
+    "rows_compared": 2533,
+    "columns_compared": 28,
+    "result": "逐行、逐列相同（12 位小数）"
+  },
+  "labels_vs_development": {
+    "asset_events_compared": 171,
+    "merged_events_compared": 102,
+    "result": "逐个相同"
+  },
+  "crossing_events_in_development_labels": [
+    {
+      "symbol": "SPX",
+      "peak_date": "2009-09-22",
+      "t0_date": "2009-10-02",
+      "trough_date": "2009-10-02",
+      "end_date": "2009-10-14",
+      "dangerous_intervals_in_window": 6,
+      "interval_start_dates": [
+        "2009-09-22",
+        "2009-09-23",
+        "2009-09-24",
+        "2009-09-25",
+        "2009-09-28",
+        "2009-09-29"
+      ],
+      "state_in_cutoff_labels": "不是事件：截止日时仍在寻峰，SPX 自 2009-09-22 起为“尾段（寻峰）”未定区间"
+    }
+  ]
+}

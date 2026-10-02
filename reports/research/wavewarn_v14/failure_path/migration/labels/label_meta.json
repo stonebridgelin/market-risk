@@ -1,0 +1,30 @@
+{
+  "label_version": "zz-v121",
+  "label_cutoff": "2009-09-30",
+  "price_axis_start": "1990-01-02",
+  "asset_events": 171,
+  "merged_events": 102,
+  "right_censored_events": 0,
+  "thresholds": {
+    "SPX": [
+      "0.04",
+      "0.05"
+    ],
+    "QQQ": [
+      "0.05",
+      "0.065"
+    ]
+  },
+  "code_commit": "bb6b79088f97dd470fffbcd8102445c37aa99dc2",
+  "worktree_dirty": false,
+  "inputs": {
+    "data/market/daily/SPX.csv": {
+      "sha256": "6941AB293EDDB8201E851D873476D64C6CBD584EC9573F5FF757447173BF0B00",
+      "note": "读取在 2009-09-30 之后的第一行之前停止"
+    },
+    "data/market/daily/QQQ.csv": {
+      "sha256": "D14E58EDCAB7EC94B4E6728CE65BBBF8A0A84565D53CE951A37A4E6143A56880",
+      "note": "读取在 2009-09-30 之后的第一行之前停止"
+    }
+  }
+}

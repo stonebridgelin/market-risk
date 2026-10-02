@@ -1,0 +1,26 @@
+{
+  "daily_detail": {
+    "file": "reports/research/wavewarn_v14/evaluation_development/daily_selected.csv.gz",
+    "sha256": "7488317FE7F476AD1209A373FC72BE038F30EE1A87658662C0BD7F986CFB8CDF",
+    "columns": [
+      "date",
+      "signal_light",
+      "system_executed_light",
+      "close",
+      "active_channels（只对 v1.4）"
+    ],
+    "rows_compared": {
+      "v1.4·SPX": 1763,
+      "v1.4·QQQ": 1763,
+      "200日均线·SPX": 1763,
+      "200日均线·QQQ": 1763
+    },
+    "result": "逐行一致"
+  },
+  "buffered_ma200": {
+    "file": "reports/research/wavewarn_v14/correction_rerun/buffered_reference_corrected.json",
+    "mean_exposure": "0.8212258796821793416572077185",
+    "billed_switches": 18,
+    "result": "一致"
+  }
+}
