@@ -37,6 +37,11 @@ market-risk/
 │   ├── manual/                         # 人工录入的数据，提交 git
 │   │   ├── breadth.csv                 # date,s5fi,s5tw,note（每个交易日一行）
 │   │   ├── outcomes.csv                # 风险事件标签（见第5节）
+│   │   ├── provenance/                 # 数据留痕（docs/research/数据留痕设计说明.md）：只追加，不接入评分与研究计算
+│   │   │   ├── records.csv             # 录入留痕记录（每条一行）
+│   │   │   ├── confirmations.csv       # 确认记录
+│   │   │   ├── record_id.counter       # 已发出的最大记录顺序号（编号不因删除而复用）
+│   │   │   └── snapshots/<指标>/<交易日>/  # 原始快照文件
 │   │   └── tradingview/                # TradingView 导出数据（docs/TRADINGVIEW.md）
 │   │       ├── raw/<导出日期>/         # 原始导出文件，只读，保留默认文件名
 │   │       └── manifest.csv            # 每个原始文件一行（含 sha256、校验结果）
@@ -177,6 +182,11 @@ results/MARKET/risk_scoring/backtests/
 | `symbols` | 参考表：标的登记（由 `config/symbols.yaml` 生成） |
 | `market_holidays` | 参考表：股市、债市的休市日与提前收盘日，含注释（由 `config/holidays.yaml` 生成） |
 | `data_decisions` | 参考表：已裁定日期表（由 `config/data_decisions.yaml` 生成） |
+| `provenance_records` | 数据留痕：录入留痕记录（由 `data/manual/provenance/records.csv` 重建；迁移 0008，2026-10-01） |
+| `provenance_confirmations` | 数据留痕：确认记录（由 `confirmations.csv` 重建） |
+| `signal_input_links` | 数据留痕的预留关联表：信号实际使用的输入记录编号（本批为空，不接入信号计算） |
+
+留痕表保存的是录入事件及其读数，属于审计记录，不是数据集副本；评分与研究计算不得从该表读取市场时间序列（目前也没有接入）。评分与研究计算仍只读 `data/market/` 与各自既有的输入。字段与约束见 `docs/research/数据留痕设计说明.md`；迁移 0009 增加了快照缺失原因与来源文件两组字段。
 
 要求：
 - 数据库**只存分析结果与索引**：运行记录、分数、指标、结果标签、资料索引、复核记录，以及以后逐日回测的结果；另有三张参考表（YAML 仍为源头，供以后前端与统计查询使用）。**市场时间序列不存入数据库**（在 `data/market/`）。

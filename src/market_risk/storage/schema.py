@@ -263,7 +263,58 @@ pullback_episodes = Table(
     Column("counted", Boolean, nullable=False),
 )
 
+# ---- 数据留痕（迁移 0008）：由 data/manual/provenance/ 下只追加的文件重建；不接入评分与研究计算 ----
+provenance_records = Table(
+    "provenance_records", metadata,
+    Column("record_id", String(16), primary_key=True),          # 唯一记录编号
+    Column("indicator", String(40), nullable=False),            # 指标代码
+    Column("trade_date", Date, nullable=False),                 # 指标对应的交易日
+    Column("raw_value", String(40), nullable=False),            # 原始值（录入文本原样）
+    Column("raw_unit", String(16), nullable=False),
+    Column("raw_basis", Text, nullable=False),                  # 口径
+    Column("raw_precision", Integer, nullable=False),           # 原始值的小数位数
+    Column("normalized_value", DECIMAL, nullable=False),        # 规范化值
+    Column("source", Text, nullable=False),
+    Column("acquisition_method", String(16), nullable=False),   # 接口 / 手工录入
+    Column("first_obtained_at_et", String(40)),                 # 首次取得时间（美东）；无法证明时为空
+    Column("entered_at_utc", String(40), nullable=False),
+    Column("entered_by", String(64), nullable=False),
+    Column("is_late", Boolean),                                 # 相对当日美东 18:30；首次取得时间为空时为空
+    Column("source_published_at", String(40)),                  # 来源发布时间；无法核实时为空
+    Column("snapshot_path", String(300)),
+    Column("snapshot_sha256", String(64)),
+    Column("data_version", String(64)),
+    Column("code_version", String(40), nullable=False),
+    Column("code_dirty", Boolean),                              # 录入时工作区是否有未提交改动
+    Column("revises_record_id", String(16), ForeignKey("provenance_records.record_id")),
+    Column("revision_kind", String(16)),                        # 来源修订 / 人工修正
+    Column("correction_original_value", String(40)),
+    Column("correction_corrected_value", String(40)),
+    Column("correction_evidence", Text),
+    Column("historical_backfill", Boolean, nullable=False),     # 历史补录
+    # 迁移 0009：原始快照缺失的原因；已有来源文件的路径与该文件自身的 SHA-256
+    Column("snapshot_missing_reason", Text),
+    Column("source_file_path", String(300)),
+    Column("source_file_sha256", String(64)),
+)
+
+provenance_confirmations = Table(
+    "provenance_confirmations", metadata,
+    Column("record_id", String(16), ForeignKey("provenance_records.record_id"), primary_key=True),
+    Column("confirmed_by", String(64), nullable=False),
+    Column("confirmed_at_utc", String(40), nullable=False),
+    Column("self_confirmed", Boolean, nullable=False),          # 确认人与录入人相同
+)
+
+# 预留：将来每次信号实际使用的输入记录编号。本批只建字段与关联结构，不接入信号计算。
+signal_input_links = Table(
+    "signal_input_links", metadata,
+    Column("signal_key", String(200), primary_key=True),
+    Column("record_id", String(16), ForeignKey("provenance_records.record_id"), primary_key=True),
+    Column("note", Text),
+)
+
 TABLES = (runs, officials, dimension_scores, totals, metrics, near_threshold, outcomes, materials, reviews,
           symbols, market_holidays, data_decisions, backtest_runs, backtest_daily_scores, backtest_outcomes,
-          pullback_episodes)
+          pullback_episodes, provenance_records, provenance_confirmations, signal_input_links)
 REFERENCE_TABLES = (symbols, market_holidays, data_decisions)

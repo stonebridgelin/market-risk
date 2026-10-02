@@ -150,6 +150,42 @@ class StoragePaths:
             raise PathError(f"TradingView 标的名不合法：{symbol!r}")
         return self.tv_processed_dir / f"{symbol}.csv"
 
+    # ---- 数据留痕（docs/research/数据留痕设计说明.md）：只追加的记录文件与原始快照，提交 git ----
+    @property
+    def provenance_dir(self) -> Path:
+        return self.manual_dir / "provenance"
+
+    @property
+    def provenance_records_csv(self) -> Path:
+        """录入留痕记录（只追加）；数据库 provenance_records 表由此重建。"""
+        return self.provenance_dir / "records.csv"
+
+    @property
+    def provenance_confirmations_csv(self) -> Path:
+        """确认记录（只追加）；数据库 provenance_confirmations 表由此重建。"""
+        return self.provenance_dir / "confirmations.csv"
+
+    @property
+    def provenance_signal_inputs_csv(self) -> Path:
+        """预留：信号实际使用的输入记录编号；数据库 signal_input_links 表由此重建。本批不写入。"""
+        return self.provenance_dir / "signal_inputs.csv"
+
+    @property
+    def provenance_counter_file(self) -> Path:
+        """已发出的最大记录顺序号（提交 git）：记录即使被删除，编号也不复用。"""
+        return self.provenance_dir / "record_id.counter"
+
+    @property
+    def provenance_lock_file(self) -> Path:
+        """分配编号与追加记录时的排他锁文件（临时文件，用完即删，不提交 git）。"""
+        return self.provenance_dir / ".lock"
+
+    def provenance_snapshot_dir(self, indicator: str, trade_date: dt.date) -> Path:
+        """原始快照：snapshots/<指标>/<交易日>/。"""
+        if not _TV_SYMBOL_RE.match(indicator):
+            raise PathError(f"指标代码不合法：{indicator!r}")
+        return self.provenance_dir / "snapshots" / indicator / trade_date.isoformat()
+
     # ---- data/market：市场数据集（计分输入，提交 git；docs/decisions/0001）----
     @property
     def market_dir(self) -> Path:

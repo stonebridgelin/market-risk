@@ -1373,3 +1373,163 @@ def index_dispute_label_impact(ctx: Context, tolerance: str = "0.02") -> IndexIm
     path = ctx.paths.reports_dir / "index_dispute_label_impact.md"
     _write_report(path, text)
     return IndexImpactReport(tuple(impacts), text, path)
+
+
+# ---------------------------------------------------------------------------
+# 数据留痕（docs/research/数据留痕设计说明.md）：只建录入留痕，不接入评分、信号与研究计算
+# ---------------------------------------------------------------------------
+
+
+def _provenance_setup(config: Any, code: Any) -> tuple[Any, Any]:
+    """留痕配置与录入时的代码版本（提交号、工作区是否有未提交改动）；测试可以直接传入。"""
+    from market_risk.config import PROJECT_ROOT
+    from market_risk.provenance import CodeVersion
+    from market_risk.provenance_config import load_provenance_config
+    from market_risk.storage.runs import git_info
+
+    if config is None:
+        config = load_provenance_config(PROJECT_ROOT / "config")
+    if code is None:
+        info = git_info(PROJECT_ROOT)
+        code = CodeVersion(info.commit, info.dirty)
+    return config, code
+
+
+def _provenance_write(ctx: Context, request: Any, revision: Any, now: dt.datetime | None, config: Any,
+                      code: Any) -> Any:
+    """在排他锁内分配编号并追加一条记录；被拒绝的录入不留下任何行，也不占用编号。"""
+    from market_risk import provenance as rules
+    from market_risk.storage import provenance_store as store
+
+    config, code = _provenance_setup(config, code)
+
+    def build(record_id: str, records: Any) -> Any:
+        original = None
+        if revision is not None:
+            original = next((item for item in records if item.record_id == revision.revises), None)
+        return rules.build_record(record_id, request, revision, original, now or dt.datetime.now(dt.UTC), code,
+                                  config)
+
+    try:
+        record = store.append_new_record(ctx.paths, build, config.lock_timeout_seconds)
+    except rules.ProvenanceError as exc:
+        raise ServiceError(str(exc)) from exc
+    _rebuild_db(ctx)
+    return record
+
+
+def _provenance_data_version(ctx: Context, indicator: str) -> str | None:
+    """数据版本：指标在 data/market/manifest.json 的序列清单里时取该清单的 SHA-256，否则留空。"""
+    import json
+
+    from market_risk.storage import provenance_store as store
+
+    manifest = ctx.paths.market_manifest
+    if not manifest.is_file():
+        return None
+    series = json.loads(manifest.read_text(encoding="utf-8")).get("series", {})
+    return store.file_sha256(manifest) if indicator in series else None
+
+
+def _provenance_request(ctx: Context, indicator: str, trade_date: dt.date, raw_value: str, source: str, method: str,
+                        entered_by: str, first_obtained_at: dt.datetime | None, historical_backfill: bool,
+                        source_published_at: dt.datetime | None, snapshot_file: Path | None,
+                        snapshot_missing_reason: str, source_file: Path | None) -> Any:
+    from market_risk import provenance as rules
+    from market_risk.storage import provenance_store as store
+
+    try:
+        snapshot = (store.store_snapshot(ctx.paths, indicator, trade_date, snapshot_file)
+                    if snapshot_file is not None else None)
+        existing = store.source_file(ctx.paths, source_file) if source_file is not None else None
+    except (rules.ProvenanceError, ValueError) as exc:
+        raise ServiceError(str(exc)) from exc
+    return rules.EntryRequest(indicator, trade_date, raw_value, source, method, first_obtained_at,
+                              historical_backfill, source_published_at, entered_by, snapshot,
+                              snapshot_missing_reason, existing, _provenance_data_version(ctx, indicator))
+
+
+def provenance_add(ctx: Context, indicator: str, trade_date: dt.date, raw_value: str, source: str, method: str,
+                   entered_by: str, first_obtained_at: dt.datetime | None = None, historical_backfill: bool = False,
+                   source_published_at: dt.datetime | None = None, snapshot_file: Path | None = None,
+                   snapshot_missing_reason: str = "", source_file: Path | None = None,
+                   now: dt.datetime | None = None, config: Any = None, code: Any = None) -> Any:
+    """录入一条留痕记录（追加到 data/manual/provenance/records.csv）。返回 provenance.ProvenanceRecord。
+
+    首次取得时间无法证明时留空并标“历史补录”；来源发布时间无法核实时留空；没有原始快照时必须写明原因。
+    不改动任何既有输入。
+    """
+    request = _provenance_request(ctx, indicator, trade_date, raw_value, source, method, entered_by,
+                                  first_obtained_at, historical_backfill, source_published_at, snapshot_file,
+                                  snapshot_missing_reason, source_file)
+    return _provenance_write(ctx, request, None, now, config, code)
+
+
+def provenance_revise(ctx: Context, revises: str, kind: str, raw_value: str, source: str, method: str,
+                      entered_by: str, evidence: str = "", first_obtained_at: dt.datetime | None = None,
+                      historical_backfill: bool = False, source_published_at: dt.datetime | None = None,
+                      snapshot_file: Path | None = None, snapshot_missing_reason: str = "",
+                      source_file: Path | None = None, now: dt.datetime | None = None, config: Any = None,
+                      code: Any = None) -> Any:
+    """修订一条记录：追加一条指向原记录的新记录，原记录不覆盖。kind 为“来源修订”或“人工修正”。
+
+    修订不得改变指标与交易日：两者取自被修订的记录。
+    """
+    from market_risk import provenance as rules
+    from market_risk.storage import provenance_store as store
+
+    try:
+        original = next((item for item in store.read_records(ctx.paths) if item.record_id == revises), None)
+    except rules.ProvenanceError as exc:
+        raise ServiceError(str(exc)) from exc
+    if original is None:
+        raise ServiceError(f"找不到被修订的记录：{revises}")
+    request = _provenance_request(ctx, original.indicator, original.trade_date, raw_value, source, method,
+                                  entered_by, first_obtained_at, historical_backfill, source_published_at,
+                                  snapshot_file, snapshot_missing_reason, source_file)
+    return _provenance_write(ctx, request, rules.RevisionRequest(revises, kind, evidence), now, config, code)
+
+
+def provenance_confirm(ctx: Context, record_id: str, confirmed_by: str, now: dt.datetime | None = None,
+                       config: Any = None) -> Any:
+    """确认一条记录（追加到 confirmations.csv）；确认人与录入人相同时标“自确认”。"""
+    from market_risk import provenance as rules
+    from market_risk.storage import provenance_store as store
+
+    config, _ = _provenance_setup(config, rules.CodeVersion("", None))
+
+    def build(records: Any, confirmations: Any) -> Any:
+        record = next((item for item in records if item.record_id == record_id), None)
+        if record is None:
+            raise rules.ProvenanceError(f"找不到记录：{record_id}")
+        return rules.confirm(record, confirmations, confirmed_by, now or dt.datetime.now(dt.UTC))
+
+    try:
+        item = store.append_new_confirmation(ctx.paths, build, config.lock_timeout_seconds)
+    except rules.ProvenanceError as exc:
+        raise ServiceError(str(exc)) from exc
+    _rebuild_db(ctx)
+    return item
+
+def provenance_list(ctx: Context, indicator: str | None = None, start: dt.date | None = None,
+                    end: dt.date | None = None) -> Any:
+    """查询留痕记录（含确认状态与是否已被修订）。返回 provenance.RecordView 的元组。"""
+    from market_risk import provenance as rules
+    from market_risk.storage import provenance_store as store
+
+    try:
+        views = rules.record_views(store.read_records(ctx.paths), store.read_confirmations(ctx.paths))
+    except rules.ProvenanceError as exc:
+        raise ServiceError(str(exc)) from exc
+    return rules.select_views(views, indicator, start, end)
+
+
+def provenance_verify_snapshots(ctx: Context) -> list[str]:
+    """原始快照与来源文件的哈希核对：返回问题清单（空即全部一致）。"""
+    from market_risk import provenance as rules
+    from market_risk.storage import provenance_store as store
+
+    try:
+        return store.snapshot_problems(ctx.paths, store.read_records(ctx.paths))
+    except rules.ProvenanceError as exc:
+        raise ServiceError(str(exc)) from exc

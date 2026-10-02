@@ -1,0 +1,33 @@
+# 数据留痕（T3 第一步）的参数。只用于录入留痕，不接入任何评分、信号或研究计算。
+version: provenance-1
+
+# 迟到判断：首次取得时间严格晚于指标对应交易日的美东 18:30:00 才算迟到
+timezone: America/New_York
+late_cutoff: "18:30:00"
+
+# 规范化值存为 Numeric(20, 8)；原始值的小数位数超过 8 位时拒绝录入，不做舍入
+max_precision: 8
+
+# 分配记录编号时对只追加的文件加排他锁；等待超过这个时间即报错（秒）
+lock_timeout_seconds: 10
+
+acquisition_methods: [接口, 手工录入]
+revision_kinds: [来源修订, 人工修正]
+
+# 第一批覆盖的三项手工数据。原始单位为百分数（%），规范化值为 0—100 的百分数，超出范围拒绝录入
+indicators:
+  S5FI:
+    unit: "%"
+    basis: 标普500成分股站上50日均线比例，日线收盘值
+    minimum: "0"
+    maximum: "100"
+  S5TW:
+    unit: "%"
+    basis: 标普500成分股站上20日均线比例，日线收盘值
+    minimum: "0"
+    maximum: "100"
+  NDTW:
+    unit: "%"
+    basis: 纳斯达克100成分股站上20日均线比例，日线收盘值
+    minimum: "0"
+    maximum: "100"
