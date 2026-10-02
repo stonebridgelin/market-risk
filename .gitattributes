@@ -12,3 +12,4 @@ patches/** -text
 # 归因版本的恢复材料（补丁、配置、清单与重建脚本）同样逐字节保持不变
 reports/research/wavewarn_v14/correction_rerun/recovery/** -text
 docs/product/** -text
+docs/research/波段预警研究规格_v2.0_登记.md -text
