@@ -1,0 +1,17 @@
+# 旧补充历史的标签影响量化（局部纠错核算，不是重新选参；不修改任何已入库的历史输出）。
+version: v1.4-label-cutoff-impact
+
+# 核对：逐区间的局部调整之和须等于汇总的变化
+tolerance: "1e-10"
+
+output: reports/research/wavewarn_v14/label_cutoff_impact
+
+# 开发期标签（旧补充历史当时使用的标签）
+development_labels:
+  events: reports/research/wavewarn_v121/zz_events_development.csv
+  unknown: reports/research/wavewarn_v121/zz_unknown_development.csv
+
+# 已入库的旧补充历史输出：原标签下的重算须与它们一致
+stored:
+  v13: reports/research/wavewarn_v13/evaluation_development/extended_history
+  v14: reports/research/wavewarn_v14/evaluation_development/extended_history

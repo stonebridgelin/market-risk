@@ -238,6 +238,16 @@ def wavewarn_v14_failure_path(ctx: Context) -> Any:
         raise ServiceError(str(exc)) from exc
 
 
+def wavewarn_v14_label_cutoff_impact(ctx: Context) -> Any:
+    """旧补充历史的标签影响量化：冻结路径上的局部纠错核算，不是重新选参，不修改任何已入库的历史输出。"""
+    from market_risk.wavewarn.label_cutoff_impact_run import run_label_cutoff_impact
+
+    try:
+        return run_label_cutoff_impact(ctx.paths.root)
+    except (ValueError, OSError) as exc:
+        raise ServiceError(str(exc)) from exc
+
+
 # ---------------------------------------------------------------------------
 # 日期与样本
 # ---------------------------------------------------------------------------

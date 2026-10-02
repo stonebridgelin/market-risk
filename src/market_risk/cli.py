@@ -732,6 +732,16 @@ def wavewarn_v14_failure_path() -> None:
     typer.echo(f"输出目录：{run.output}")
 
 
+@wavewarn_app.command("v14-label-cutoff-impact")
+def wavewarn_v14_label_cutoff_impact() -> None:
+    """旧补充历史的标签影响量化（开发期标签对 2009-09-30 截止的标签）；局部纠错核算，不是重新选参。"""
+    run = _call(services.wavewarn_v14_label_cutoff_impact, _ctx())
+    for name, count in run.differences:
+        typer.echo(f"{name}：{count} 个资产区间的归类不同；原标签下的重算与已入库输出一致，"
+                   "局部调整之和与汇总的变化一致。")
+    typer.echo(f"报告 SHA-256 {run.report_sha256}。输出目录：{run.output}")
+
+
 @backtest_app.command("zigzag-check")
 def backtest_zigzag_check(
     symbol: Annotated[str, typer.Option("--symbol", help="SPX 或 QQQ")],
