@@ -99,9 +99,14 @@ class Window:
 class EventJudgement:
     event: R2Event
     category: EventClass
-    first_new_day: dt.date | None       # 新提示达标：首次新提示日 d
-    executable_day: dt.date | None      # 可执行日 d+1；超出交易日序列时为 None
-    executable_offset: int | None       # d+1 相对 T3 的交易日偏移（0 即 T3 当日，负数为更早）
+    # 新提示达标：首次新提示日 d。peak_new_uncertain 为真时，它只是“首次可确认的新提示日”，
+    # 即 [P, T3) 内最早的确定的“非提示 → 提示”转换日，不是真实的首次新提示日。
+    first_new_day: dt.date | None
+    executable_day: dt.date | None      # 可执行日 d+1；超出交易日序列时为 None。peak_new_uncertain 为真时按可确认日计算
+    executable_offset: int | None       # d+1 相对 T3 的交易日偏移（0 即 T3 当日，负数为更早）；同上
+    # P 当日是否为新提示无法确定（实施口径补充第 20 条）：只在 S_P 为提示、S_{P−1} 无法确定、
+    # 而 [P, T3) 内另有确定的“非提示 → 提示”转换时为真；其他情形为假。
+    peak_new_uncertain: bool
 
 
 @dataclass(frozen=True)
@@ -122,37 +127,42 @@ class R2Result:
 def judge_event(event: R2Event, window: Window) -> EventJudgement:
     """单个事件的唯一分类。"""
     if event.peak <= window.first:
-        return EventJudgement(event, EventClass.LEFT_TRUNCATED, None, None, None)
+        return EventJudgement(event, EventClass.LEFT_TRUNCATED, None, None, None, False)
     early = window.span(event.peak, event.t3, inclusive=False)                 # [P, T3)
     states = [window.status[day] for day in early]
     if Prompt.UNKNOWN in states:
-        return EventJudgement(event, EventClass.INSUFFICIENT, None, None, None)
+        return EventJudgement(event, EventClass.INSUFFICIENT, None, None, None, False)
     if all(state is Prompt.YES for state in states):
-        return EventJudgement(event, EventClass.COVERED, None, None, None)
+        return EventJudgement(event, EventClass.COVERED, None, None, None, False)
     restarts = [day for day, state, previous in zip(early[1:], states[1:], states, strict=False)
                 if state is Prompt.YES and previous is Prompt.NO]
+    uncertain = False
     if states[0] is Prompt.YES:
         previous = window.status.get(window.before(event.peak))
         if previous is None:
             raise R2Error(f"{event.asset} 高点 {event.peak} 的前一日不在已给出提示状态的范围内")
         if previous is Prompt.NO:
             restarts = [event.peak, *restarts]
-        elif previous is Prompt.UNKNOWN and not restarts:
-            raise R2Error(f"{event.asset} 高点 {event.peak} 的前一日状态无法确定，影响“新提示达标”与“提示中断”的区分")
+        elif previous is Prompt.UNKNOWN:
+            if not restarts:
+                raise R2Error(f"{event.asset} 高点 {event.peak} 的前一日状态无法确定，"
+                              "影响“新提示达标”与“提示中断”的区分")
+            # 第 20 条：另有确定的转换，归“新提示达标”；但 P 当日是否为真实的新提示无法确定。
+            uncertain = True
     if restarts:
         first = restarts[0]
         position = window.index(first) + 1
         executable = window.days[position] if position < len(window.days) else None
         offset = None if executable is None else position - window.index(event.t3)
-        return EventJudgement(event, EventClass.NEW, first, executable, offset)
+        return EventJudgement(event, EventClass.NEW, first, executable, offset, uncertain)
     if states[0] is Prompt.YES:
-        return EventJudgement(event, EventClass.INTERRUPTED, None, None, None)
+        return EventJudgement(event, EventClass.INTERRUPTED, None, None, None, False)
     late = [window.status[day] for day in window.span(event.t3, event.trough, inclusive=True)]   # [T3, Tr]
     if Prompt.YES in late:
-        return EventJudgement(event, EventClass.LATE, None, None, None)
+        return EventJudgement(event, EventClass.LATE, None, None, None, False)
     if Prompt.UNKNOWN in late:
         raise R2Error(f"{event.asset} 高点 {event.peak} 的事件：[T3, Tr] 内有无法确定的状态，影响“迟到”与“漏报”的区分")
-    return EventJudgement(event, EventClass.MISSED, None, None, None)
+    return EventJudgement(event, EventClass.MISSED, None, None, None, False)
 
 
 def r2_result(events: Sequence[R2Event], window: Window, rule: R2Rule) -> R2Result:

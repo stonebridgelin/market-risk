@@ -64,6 +64,8 @@ def registered_candidates(ks: Sequence[int], thetas: Sequence[Decimal], hs: Sequ
 
 def select(records: Sequence[CandidateRecord], reference_failed: bool, tolerance: float) -> SelectionResult:
     """按登记的顺序判断出口并选定。records 须按登记序号排列且不重复。"""
+    if not isinstance(tolerance, int | float) or isinstance(tolerance, bool) or not math.isfinite(tolerance):
+        raise SelectionError(f"并列容差必须是有限数：{tolerance!r}")
     ordered = tuple(records)
     if [item.order for item in ordered] != list(range(len(ordered))) or len(
             {item.candidate for item in ordered}) != len(ordered) or not ordered:

@@ -43,6 +43,8 @@ def max_drawdown(wealth: Sequence[float]) -> float:
 
 def r1_result(signal: Sequence[float] | None, hold: Sequence[float] | None, ratio: float) -> R1Result:
     """signal、hold 为信号模拟与一直持有的净值序列；任一为 None 表示净值无法计算。"""
+    if not isinstance(ratio, int | float) or isinstance(ratio, bool) or not math.isfinite(ratio):
+        raise R1Error(f"R1 的比例必须是有限数：{ratio!r}")
     if signal is None or hold is None:
         return R1Result(False, None, None, None)
     for wealth in (signal, hold):

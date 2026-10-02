@@ -157,3 +157,25 @@ def test_records_must_follow_the_registered_order() -> None:
         select(shuffled, False, TOLERANCE)
     with pytest.raises(SelectionError):
         select([], False, TOLERANCE)
+
+
+# ---------------------------------------------------------------------------
+# 补修：非有限数的输入有效性保护
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_parameters_and_values_are_rejected(value: float) -> None:
+    """参数类输入非有限即抛异常；数据类的非有限值本来就不会被放行，这里一并固定下来。"""
+    # R1 的比例：NaN 时“回撤 ≤ 比例 × 回撤”恒为假，会被悄悄判成不满足。
+    with pytest.raises(R1Error, match="有限数"):
+        r1_result([1.0, 0.9], [1.0, 0.8], value)
+    # 并列容差：NaN 时“ln W_末 ≥ M − 容差”恒为假，并列组会变成空的。
+    with pytest.raises(SelectionError, match="有限数"):
+        select(records(), False, value)
+    # 净值序列里的非有限值（原有保护）：抛异常。
+    with pytest.raises(R1Error):
+        r1_result([1.0, value], [1.0, 0.8], HALF)
+    # ln W_末 为非有限值而没有标为计算失败（原有保护）：抛异常，不参与排序。
+    with pytest.raises(SelectionError, match="有限"):
+        select(records(n3={"log_wealth": value}), False, TOLERANCE)

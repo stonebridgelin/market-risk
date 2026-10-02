@@ -124,3 +124,14 @@ def test_cutoff_invariance_on_random_paths() -> None:
             assert event.peak < event.t3 <= event.t5 <= event.trough        # 每个事件都有 T3，且不晚于 T5
             assert event.end is None or event.trough < event.end
     assert checked >= 10
+
+
+def test_thresholds_must_be_positive_finite_decimals() -> None:
+    """补修：事件门槛是参数类输入，非有限、非正或不是 Decimal 时抛异常。"""
+    R2Thresholds(Decimal("0.95"), Decimal("1.05"), Decimal("0.97"))
+    for bad in (Decimal("NaN"), Decimal("Infinity"), Decimal("-Infinity"), Decimal("0"), Decimal("-0.95"), 0.95):
+        for position in range(3):
+            values = [Decimal("0.95"), Decimal("1.05"), Decimal("0.97")]
+            values[position] = bad
+            with pytest.raises(LabelError, match="门槛"):
+                R2Thresholds(*values)

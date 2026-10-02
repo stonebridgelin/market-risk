@@ -474,3 +474,95 @@ def test_inputs_are_validated() -> None:
         confirmatory_test(data([0.001] * 3, end_days=(numbered(2), numbered(1), numbered(3))), parameters())
     with pytest.raises(ConfirmatoryError, match="等长"):
         confirmatory_test(data([0.001] * 3, end_days=end_days(4)), parameters())
+
+
+# ---------------------------------------------------------------------------
+# 补修：非有限数的输入有效性保护（NaN 参与的比较一律为假，不先检查就会被悄悄放行）
+# ---------------------------------------------------------------------------
+
+NON_FINITE = (math.nan, math.inf, -math.inf)
+
+
+def assert_invalid(result, reason: str) -> None:
+    """“计算无效”出口：没有类别、没有两个独立判断、没有任何收益结论文字。"""
+    assert (result.valid, result.category, result.conclusion, result.own_result) == (False, None, INVALID, None)
+    assert (result.improvement_passed, result.magnitude_reached) == (None, None)
+    assert (result.delta, result.delta_min, result.annual_growth, result.main) == (None, None, None, None)
+    assert reason in result.reason and "nan%" not in result.reason and "inf%" not in result.reason
+
+
+@pytest.mark.parametrize("field", ["candidate_log_wealth", "reference_log_wealth"])
+@pytest.mark.parametrize("value", NON_FINITE)
+def test_non_finite_log_wealth_is_invalid_computation(field: str, value: float) -> None:
+    """候选或参照的累计对数净值为 NaN、+∞、−∞（共 6 例）：一律“计算无效”。
+
+    理由：对账写的是 abs(x − y) > 容差，NaN 参与时为假，若不先检查，非有限值会通过对账并得到有效类别与含 nan% 的文字。
+    正常的收益序列本身是有限的（每日 +0.001），只有累计对数净值这一项不是有限数。
+    """
+    result = confirmatory_test(data([0.001] * N, **{field: value}), parameters())
+    name = "候选" if field == "candidate_log_wealth" else "参照"
+    assert_invalid(result, f"{name}的累计对数净值不是有限数")
+    assert str(value) in result.reason                         # 原因写明是哪一项、什么值
+
+
+@pytest.mark.parametrize("value", NON_FINITE)
+def test_non_finite_hold_log_wealth_is_invalid_when_candidate_loses(value: float) -> None:
+    """候选自身亏损时结论文字要列出一直持有的自身收益：它为 NaN、+∞、−∞（共 3 例）时“计算无效”。"""
+    losing = data([-0.001] * N, [-0.002] * N, hold_log_wealth=value)
+    assert_invalid(confirmatory_test(losing, parameters()), "一直持有的累计对数净值不是有限数")
+    # 对照：同样的输入，一直持有为有限值时是有效结论。
+    assert confirmatory_test(data([-0.001] * N, [-0.002] * N, hold_log_wealth=-0.3), parameters()).valid
+
+
+def test_non_finite_hold_log_wealth_does_not_matter_when_candidate_does_not_lose() -> None:
+    """候选不亏损时，一直持有的累计对数净值为 NaN 不影响结果：结论文字不使用它，统计量与类别也不依赖它。"""
+    finite = confirmatory_test(data([0.001] * N, hold_log_wealth=0.1), parameters())
+    with_nan = confirmatory_test(data([0.001] * N, hold_log_wealth=math.nan), parameters())
+    assert with_nan == finite and with_nan.valid and with_nan.category == "A" and with_nan.own_result is None
+
+
+def test_finite_values_still_give_valid_results_and_finite_mismatch_is_still_invalid() -> None:
+    """保留的两种情形：正常有限值得出有效结论；有限值但对账不一致时为“计算无效”。"""
+    assert confirmatory_test(data([0.001] * N), parameters()).valid
+    mismatch = confirmatory_test(data([0.001] * N, candidate_log_wealth=0.5), parameters())
+    assert_invalid(mismatch, "对账不符")
+
+
+@pytest.mark.parametrize("name", ["alpha", "warning_p", "minimum_growth", "tolerance"])
+@pytest.mark.parametrize("value", NON_FINITE)
+def test_non_finite_parameters_are_rejected(name: str, value: float) -> None:
+    """参数类输入非有限即抛异常。例如容差为 NaN 时，“差值 > 容差”恒为假，任何对账都会通过。"""
+    fields = dict(main=BlockSetting(20, 20261020), sensitivities=(), resamples=RESAMPLES, alpha=0.05, warning_p=0.10,
+                  annual_days=252, minimum_growth=0.01, tolerance=1e-10, padding=20, split=numbered(61))
+    ConfirmatoryParameters(**fields)                           # 有限值可以构造
+    fields[name] = value
+    with pytest.raises(ConfirmatoryError, match="有限数"):
+        ConfirmatoryParameters(**fields)
+
+
+def test_helper_functions_reject_non_finite_values() -> None:
+    """类别判定等函数直接收到非有限值时抛异常，不把它当作某个有效类别放行。"""
+    for value in NON_FINITE:
+        for arguments in ((True, value, 0.01, 0.004, 0.05), (True, 0.01, value, 0.004, 0.05),
+                          (True, 0.01, 0.01, value, 0.05), (True, 0.01, 0.01, 0.004, value),
+                          (False, value, 0.01, 0.004, 0.05)):
+            with pytest.raises(ConfirmatoryError, match="有限数"):
+                category_of(*arguments)
+        with pytest.raises(ConfirmatoryError):
+            improvement_passed(value, 0.01, 0.05)
+        with pytest.raises(ConfirmatoryError):
+            halves_consistent(value, 0.1)
+        with pytest.raises(ConfirmatoryError):
+            halves_consistent(0.1, value)
+        with pytest.raises(ConfirmatoryError):
+            right_tail_p(value, [0.1, 0.2])
+        with pytest.raises(ConfirmatoryError):
+            right_tail_p(0.1, [0.1, value])
+        with pytest.raises(ConfirmatoryError):
+            stability_warnings([row(value)], (0.1, 0.2), [], 0.10)
+        with pytest.raises(ConfirmatoryError):
+            stability_warnings([row(0.01)], (0.1, 0.2), [ZeroedEvent("SPX", numbered(5), value)], 0.10)
+        with pytest.raises(ConfirmatoryError):
+            stability_warnings([row(0.01)], (0.1, 0.2), [], value)
+    # 无效的敏感性行没有 p（None），不受此限。
+    assert stability_warnings([row(None, valid=False)], (0.1, 0.2), [], 0.10) == ()

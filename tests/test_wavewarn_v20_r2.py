@@ -103,6 +103,7 @@ def test_prompt_newly_started_on_the_peak_day_then_released_is_a_timely_new_prom
     """
     judged = judge_event(EXAMPLE, marked(131, {100: "Y"}))
     assert judged.category is EventClass.NEW and judged.category is not EventClass.COVERED
+    assert judged.peak_new_uncertain is False              # S_{P−1} 为非提示：P 当日确实是新提示
     assert (judged.first_new_day, judged.executable_day, judged.executable_offset) == (numbered(100), numbered(101), -2)
 
 
@@ -339,3 +340,42 @@ def test_window_requires_states_from_the_day_before_the_first_signal_day() -> No
         Window(days, numbered(0), numbered(4), {day: Prompt.NO for day in days})        # f 之前没有交易日
     with pytest.raises(R2Error, match="恰好覆盖"):
         Window(days, numbered(2), numbered(4), {day: Prompt.NO for day in days[2:]})    # 缺 f − 1 的状态
+
+
+# ---------------------------------------------------------------------------
+# 实施口径补充第 20 条：P 前一日状态无法确定时的新提示
+# ---------------------------------------------------------------------------
+
+
+def test_rule_20_first_confirmable_new_prompt_day_when_the_day_before_peak_is_unknown() -> None:
+    """S_P 为提示、S_{P−1} 无法确定，[P, T3) 内在第 P+2 日有一次确定的“非提示 → 提示”转换。
+
+    P = 100，T3 = 103。第 99 日无法确定，第 100 日提示，第 101 日非提示，第 102 日提示。
+    期望：新提示达标；日期记录为第 102 日（首次可确认的新提示日，不是真实的首次新提示日）；新字段为真；
+    可执行日为第 103 日，相对 T3 的偏移为 0，都按第 102 日计算。
+    """
+    judged = judge_event(EXAMPLE, marked(131, {99: "?", 100: "Y", 102: "Y"}))
+    assert judged.category is EventClass.NEW
+    assert judged.first_new_day == numbered(102) and judged.peak_new_uncertain is True
+    assert (judged.executable_day, judged.executable_offset) == (numbered(103), 0)
+
+
+def test_rule_20_control_day_before_peak_is_not_prompting() -> None:
+    """对照：同样的状态，只把第 99 日改为非提示。P 当日就是新提示：日期为 P，新字段为假。"""
+    judged = judge_event(EXAMPLE, marked(131, {99: "N", 100: "Y", 102: "Y"}))
+    assert judged.category is EventClass.NEW
+    assert judged.first_new_day == numbered(100) and judged.peak_new_uncertain is False
+    assert (judged.executable_day, judged.executable_offset) == (numbered(101), -2)
+
+
+def test_new_field_is_false_in_every_other_case() -> None:
+    cases = [marked(131, span(99, 102)),                       # 持续覆盖
+             marked(131, {101: "Y"}),                           # 新提示（S_P 为非提示）
+             marked(131, {99: "Y", 100: "Y"}),                  # 提示中断
+             marked(131, {99: "Y", 100: "Y", 102: "Y"}),        # 中断后重新开始，S_{P−1} 为提示
+             marked(131, {104: "Y"}),                           # 迟到
+             marked(131, {}),                                   # 漏报
+             marked(131, {101: "?"})]                           # 输入不足
+    assert [judge_event(EXAMPLE, states).peak_new_uncertain for states in cases] == [False] * 7
+    left = marked(60, span(0, 59))
+    assert judge_event(event(1, 3, 5, 6, 9), left).peak_new_uncertain is False      # 左截断

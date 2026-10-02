@@ -26,6 +26,12 @@ class R2Thresholds:
     finish: Decimal      # 结束：C ≥ finish × L
     early: Decimal       # T3：C ≤ early × C_P
 
+    def __post_init__(self) -> None:
+        for name in ("confirm", "finish", "early"):
+            value = getattr(self, name)
+            if not isinstance(value, Decimal) or not value.is_finite() or value <= 0:
+                raise LabelError(f"事件门槛 {name} 必须是正的有限 Decimal：{value!r}")
+
 
 @dataclass(frozen=True)
 class R2Event:

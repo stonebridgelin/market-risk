@@ -36,6 +36,12 @@ class ConfirmatoryError(ValueError):
     """输入不合法。"""
 
 
+def _finite_parameter(name: str, value: float) -> None:
+    """参数类输入必须是有限数：NaN 参与的比较一律为假，会让检查被悄悄放行，所以直接报错。"""
+    if not isinstance(value, int | float) or isinstance(value, bool) or not math.isfinite(value):
+        raise ConfirmatoryError(f"{name} 必须是有限数：{value!r}")
+
+
 @dataclass(frozen=True)
 class BlockSetting:
     block: int          # 平均区块长度 b
@@ -59,6 +65,10 @@ class ConfirmatoryParameters:
     tolerance: float
     padding: int
     split: dt.date                 # 区间末日早于它的属于前一半
+
+    def __post_init__(self) -> None:
+        for name in ("alpha", "warning_p", "minimum_growth", "tolerance"):
+            _finite_parameter(name, getattr(self, name))
 
 
 @dataclass(frozen=True)
@@ -139,6 +149,9 @@ def stationary_bootstrap_indices(length: int, block_length: int, resamples: int,
 
 def right_tail_p(delta: float, resampled: Sequence[float]) -> float:
     """中心化右尾 p = (1 + #{k : Δ*_k − Δ ≥ Δ}) ÷ (B + 1)，按此式原样计算。"""
+    _finite_parameter("Δ", delta)
+    if any(not math.isfinite(value) for value in resampled):
+        raise ConfirmatoryError("重抽样的 Δ* 出现非有限值")
     return (1 + sum(1 for value in resampled if value - delta >= delta)) / (len(resampled) + 1)
 
 
@@ -180,11 +193,15 @@ def zeroed_events(data: ConfirmatoryInput, differences: Sequence[float], padding
 
 def halves_consistent(first: float, second: float) -> bool:
     """只有同为正或同为负才算方向一致；任一半等于 0 都算不一致。"""
+    _finite_parameter("前一半的 Δ", first)
+    _finite_parameter("后一半的 Δ", second)
     return (first > 0 and second > 0) or (first < 0 and second < 0)
 
 
 def improvement_passed(delta: float, p_value: float, alpha: float) -> bool:
     """“收益改善检验通过”：Δ > 0 且 p < α。Δ ≤ 0 时不论 p 多小都不通过。"""
+    for name, value in (("Δ", delta), ("p", p_value), ("α", alpha)):
+        _finite_parameter(name, value)
     return delta > 0 and p_value < alpha
 
 
@@ -193,6 +210,8 @@ def category_of(qualified: bool, delta: float, p_value: float, delta_min: float,
 
     D：R1 或 R2 不通过。C：资格通过，且 Δ ≤ 0 或 p ≥ α。B：Δ > 0、p < α、Δ < Δ_min。A：Δ > 0、p < α、Δ ≥ Δ_min。
     """
+    for name, value in (("Δ", delta), ("p", p_value), ("Δ_min", delta_min), ("α", alpha)):
+        _finite_parameter(name, value)
     if not qualified:
         return "D"
     if delta <= 0 or not improvement_passed(delta, p_value, alpha):
@@ -206,6 +225,12 @@ def stability_warnings(sensitivities: Sequence[BootstrapRow], halves: tuple[floa
 
     有效的敏感性行中任一 p ≥ 警示线；前后两半的 Δ 方向不一致；任一事件窗口置零后重算的 Δ ≤ 0（不再为正）。
     """
+    _finite_parameter("警示线", warning_p)
+    for row in sensitivities:
+        if row.valid and row.p_value is not None:
+            _finite_parameter(f"敏感性行（b = {row.block}）的 p", row.p_value)
+    for item in zeroed:
+        _finite_parameter(f"{item.asset} 高点 {item.peak} 的事件置零后的 Δ", item.delta)
     warnings: list[str] = []
     if any(row.valid and row.p_value is not None and row.p_value >= warning_p for row in sensitivities):
         warnings.append(WARNING_SENSITIVITY)
@@ -255,6 +280,15 @@ def confirmatory_test(data: ConfirmatoryInput, parameters: ConfirmatoryParameter
     if data.candidate_returns is None or data.reference_returns is None or (
             data.candidate_log_wealth is None or data.reference_log_wealth is None):
         return _invalid("净值所需价格缺失，收益无法计算", n)
+    # 输入有效性保护：NaN 参与的比较一律为假，若不先检查，非有限的累计对数净值会通过下面的对账。
+    for name, value in (("候选", data.candidate_log_wealth), ("参照", data.reference_log_wealth)):
+        if not math.isfinite(value):
+            return _invalid(f"{name}的累计对数净值不是有限数：{value}", n)
+    if data.candidate_log_wealth < 0 and data.hold_log_wealth is not None and not math.isfinite(
+            data.hold_log_wealth):
+        # 只在结论文字实际使用它时检查：候选自身亏损时须同时列出一直持有的自身收益。
+        reason = f"一直持有的累计对数净值不是有限数：{data.hold_log_wealth}（候选自身亏损，结论文字要用到它）"
+        return _invalid(reason, n)
     if len(data.candidate_returns) != n or len(data.reference_returns) != n:
         raise ConfirmatoryError("收益序列须与区间末日等长")
     if n == 0:
