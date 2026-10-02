@@ -18,7 +18,7 @@ PACKAGE = Path(__file__).resolve().parents[1] / "src" / "market_risk" / "wavewar
 FORBIDDEN = ("market_risk.wavewarn", "market_risk.scoring", "market_risk.outcomes", "market_risk.data.market",
              "market_risk.data.snapshot", "market_risk.research")
 # 本批的模块都是纯计算：除本包与标准库外不导入任何东西。
-PURE = ("snapshot", "inputs", "channels", "state_machine", "convergence")
+PURE = ("snapshot", "inputs", "channels", "state_machine", "convergence", "reference", "execution", "nav")
 
 
 def forbidden(name: str) -> bool:

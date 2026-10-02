@@ -5,7 +5,7 @@
 - 系统收敛：在 κ_通道 当日放入 (S, c₁, c₂) 的全部 3 × (h+1)² 种初始值，自下一日起更新，
   全部运行的完整状态首次逐项相同之日。判断用完整状态逐项相同，不用某一天风险状态相同。
 - j₀ = max(t0 + 63, κ_全 + 1)。任一对象始终不收敛即报错。
-主参照的收敛在后续批次加入。
+主参照：S_参照 以三种初始值各运行一次，取首次相同之日；它参与 κ_全 的取最大值。
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from market_risk.wavewarn_v20.channels import (
     trend_valid,
 )
 from market_risk.wavewarn_v20.inputs import AssetDay, TrendDay
+from market_risk.wavewarn_v20.reference import run_reference
 from market_risk.wavewarn_v20.state_machine import (
     ChannelInitial,
     Evidence,
@@ -40,6 +41,7 @@ CHANNEL_NAMES = ("P_SPX", "P_QQQ", "PR_SPX", "PR_QQQ", "MR")
 # 登记第四节第 1 小节：t0 是初始快照，所有通道“已武装、未激活”，S = 正常，c₁ = c₂ = 0。
 REGISTERED_CHANNELS = ChannelInitial(*(ChannelState.ARMED,) * 5)
 REGISTERED_SYSTEM = SystemState(Risk.NORMAL, 0, 0)
+REGISTERED_REFERENCE = Risk.NORMAL        # 主参照在 t0 的初始值；收敛之后的路径与它无关
 
 
 class ConvergenceError(ValueError):
@@ -115,6 +117,17 @@ def system_convergence(evidence: Sequence[Evidence], k: int, h: int) -> int:
     return _required(first_common_index(runs), f"系统（K = {k}，h = {h}）")
 
 
+def reference_initial_states() -> tuple[Risk, ...]:
+    """主参照的完整状态只有 S_参照，共三种初始值。"""
+    return tuple(Risk)
+
+
+def reference_convergence(inputs: Sequence[TrendDay], average: int) -> int:
+    """主参照的收敛位置（相对于 inputs，即 t0 之后的各日）。"""
+    runs = [[item.risk for item in run_reference(initial, inputs, average)] for initial in reference_initial_states()]
+    return _required(first_common_index(runs), "主参照")
+
+
 def candidate_convergence(spx: Sequence[AssetDay], qqq: Sequence[AssetDay], trend: Sequence[TrendDay],
                           t0_index: int, candidate: Candidate, average: int) -> CandidateConvergence:
     """一组候选的通道收敛日、κ_通道 与系统收敛日。三个输入序列覆盖整条日期轴。"""
@@ -137,7 +150,10 @@ def candidate_convergence(spx: Sequence[AssetDay], qqq: Sequence[AssetDay], tren
 
 
 def common_start_index(t0_index: int, system_indices: Sequence[int], offset: int, length: int) -> int:
-    """j₀ = max(t0 + offset, κ_全 + 1)，κ_全 为全部对象系统收敛日的最大值；offset 登记为 63。"""
+    """j₀ = max(t0 + offset, κ_全 + 1)；offset 登记为 63。
+
+    κ_全 为全部候选与主参照的系统收敛日的最大值：system_indices 须同时包含各候选与主参照的收敛日。
+    """
     if not system_indices:
         raise ConvergenceError("没有任何对象的系统收敛日")
     start = max(t0_index + offset, max(system_indices) + 1)

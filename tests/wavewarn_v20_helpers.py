@@ -17,10 +17,12 @@ from market_risk.wavewarn_v20.convergence import (
     Candidate,
     first_valid_index,
 )
+from market_risk.wavewarn_v20.execution import PolicyParameters, PositionMap, SignalRecord, Weights
 from market_risk.wavewarn_v20.inputs import AssetDay, InputWindows, NewLow, TrendDay, asset_days, trend_days
 from market_risk.wavewarn_v20.state_machine import (
     ChannelPaths,
     Evidence,
+    Risk,
     SystemDay,
     evidence_series,
     run_channels,
@@ -32,6 +34,20 @@ WINDOWS = InputWindows(high=63, low_prior=19, low_minimum=15, average=200)
 START = dt.date(2001, 1, 1)
 DAY = dt.date(2001, 6, 1)
 CENT = Decimal("0.01")
+# 登记的仓位映射：正常 0.6/0.4，一级 0.6/0，二级 0.3/0，λ = 2；止损线 96%，冷却 10 个交易日；对账容差 1e-10。
+POSITIONS = PositionMap(Weights(0.6, 0.4), Weights(0.6, 0.0), Weights(0.3, 0.0), 2.0)
+POLICY = PolicyParameters(stop_ratio=0.96, cooldown=10)
+TOLERANCE = 1e-10
+
+
+def numbered(number: int) -> dt.date:
+    """“第 n 日”对应的构造日期。"""
+    return START + dt.timedelta(days=number)
+
+
+def signal(number: int, risk: Risk, valid: bool = True) -> SignalRecord:
+    """第 n 日的信号记录；L 与计数在执行层不参与判断，置为 None。"""
+    return SignalRecord(numbered(number), risk, None, None, None, valid)
 
 
 def dec(value: str | int) -> Decimal:
@@ -61,19 +77,19 @@ def channel(state: ChannelState, valid: bool = True, day: dt.date = DAY) -> Chan
 def evidence(spx: AssetDay | None = None, qqq: AssetDay | None = None, ma: TrendDay | None = None,
              p_spx: ChannelState = ChannelState.ARMED, p_qqq: ChannelState = ChannelState.ARMED,
              pr_spx: ChannelState = ChannelState.ARMED, pr_qqq: ChannelState = ChannelState.ARMED,
-             mr: ChannelState = ChannelState.ARMED) -> Evidence:
+             mr: ChannelState = ChannelState.ARMED, day: dt.date = DAY) -> Evidence:
     """手工搭一份证据。通道有效性按登记的定义由输入完整性给出：
 
     P、PR 有效 ⇔ C 存在且 H 完整；MR 有效 ⇔ C 存在且均线完整。
     """
-    spx = spx or asset()
-    qqq = qqq or asset()
-    ma = ma or trend(close=None if spx.close is None else str(spx.close))
+    spx = spx or asset(day=day)
+    qqq = qqq or asset(day=day)
+    ma = ma or trend(close=None if spx.close is None else str(spx.close), day=day)
     spx_valid = spx.close is not None and spx.high_complete
     qqq_valid = qqq.close is not None and qqq.high_complete
     mr_valid = ma.close is not None and ma.complete
-    return Evidence(spx, qqq, ma, channel(p_spx, spx_valid), channel(p_qqq, qqq_valid),
-                    channel(pr_spx, spx_valid), channel(pr_qqq, qqq_valid), channel(mr, mr_valid))
+    return Evidence(spx, qqq, ma, channel(p_spx, spx_valid, day), channel(p_qqq, qqq_valid, day),
+                    channel(pr_spx, spx_valid, day), channel(pr_qqq, qqq_valid, day), channel(mr, mr_valid, day))
 
 
 def random_closes(seed: int, length: int, missing: float = 0.0, warmup: int = 0) -> list[Decimal | None]:
