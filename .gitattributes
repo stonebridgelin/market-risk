@@ -11,3 +11,4 @@ reports/research/wavewarn_v14/disclosure/** -text
 patches/** -text
 # 归因版本的恢复材料（补丁、配置、清单与重建脚本）同样逐字节保持不变
 reports/research/wavewarn_v14/correction_rerun/recovery/** -text
+docs/product/** -text
