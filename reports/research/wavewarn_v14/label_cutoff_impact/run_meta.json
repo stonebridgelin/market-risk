@@ -1,0 +1,10 @@
+{
+  "code_commit": "e505ceb01f10b4813d00aafc0e262fe06cb191b8",
+  "worktree_dirty": false,
+  "inputs": {
+    "data/market/daily/SPX.csv": "6941AB293EDDB8201E851D873476D64C6CBD584EC9573F5FF757447173BF0B00",
+    "data/market/daily/QQQ.csv": "D14E58EDCAB7EC94B4E6728CE65BBBF8A0A84565D53CE951A37A4E6143A56880",
+    "reports/research/wavewarn_v121/zz_events_development.csv": "F8E880A288152C173FD043374D3F84CEFAA730F21226A70C89418405694AA242",
+    "reports/research/wavewarn_v121/zz_unknown_development.csv": "0167C01E9A3DB21F0DD9152D5E0633598742E31D848F42D258A067E3EC420B71"
+  }
+}
