@@ -228,6 +228,16 @@ def wavewarn_v14_extended_nav(ctx: Context) -> Any:
         raise ServiceError(str(exc)) from exc
 
 
+def wavewarn_v14_failure_path(ctx: Context) -> Any:
+    """v1.4 失败路径分析（开发期与纯价格版本迁移评估）：只作描述，不改变任何规则，不重跑已入库的评价输出。"""
+    from market_risk.wavewarn.failure_path_run import run_v14_failure_path
+
+    try:
+        return run_v14_failure_path(ctx.paths.root)
+    except (ValueError, OSError) as exc:
+        raise ServiceError(str(exc)) from exc
+
+
 # ---------------------------------------------------------------------------
 # 日期与样本
 # ---------------------------------------------------------------------------

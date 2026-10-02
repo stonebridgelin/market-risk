@@ -722,6 +722,16 @@ def wavewarn_v14_extended_nav() -> None:
     typer.echo(f"报告 SHA-256 {run.report_sha256}。输出目录：{run.output}")
 
 
+@wavewarn_app.command("v14-failure-path")
+def wavewarn_v14_failure_path() -> None:
+    """v1.4 失败路径分析（开发期与纯价格版本迁移评估）；只作描述，不构成任何机制的选择依据。"""
+    run = _call(services.wavewarn_v14_failure_path, _ctx())
+    for (label, intervals, segments), digest in zip(run.windows, run.report_sha256, strict=True):
+        typer.echo(f"{label}：{intervals} 个区间，选定设定 {segments} 个非绿执行段；三项对账通过。"
+                   f"报告 SHA-256 {digest}。")
+    typer.echo(f"输出目录：{run.output}")
+
+
 @backtest_app.command("zigzag-check")
 def backtest_zigzag_check(
     symbol: Annotated[str, typer.Option("--symbol", help="SPX 或 QQQ")],

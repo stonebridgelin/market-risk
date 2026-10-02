@@ -1,0 +1,41 @@
+# 波段预警 v1.4 失败路径分析（T2，描述性）的参数。只作描述，不改变模型规则、参数、选定设定与 γ；
+# 不含任何 v1.4 规则。分析对象的 K、θ_P 取 wavewarn_v14_validation.yaml 的锁定设定，
+# 带缓冲带均线的带宽取 wavewarn_v14_diagnostics.yaml。
+version: v1.4-failure-path
+
+# 按结果分类的报告中性带：|D| ≤ 0.0001 为“接近零”；只影响类别，不改原始的 D
+neutral_band: "0.0001"
+
+# 段长不超过 5 个收益区间标“短段”
+short_segment: 5
+
+# 三项对账的绝对误差上限（float64）
+reconcile_tolerance: "1e-10"
+
+# 段相对事件的位置：高点前 20 个交易日
+pre_peak_days: 20
+
+# 市场环境标签（只作描述）：熊市为 SPX 收盘价的高点 P 至低点 Tr，区间起点日 d 满足 P ≤ d < Tr；
+# 其余按完整日历年的 SPX 价格指数年度收益：≥ +10% 上涨年，≤ −10% 下跌年，其余平淡年
+environment:
+  bear_markets:
+    - [2000-03-24, 2002-10-09]
+    - [2007-10-09, 2009-03-09]
+  up_year: "0.10"
+  down_year: "-0.10"
+
+# 案例段（只作个案描述，开发期）：看过结果之后选出，不代表典型行情
+development_case_periods:
+  - [2011-04-29, 2011-12-28]
+  - [2014-11-28, 2016-06-27]
+
+output: reports/research/wavewarn_v14/failure_path
+
+# 一致性检查所对照的已入库输出，以及事件标签文件
+stored:
+  development_daily: reports/research/wavewarn_v14/evaluation_development/daily_selected.csv.gz
+  buffered_reference: reports/research/wavewarn_v14/correction_rerun/buffered_reference_corrected.json
+  migration_nav: reports/research/wavewarn_v14/extended_nav/nav_daily.csv.gz
+  events: reports/research/wavewarn_v121/zz_events_development.csv
+  merged: reports/research/wavewarn_v121/zz_merged_development.csv
+  unknown: reports/research/wavewarn_v121/zz_unknown_development.csv
