@@ -1,5 +1,5 @@
 -- 由 `market-risk db export-sql` 自动生成，不得手工修改。
--- 表结构：Alembic 版本 0007（migrations/versions/），数据库：mysql。
+-- 表结构：Alembic 版本 0008（migrations/versions/），数据库：mysql。
 -- 具体数据不在此导出，见 db/sql/README.md。
 -- 建库时使用 utf8mb4 字符集（CREATE DATABASE ... CHARACTER SET utf8mb4）。
 
@@ -67,6 +67,37 @@ CREATE TABLE outcomes (
 	qqq_peak_to_trough_drawdown NUMERIC(20, 8),
 	near_event BOOL,
 	PRIMARY KEY (subject, base_date, source)
+);
+
+CREATE TABLE provenance_records (
+	record_id VARCHAR(16) NOT NULL,
+	indicator VARCHAR(40) NOT NULL,
+	trade_date DATE NOT NULL,
+	raw_value VARCHAR(40) NOT NULL,
+	raw_unit VARCHAR(16) NOT NULL,
+	raw_basis TEXT NOT NULL,
+	raw_precision INTEGER NOT NULL,
+	normalized_value NUMERIC(20, 8) NOT NULL,
+	source TEXT NOT NULL,
+	acquisition_method VARCHAR(16) NOT NULL,
+	first_obtained_at_et VARCHAR(40),
+	entered_at_utc VARCHAR(40) NOT NULL,
+	entered_by VARCHAR(64) NOT NULL,
+	is_late BOOL,
+	source_published_at VARCHAR(40),
+	snapshot_path VARCHAR(300),
+	snapshot_sha256 VARCHAR(64),
+	data_version VARCHAR(64),
+	code_version VARCHAR(40) NOT NULL,
+	code_dirty BOOL,
+	revises_record_id VARCHAR(16),
+	revision_kind VARCHAR(16),
+	correction_original_value VARCHAR(40),
+	correction_corrected_value VARCHAR(40),
+	correction_evidence TEXT,
+	historical_backfill BOOL NOT NULL,
+	PRIMARY KEY (record_id),
+	FOREIGN KEY(revises_record_id) REFERENCES provenance_records (record_id)
 );
 
 CREATE TABLE reviews (
@@ -215,6 +246,15 @@ CREATE TABLE officials (
 	FOREIGN KEY(run_key) REFERENCES runs (run_key)
 );
 
+CREATE TABLE provenance_confirmations (
+	record_id VARCHAR(16) NOT NULL,
+	confirmed_by VARCHAR(64) NOT NULL,
+	confirmed_at_utc VARCHAR(40) NOT NULL,
+	self_confirmed BOOL NOT NULL,
+	PRIMARY KEY (record_id),
+	FOREIGN KEY(record_id) REFERENCES provenance_records (record_id)
+);
+
 CREATE TABLE pullback_episodes (
 	id INTEGER NOT NULL AUTO_INCREMENT,
 	run_id VARCHAR(64) NOT NULL,
@@ -239,6 +279,14 @@ CREATE TABLE pullback_episodes (
 	FOREIGN KEY(run_id) REFERENCES backtest_runs (run_id)
 );
 
+CREATE TABLE signal_input_links (
+	signal_key VARCHAR(200) NOT NULL,
+	record_id VARCHAR(16) NOT NULL,
+	note TEXT,
+	PRIMARY KEY (signal_key, record_id),
+	FOREIGN KEY(record_id) REFERENCES provenance_records (record_id)
+);
+
 CREATE TABLE totals (
 	run_key VARCHAR(200) NOT NULL,
 	version VARCHAR(16) NOT NULL,
@@ -255,4 +303,4 @@ CREATE TABLE totals (
 );
 
 CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL, PRIMARY KEY (version_num));
-INSERT INTO alembic_version (version_num) VALUES ('0007');
+INSERT INTO alembic_version (version_num) VALUES ('0008');

@@ -745,3 +745,113 @@ def backtest_index_impact() -> None:
     report = _call(services.index_dispute_label_impact, _ctx())
     typer.echo(report.text)
     typer.echo(f"已写入 {report.path}")
+
+
+# ---------------------------------------------------------------------------
+# 数据留痕（只建录入留痕，不接入评分、信号与研究计算）
+# ---------------------------------------------------------------------------
+
+provenance_app = typer.Typer(help="数据留痕：录入、确认、修订与查询（docs/research/数据留痕设计说明.md）")
+app.add_typer(provenance_app, name="provenance")
+ObtainedOpt = Annotated[str | None, typer.Option(
+    "--first-obtained", help="首次取得时间（带时区的 ISO 时间）；无法证明时不填，并加 --backfill")]
+BackfillOpt = Annotated[bool, typer.Option("--backfill", help="历史补录")]
+PublishedOpt = Annotated[str | None, typer.Option(
+    "--source-published", help="来源发布时间（带时区的 ISO 时间）；无法核实时不填")]
+SnapshotOpt = Annotated[Path | None, typer.Option("--snapshot", help="原始快照文件（复制入库并记录 SHA-256）")]
+
+
+def _provenance_time(value: str | None) -> dt.datetime | None:
+    return _parse_datetime(value) if value else None
+
+
+def _provenance_line(record: Any) -> str:
+    late = {True: "迟到", False: "未迟到", None: "无法判断"}[record.is_late]
+    marks = "，历史补录" if record.historical_backfill else ""
+    marks += "，未提交改动" if record.code_dirty else ""
+    return (f"{record.record_id}：{record.indicator} {record.trade_date} 原始值 {record.raw_value}{record.raw_unit}，"
+            f"规范化值 {record.normalized_value}；{late}{marks}")
+
+
+@provenance_app.command("add")
+def provenance_add(
+    indicator: Annotated[str, typer.Option("--indicator", help="指标代码：S5FI、S5TW 或 NDTW")],
+    date: Annotated[str, typer.Option("--date", help="指标对应的交易日")],
+    value: Annotated[str, typer.Option("--value", help="原始值（按录入文本原样保存）")],
+    source: Annotated[str, typer.Option("--source", help="来源")],
+    method: Annotated[str, typer.Option("--method", help="取得方式：接口 或 手工录入")],
+    entered_by: Annotated[str, typer.Option("--by", help="录入人")],
+    first_obtained: ObtainedOpt = None,
+    backfill: BackfillOpt = False,
+    source_published: PublishedOpt = None,
+    snapshot: SnapshotOpt = None,
+) -> None:
+    """录入一条留痕记录；只追加，不改动任何既有输入。"""
+    record = _call(services.provenance_add, _ctx(), indicator, _parse_date(date), value, source, method, entered_by,
+                   _provenance_time(first_obtained), backfill, _provenance_time(source_published), snapshot)
+    typer.echo(f"已录入（未确认）{_provenance_line(record)}")
+
+
+@provenance_app.command("revise")
+def provenance_revise(
+    record_id: Annotated[str, typer.Option("--record", help="被修订的记录编号")],
+    kind: Annotated[str, typer.Option("--kind", help="来源修订 或 人工修正")],
+    value: Annotated[str, typer.Option("--value", help="修订后的原始值")],
+    source: Annotated[str, typer.Option("--source", help="来源")],
+    method: Annotated[str, typer.Option("--method", help="取得方式：接口 或 手工录入")],
+    entered_by: Annotated[str, typer.Option("--by", help="录入人")],
+    evidence: Annotated[str, typer.Option("--evidence", help="证据（人工修正必填）")] = "",
+    first_obtained: ObtainedOpt = None,
+    backfill: BackfillOpt = False,
+    source_published: PublishedOpt = None,
+    snapshot: SnapshotOpt = None,
+) -> None:
+    """修订一条记录：追加一条指向原记录的新记录，原记录不覆盖。"""
+    record = _call(services.provenance_revise, _ctx(), record_id, kind, value, source, method, entered_by, evidence,
+                   _provenance_time(first_obtained), backfill, _provenance_time(source_published), snapshot)
+    typer.echo(f"已录入修订（{record.revision_kind}，指向 {record.revises_record_id}，未确认）"
+               f"{_provenance_line(record)}")
+
+
+@provenance_app.command("confirm")
+def provenance_confirm(
+    record_id: Annotated[str, typer.Option("--record", help="记录编号")],
+    confirmed_by: Annotated[str, typer.Option("--by", help="确认人")],
+) -> None:
+    """确认一条记录；确认人与录入人相同时标“自确认”。"""
+    item = _call(services.provenance_confirm, _ctx(), record_id, confirmed_by)
+    status = "自确认" if item.self_confirmed else "已确认"
+    typer.echo(f"{item.record_id} 已确认（{status}，确认人 {item.confirmed_by}）")
+
+
+@provenance_app.command("list")
+def provenance_list(
+    indicator: Annotated[str | None, typer.Option("--indicator")] = None,
+    date_from: Annotated[str | None, typer.Option("--from")] = None,
+    date_to: Annotated[str | None, typer.Option("--to")] = None,
+) -> None:
+    """查询留痕记录：原始值与规范化值并列，标出确认状态、历史补录、迟到与修订关系。"""
+    views = _call(services.provenance_list, _ctx(), indicator, _opt_date(date_from), _opt_date(date_to))
+    if not views:
+        typer.echo("没有留痕记录")
+        return
+    late = {True: "是", False: "否", None: ""}
+    typer.echo(_table(
+        ["编号", "指标", "交易日", "原始值", "规范化值", "取得方式", "首次取得（美东）", "迟到", "历史补录", "确认",
+         "修订了", "被修订"],
+        [[v.record.record_id, v.record.indicator, str(v.record.trade_date), f"{v.record.raw_value}{v.record.raw_unit}",
+          str(v.record.normalized_value), v.record.acquisition_method,
+          v.record.first_obtained_at_et.isoformat(timespec="seconds") if v.record.first_obtained_at_et else "",
+          late[v.record.is_late], "是" if v.record.historical_backfill else "", v.status,
+          v.record.revises_record_id or "", "、".join(v.revised_by)] for v in views]))
+
+
+@provenance_app.command("verify-snapshots")
+def provenance_verify_snapshots() -> None:
+    """原始快照哈希核对：逐条重算快照文件的 SHA-256，与记录比较。"""
+    problems = _call(services.provenance_verify_snapshots, _ctx())
+    for item in problems:
+        typer.echo(item)
+    typer.echo("快照哈希全部一致" if not problems else f"共 {len(problems)} 处问题")
+    if problems:
+        raise typer.Exit(code=2)

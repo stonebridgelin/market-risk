@@ -392,6 +392,16 @@ def _insert_backtests(conn: Connection, paths: StoragePaths) -> None:
             conn.execute(schema.pullback_episodes.insert(), rows)
 
 
+def _insert_provenance(conn: Connection, paths: StoragePaths) -> None:
+    """数据留痕的三张表：由 data/manual/provenance/ 下只追加的文件重建（被修订的记录先于修订记录写入）。"""
+    from market_risk.storage import provenance_store
+
+    rows = provenance_store.database_rows(paths)
+    for table in (schema.provenance_records, schema.provenance_confirmations, schema.signal_input_links):
+        for row in rows[table.name]:
+            conn.execute(table.insert().values(**row))
+
+
 def rebuild(paths: StoragePaths, url: str | None = None) -> str:
     """清空并重建数据库（rebuild-db）：Alembic 迁移到最新结构后，由文件写入全部内容。返回连接地址。"""
     url = url or default_url(paths)
@@ -405,6 +415,7 @@ def rebuild(paths: StoragePaths, url: str | None = None) -> str:
             _insert_files(conn, paths)
             _insert_reference(conn)
             _insert_backtests(conn, paths)
+            _insert_provenance(conn, paths)
     finally:
         engine.dispose()
     return url
