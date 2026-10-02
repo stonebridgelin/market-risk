@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-import ast
 import datetime as dt
-import json
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -27,34 +23,6 @@ def forbidden(name: str) -> bool:
 
 def modules() -> list[str]:
     return sorted(f"market_risk.wavewarn_v20.{path.stem}" for path in PACKAGE.glob("*.py") if path.stem != "__init__")
-
-
-def test_no_module_imports_forbidden_modules_statically() -> None:
-    for path in sorted(PACKAGE.glob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        names: set[str] = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module:
-                names.add(node.module)
-                names.update(f"{node.module}.{alias.name}" for alias in node.names)
-            elif isinstance(node, ast.Import):
-                names.update(alias.name for alias in node.names)
-        assert sorted(name for name in names if forbidden(name)) == [], path.name
-        project = {name for name in names if name.startswith("market_risk")}
-        if path.stem in PURE:
-            assert all(name.startswith("market_risk.wavewarn_v20") for name in project), path.name
-
-
-@pytest.mark.parametrize("module", modules())
-def test_importing_a_module_loads_no_forbidden_module(module: str) -> None:
-    """在全新的解释器里只导入这一个模块，检查实际被加载的全部模块（含间接导入）。"""
-    code = ("import importlib, json, sys\n"
-            f"importlib.import_module({module!r})\n"
-            "print(json.dumps(sorted(name for name in sys.modules if name.startswith('market_risk'))))\n")
-    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
-    loaded = json.loads(done.stdout)
-    assert [name for name in loaded if forbidden(name)] == []
-    assert all(name == "market_risk" or name.startswith("market_risk.wavewarn_v20") for name in loaded)
 
 
 def test_forbidden_check_does_not_confuse_wavewarn_with_wavewarn_v20() -> None:

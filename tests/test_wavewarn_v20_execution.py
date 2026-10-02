@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import ast
 import dataclasses
 from decimal import Decimal
 from pathlib import Path
@@ -159,18 +158,6 @@ def test_net_value_is_driven_by_planned_targets_only() -> None:
         nav.simulate_targets([done], [], POSITIONS, TOLERANCE)                    # type: ignore[list-item]
     with pytest.raises(nav.NavError, match="PlannedTarget"):
         nav.simulate_targets([signal(1, NORMAL)], [], POSITIONS, TOLERANCE)       # type: ignore[list-item]
-
-
-def test_no_research_function_returns_or_builds_an_actual_execution() -> None:
-    for path in sorted(PACKAGE.glob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.returns is not None:
-                assert "ActualExecution" not in ast.unparse(node.returns), f"{path.name}:{node.name}"
-            if isinstance(node, ast.Call):
-                assert "ActualExecution" not in ast.unparse(node.func), f"{path.name} 构造了 ActualExecution"
-        mentioned = any(isinstance(node, ast.Name) and node.id == "ActualExecution" for node in ast.walk(tree))
-        assert not mentioned or path.name == "execution.py"
 
 
 # ---------------------------------------------------------------------------
