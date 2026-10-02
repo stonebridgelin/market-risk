@@ -448,7 +448,7 @@ def migration_output(root: Path, validation: ValidationConfig, round2: Round2Con
                         f"在 {cutoff} 截止的标签中的状态"), crossing_rows),
              "只核查、不重跑的检查：此前 v1.3、v1.4 补充历史的损失计算是否使用了这一跨界事件的危险标记"
              "（当时的实施细则写明“危险标签取自完整标签”，危险区间取区间起点日 d 满足 P ≤ d < Tr）。"
-             f"结果：{usage} 这里只按日期清点，没有重算损失，也没有修改任何已入库的历史输出。", ""]
+             f"结果：{usage}这里只按日期清点，没有重算损失，也没有修改任何已入库的历史输出。", ""]
     return WindowOutput(MIGRATION, "失败路径分析：冻结参数的纯价格版本迁移评估", window, results, checks,
                         tuple(notes), labels)
 
