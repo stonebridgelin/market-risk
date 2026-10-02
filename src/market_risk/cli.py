@@ -759,6 +759,9 @@ BackfillOpt = Annotated[bool, typer.Option("--backfill", help="历史补录")]
 PublishedOpt = Annotated[str | None, typer.Option(
     "--source-published", help="来源发布时间（带时区的 ISO 时间）；无法核实时不填")]
 SnapshotOpt = Annotated[Path | None, typer.Option("--snapshot", help="原始快照文件（复制入库并记录 SHA-256）")]
+NoSnapshotOpt = Annotated[str, typer.Option("--no-snapshot-reason", help="没有原始快照时必须写明原因")]
+SourceFileOpt = Annotated[Path | None, typer.Option(
+    "--source-file", help="已有的来源文件（如已入库的原始导出）：只记录路径与该文件的 SHA-256，不复制")]
 
 
 def _provenance_time(value: str | None) -> dt.datetime | None:
@@ -785,10 +788,13 @@ def provenance_add(
     backfill: BackfillOpt = False,
     source_published: PublishedOpt = None,
     snapshot: SnapshotOpt = None,
+    no_snapshot_reason: NoSnapshotOpt = "",
+    source_file: SourceFileOpt = None,
 ) -> None:
     """录入一条留痕记录；只追加，不改动任何既有输入。"""
     record = _call(services.provenance_add, _ctx(), indicator, _parse_date(date), value, source, method, entered_by,
-                   _provenance_time(first_obtained), backfill, _provenance_time(source_published), snapshot)
+                   _provenance_time(first_obtained), backfill, _provenance_time(source_published), snapshot,
+                   no_snapshot_reason, source_file)
     typer.echo(f"已录入（未确认）{_provenance_line(record)}")
 
 
@@ -805,10 +811,13 @@ def provenance_revise(
     backfill: BackfillOpt = False,
     source_published: PublishedOpt = None,
     snapshot: SnapshotOpt = None,
+    no_snapshot_reason: NoSnapshotOpt = "",
+    source_file: SourceFileOpt = None,
 ) -> None:
-    """修订一条记录：追加一条指向原记录的新记录，原记录不覆盖。"""
+    """修订一条记录：追加一条指向原记录的新记录，原记录不覆盖；指标与交易日沿用原记录。"""
     record = _call(services.provenance_revise, _ctx(), record_id, kind, value, source, method, entered_by, evidence,
-                   _provenance_time(first_obtained), backfill, _provenance_time(source_published), snapshot)
+                   _provenance_time(first_obtained), backfill, _provenance_time(source_published), snapshot,
+                   no_snapshot_reason, source_file)
     typer.echo(f"已录入修订（{record.revision_kind}，指向 {record.revises_record_id}，未确认）"
                f"{_provenance_line(record)}")
 
@@ -838,20 +847,20 @@ def provenance_list(
     late = {True: "是", False: "否", None: ""}
     typer.echo(_table(
         ["编号", "指标", "交易日", "原始值", "规范化值", "取得方式", "首次取得（美东）", "迟到", "历史补录", "确认",
-         "修订了", "被修订"],
+         "快照", "修订了", "被修订"],
         [[v.record.record_id, v.record.indicator, str(v.record.trade_date), f"{v.record.raw_value}{v.record.raw_unit}",
           str(v.record.normalized_value), v.record.acquisition_method,
           v.record.first_obtained_at_et.isoformat(timespec="seconds") if v.record.first_obtained_at_et else "",
           late[v.record.is_late], "是" if v.record.historical_backfill else "", v.status,
-          v.record.revises_record_id or "", "、".join(v.revised_by)] for v in views]))
+          v.snapshot, v.record.revises_record_id or "", "、".join(v.revised_by)] for v in views]))
 
 
 @provenance_app.command("verify-snapshots")
 def provenance_verify_snapshots() -> None:
-    """原始快照哈希核对：逐条重算快照文件的 SHA-256，与记录比较。"""
+    """原始快照与来源文件的哈希核对：逐条重算文件的 SHA-256，与记录比较。"""
     problems = _call(services.provenance_verify_snapshots, _ctx())
     for item in problems:
         typer.echo(item)
-    typer.echo("快照哈希全部一致" if not problems else f"共 {len(problems)} 处问题")
+    typer.echo("快照与来源文件的哈希全部一致" if not problems else f"共 {len(problems)} 处问题")
     if problems:
         raise typer.Exit(code=2)

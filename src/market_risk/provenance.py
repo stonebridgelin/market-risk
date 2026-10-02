@@ -40,11 +40,20 @@ class ProvenanceConfig:
     max_precision: int             # 原始值小数位数的上限（超过即拒绝，不舍入）
     methods: tuple[str, ...]       # 取得方式
     revision_kinds: tuple[str, ...]
+    lock_timeout_seconds: float    # 分配记录编号时等待排他锁的最长时间
 
 
 @dataclass(frozen=True)
 class Snapshot:
     """原始快照文件：相对存储根目录的路径与 SHA-256。"""
+
+    path: str
+    sha256: str
+
+
+@dataclass(frozen=True)
+class SourceFile:
+    """已有的来源文件（如已入库的原始导出）：相对存储根目录的路径与该文件自身的 SHA-256。"""
 
     path: str
     sha256: str
@@ -64,7 +73,9 @@ class EntryRequest:
     source_published_at: dt.datetime | None    # 来源发布时间；无法核实时为空
     entered_by: str
     snapshot: Snapshot | None
-    data_version: str | None
+    snapshot_missing_reason: str               # 没有原始快照时必须写明原因；有快照时留空
+    source_file: SourceFile | None             # 已有的来源文件；没有时为空
+    data_version: str | None                   # 指标所在数据集清单的版本；指标不在数据集中时为空
 
 
 @dataclass(frozen=True)
@@ -110,6 +121,9 @@ class ProvenanceRecord:
     correction_corrected_value: str | None     # 人工修正：修正值（即本记录的原始值）
     correction_evidence: str | None
     historical_backfill: bool
+    snapshot_missing_reason: str | None        # 没有原始快照的原因；有快照时为空
+    source_file_path: str | None               # 已有来源文件的路径
+    source_file_sha256: str | None             # 该来源文件自身的 SHA-256
 
 
 @dataclass(frozen=True)
@@ -120,16 +134,25 @@ class Confirmation:
     self_confirmed: bool                       # 确认人与录入人相同
 
 
-def next_record_id(existing: Sequence[str]) -> str:
-    """唯一记录编号：PR- 加六位顺序号，接在已有编号的最大值之后。"""
-    numbers = []
-    for item in existing:
-        if not re.fullmatch(rf"{RECORD_PREFIX}\d{{6}}", item):
-            raise ProvenanceError(f"已有的记录编号不合法：{item!r}")
-        numbers.append(int(item[len(RECORD_PREFIX):]))
+def record_number(record_id: str) -> int:
+    """记录编号里的顺序号；格式为 PR- 加至少六位数字。"""
+    if not re.fullmatch(rf"{RECORD_PREFIX}\d{{6,}}", record_id):
+        raise ProvenanceError(f"记录编号不合法：{record_id!r}")
+    return int(record_id[len(RECORD_PREFIX):])
+
+
+def next_record_id(existing: Sequence[str], issued: int) -> str:
+    """唯一记录编号：PR- 加顺序号，接在“已有编号的最大值”与“已发出的最大顺序号”两者较大者之后。
+
+    issued 是持久保存的已发出的最大顺序号：即使记录文件里的行被删除，编号也不复用。
+    顺序号不足六位时补零，超过六位时位数自动增长，不设数量上限。
+    """
+    numbers = [record_number(item) for item in existing]
     if len(set(numbers)) != len(numbers):
         raise ProvenanceError("已有的记录编号有重复")
-    return f"{RECORD_PREFIX}{max(numbers, default=0) + 1:06d}"
+    if issued < 0:
+        raise ProvenanceError("已发出的最大顺序号不能为负")
+    return f"{RECORD_PREFIX}{max(max(numbers, default=0), issued) + 1:06d}"
 
 
 def normalize(raw_value: str, spec: IndicatorSpec, max_precision: int) -> tuple[Decimal, int]:
@@ -190,6 +213,14 @@ def build_record(record_id: str, request: EntryRequest, revision: RevisionReques
         raise ProvenanceError("录入人与来源不能为空")
     if request.snapshot is not None and not (request.snapshot.path and request.snapshot.sha256):
         raise ProvenanceError("原始快照须同时有路径与 SHA-256")
+    reason = request.snapshot_missing_reason.strip()
+    if request.snapshot is None and not reason:
+        raise ProvenanceError("没有原始快照时必须写明缺失原因")
+    if request.snapshot is not None and reason:
+        raise ProvenanceError("已有原始快照，不应再写缺失原因")
+    source = request.source_file
+    if source is not None and not (source.path and source.sha256):
+        raise ProvenanceError("来源文件须同时有路径与 SHA-256")
     entered = _aware(entered_at, "录入时间").astimezone(dt.UTC)
     value, precision = normalize(request.raw_value, spec, config.max_precision)
     first = _first_obtained(request, entered, config)
@@ -216,7 +247,8 @@ def build_record(record_id: str, request: EntryRequest, revision: RevisionReques
         published, snapshot.path if snapshot else None, snapshot.sha256 if snapshot else None,
         request.data_version or None, code.commit, code.dirty,
         revision.revises if revision else None, kind, original_value, corrected, evidence,
-        request.historical_backfill)
+        request.historical_backfill, reason or None, source.path if source else None,
+        source.sha256 if source else None)
 
 
 def confirm(record: ProvenanceRecord, existing: Sequence[Confirmation], confirmed_by: str,
@@ -245,6 +277,13 @@ class RecordView:
         if self.confirmation is None:
             return UNCONFIRMED
         return SELF_CONFIRMED if self.confirmation.self_confirmed else CONFIRMED
+
+    @property
+    def snapshot(self) -> str:
+        """查询结果里的快照一栏：有快照写“有”，没有时写“无快照”及原因。"""
+        if self.record.snapshot_path:
+            return "有"
+        return f"无快照：{self.record.snapshot_missing_reason}"
 
 
 def record_views(records: Sequence[ProvenanceRecord], confirmations: Sequence[Confirmation]) -> tuple[RecordView, ...]:

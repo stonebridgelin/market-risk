@@ -292,6 +292,10 @@ provenance_records = Table(
     Column("correction_corrected_value", String(40)),
     Column("correction_evidence", Text),
     Column("historical_backfill", Boolean, nullable=False),     # 历史补录
+    # 迁移 0009：原始快照缺失的原因；已有来源文件的路径与该文件自身的 SHA-256
+    Column("snapshot_missing_reason", Text),
+    Column("source_file_path", String(300)),
+    Column("source_file_sha256", String(64)),
 )
 
 provenance_confirmations = Table(

@@ -26,3 +26,5 @@ build/
 
 # IDE
 .idea/
+# 数据留痕分配编号时的排他锁文件（临时文件，用完即删）
+data/manual/provenance/.lock

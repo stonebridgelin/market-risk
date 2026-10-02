@@ -23,13 +23,16 @@ def parse_provenance_config(raw: dict[str, Any]) -> ProvenanceConfig:
     config = ProvenanceConfig(indicators, str(raw.get("timezone")), dt.time.fromisoformat(str(raw.get("late_cutoff"))),
                               int(raw.get("max_precision", 0)),
                               tuple(str(item) for item in raw.get("acquisition_methods", ())),
-                              tuple(str(item) for item in raw.get("revision_kinds", ())))
+                              tuple(str(item) for item in raw.get("revision_kinds", ())),
+                              float(raw.get("lock_timeout_seconds", 0)))
     if (config.timezone, config.late_cutoff) != ("America/New_York", dt.time(18, 30)):
         raise ValueError("迟到判断的时区或截止时刻与负责人裁决不一致（美东 18:30:00）")
     if not indicators or any(spec.minimum > spec.maximum for spec in indicators.values()):
         raise ValueError("数据留痕配置缺少指标，或取值范围不合法")
     if not 0 < config.max_precision <= 8:
         raise ValueError("原始值小数位数的上限须在 1 至 8 之间（规范化值存为 Numeric(20, 8)）")
+    if config.lock_timeout_seconds <= 0:
+        raise ValueError("等待排他锁的最长时间必须为正")
     if set(config.revision_kinds) != {SOURCE_REVISION, MANUAL_CORRECTION} or not config.methods:
         raise ValueError("修订类型或取得方式与设计说明不一致")
     return config

@@ -170,6 +170,16 @@ class StoragePaths:
         """预留：信号实际使用的输入记录编号；数据库 signal_input_links 表由此重建。本批不写入。"""
         return self.provenance_dir / "signal_inputs.csv"
 
+    @property
+    def provenance_counter_file(self) -> Path:
+        """已发出的最大记录顺序号（提交 git）：记录即使被删除，编号也不复用。"""
+        return self.provenance_dir / "record_id.counter"
+
+    @property
+    def provenance_lock_file(self) -> Path:
+        """分配编号与追加记录时的排他锁文件（临时文件，用完即删，不提交 git）。"""
+        return self.provenance_dir / ".lock"
+
     def provenance_snapshot_dir(self, indicator: str, trade_date: dt.date) -> Path:
         """原始快照：snapshots/<指标>/<交易日>/。"""
         if not _TV_SYMBOL_RE.match(indicator):

@@ -8,6 +8,9 @@ late_cutoff: "18:30:00"
 # 规范化值存为 Numeric(20, 8)；原始值的小数位数超过 8 位时拒绝录入，不做舍入
 max_precision: 8
 
+# 分配记录编号时对只追加的文件加排他锁；等待超过这个时间即报错（秒）
+lock_timeout_seconds: 10
+
 acquisition_methods: [接口, 手工录入]
 revision_kinds: [来源修订, 人工修正]
 

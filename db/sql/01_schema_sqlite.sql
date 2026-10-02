@@ -1,5 +1,5 @@
 -- 由 `market-risk db export-sql` 自动生成，不得手工修改。
--- 表结构：Alembic 版本 0008（migrations/versions/），数据库：sqlite。
+-- 表结构：Alembic 版本 0009（migrations/versions/），数据库：sqlite。
 -- 具体数据不在此导出，见 db/sql/README.md。
 
 CREATE TABLE backtest_runs (
@@ -95,6 +95,9 @@ CREATE TABLE provenance_records (
 	correction_corrected_value VARCHAR(40),
 	correction_evidence TEXT,
 	historical_backfill BOOLEAN NOT NULL,
+	snapshot_missing_reason TEXT,
+	source_file_path VARCHAR(300),
+	source_file_sha256 VARCHAR(64),
 	PRIMARY KEY (record_id),
 	FOREIGN KEY(revises_record_id) REFERENCES provenance_records (record_id)
 );
@@ -302,4 +305,4 @@ CREATE TABLE totals (
 );
 
 CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL, PRIMARY KEY (version_num));
-INSERT INTO alembic_version (version_num) VALUES ('0008');
+INSERT INTO alembic_version (version_num) VALUES ('0009');

@@ -26,6 +26,7 @@ NEW_YORK = ZoneInfo("America/New_York")
 DAY = dt.date(2026, 9, 25)                                    # 指标对应的交易日（构造的录入，不读任何市场数据）
 OBTAINED = dt.datetime(2026, 9, 25, 17, 0, tzinfo=NEW_YORK)   # 当日美东 17:00 取得
 ENTERED = dt.datetime(2026, 9, 25, 22, 0, tzinfo=dt.UTC)      # 美东 18:00 录入
+NO_SNAPSHOT = "手工看屏录入，没有文件"
 
 
 @pytest.fixture
@@ -40,6 +41,8 @@ def _add(ctx: services.Context, value: str = "54.67", **overrides: object) -> ru
         "method": "手工录入", "entered_by": "stone", "first_obtained_at": OBTAINED, "now": ENTERED,
         "config": CONFIG, "code": CODE}
     arguments.update(overrides)
+    if arguments.get("snapshot_file") is None:
+        arguments.setdefault("snapshot_missing_reason", NO_SNAPSHOT)
     return services.provenance_add(ctx, **arguments)  # type: ignore[arg-type]
 
 
@@ -60,8 +63,8 @@ def test_revision_never_overwrites_the_original_record(ctx: services.Context) ->
     first = _add(ctx)
     before = ctx.paths.provenance_records_csv.read_bytes()
     second = services.provenance_revise(ctx, first.record_id, "人工修正", "54.76", "TradingView INDEX:S5FI", "手工录入",
-                                        "stone", "截图读数为 54.76，原录入把后两位写反", OBTAINED, now=ENTERED,
-                                        config=CONFIG, code=CODE)
+                                        "stone", "截图读数为 54.76，原录入把后两位写反", OBTAINED,
+                                        snapshot_missing_reason=NO_SNAPSHOT, now=ENTERED, config=CONFIG, code=CODE)
     after = ctx.paths.provenance_records_csv.read_bytes()
     assert after.startswith(before) and after.count(b"\n") == before.count(b"\n") + 1
     assert (second.record_id, second.revises_record_id, second.revision_kind) == ("PR-000002", "PR-000001", "人工修正")
@@ -76,17 +79,18 @@ def test_revision_never_overwrites_the_original_record(ctx: services.Context) ->
     # 人工修正必须写证据；修订类型只有两种；被修订的记录必须存在。
     with pytest.raises(services.ServiceError, match="证据"):
         services.provenance_revise(ctx, first.record_id, "人工修正", "54.70", "x", "手工录入", "stone", "", OBTAINED,
-                                   now=ENTERED, config=CONFIG, code=CODE)
+                                   snapshot_missing_reason=NO_SNAPSHOT, now=ENTERED, config=CONFIG, code=CODE)
     with pytest.raises(services.ServiceError, match="修订类型"):
         services.provenance_revise(ctx, first.record_id, "覆盖", "54.70", "x", "手工录入", "stone", "", OBTAINED,
-                                   now=ENTERED, config=CONFIG, code=CODE)
+                                   snapshot_missing_reason=NO_SNAPSHOT, now=ENTERED, config=CONFIG, code=CODE)
     with pytest.raises(services.ServiceError, match="找不到"):
         services.provenance_revise(ctx, "PR-000009", "来源修订", "54.70", "x", "手工录入", "stone", "", OBTAINED,
-                                   now=ENTERED, config=CONFIG, code=CODE)
+                                   snapshot_missing_reason=NO_SNAPSHOT, now=ENTERED, config=CONFIG, code=CODE)
     assert len(store.read_records(ctx.paths)) == 2                      # 被拒绝的修订没有留下任何行
     # 来源修订不带人工修正的三个字段。
     third = services.provenance_revise(ctx, second.record_id, "来源修订", "54.80", "TradingView INDEX:S5FI", "接口",
-                                       "stone", "", OBTAINED, now=ENTERED, config=CONFIG, code=CODE)
+                                       "stone", "", OBTAINED, snapshot_missing_reason=NO_SNAPSHOT, now=ENTERED,
+                                       config=CONFIG, code=CODE)
     assert (third.revision_kind, third.correction_original_value, third.correction_corrected_value) == (
         "来源修订", None, None)
 
@@ -216,19 +220,20 @@ def test_confirmation_is_a_separate_step_and_marks_self_confirmation(ctx: servic
     assert [view.status for view in services.provenance_list(ctx)] == ["未确认", "未确认"]
     before = ctx.paths.provenance_records_csv.read_bytes()
     at = dt.datetime(2026, 9, 26, 1, 0, tzinfo=dt.UTC)
-    own = services.provenance_confirm(ctx, first.record_id, "stone", at)
-    other = services.provenance_confirm(ctx, second.record_id, "reviewer", at)
+    own = services.provenance_confirm(ctx, first.record_id, "stone", at, CONFIG)
+    other = services.provenance_confirm(ctx, second.record_id, "reviewer", at, CONFIG)
     assert (own.self_confirmed, other.self_confirmed) == (True, False)
     assert [view.status for view in services.provenance_list(ctx)] == ["自确认", "已确认"]
     assert ctx.paths.provenance_records_csv.read_bytes() == before
     rows = {row["record_id"]: row for row in _table(ctx, schema.provenance_confirmations)}
     assert rows["PR-000001"]["self_confirmed"] is True and rows["PR-000002"]["confirmed_by"] == "reviewer"
     with pytest.raises(services.ServiceError, match="已经确认过"):
-        services.provenance_confirm(ctx, first.record_id, "reviewer", at)
+        services.provenance_confirm(ctx, first.record_id, "reviewer", at, CONFIG)
     with pytest.raises(services.ServiceError, match="找不到记录"):
-        services.provenance_confirm(ctx, "PR-000099", "stone", at)
+        services.provenance_confirm(ctx, "PR-000099", "stone", at, CONFIG)
     with pytest.raises(services.ServiceError, match="早于录入时间"):
-        services.provenance_confirm(ctx, _add(ctx, "56.00").record_id, "stone", ENTERED - dt.timedelta(hours=1))
+        services.provenance_confirm(ctx, _add(ctx, "56.00").record_id, "stone", ENTERED - dt.timedelta(hours=1),
+                                    CONFIG)
 
 
 def test_database_is_rebuilt_from_the_append_only_files(ctx: services.Context) -> None:
@@ -237,7 +242,7 @@ def test_database_is_rebuilt_from_the_append_only_files(ctx: services.Context) -
     录入时记下代码提交号与“工作区是否有未提交改动”；数据版本在没有数据集清单时为空。
     """
     record = _add(ctx, code=rules.CodeVersion("f" * 40, True))
-    services.provenance_confirm(ctx, record.record_id, "stone", ENTERED)
+    services.provenance_confirm(ctx, record.record_id, "stone", ENTERED, CONFIG)
     assert (record.code_version, record.code_dirty, record.data_version) == ("f" * 40, True, None)
     first = db.dump(ctx.db_url)
     db.rebuild(ctx.paths, ctx.db_url)
@@ -258,9 +263,10 @@ def test_database_is_rebuilt_from_the_append_only_files(ctx: services.Context) -
 
 
 def test_record_ids_are_sequential_and_config_matches_the_ruling() -> None:
-    assert rules.next_record_id([]) == "PR-000001" and rules.next_record_id(["PR-000001", "PR-000007"]) == "PR-000008"
+    assert rules.next_record_id([], 0) == "PR-000001"
+    assert rules.next_record_id(["PR-000001", "PR-000007"], 0) == "PR-000008"
     with pytest.raises(rules.ProvenanceError):
-        rules.next_record_id(["X-1"])
+        rules.next_record_id(["X-1"], 0)
     assert set(CONFIG.indicators) == {"S5FI", "S5TW", "NDTW"} and CONFIG.late_cutoff == dt.time(18, 30)
     with (PROJECT_ROOT / "config" / "provenance.yaml").open(encoding="utf-8") as file:
         raw = yaml.safe_load(file)
@@ -289,3 +295,158 @@ def test_provenance_is_not_wired_into_scoring_or_research() -> None:
     tree = ast.parse((source / "provenance.py").read_text(encoding="utf-8"))
     imports = {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module}
     assert not any(name.startswith("market_risk") for name in imports)
+
+
+def _request(value: str = "50.00") -> rules.EntryRequest:
+    return rules.EntryRequest("S5FI", DAY, value, "TradingView INDEX:S5FI", "手工录入", OBTAINED, False, None, "stone",
+                              None, NO_SNAPSHOT, None, None)
+
+
+def test_concurrent_allocation_never_hands_out_the_same_record_id(tmp_path: Path) -> None:
+    """8 个线程同时各录入 5 条：分配编号、追加记录与更新计数都在排他锁内，
+
+    40 条记录的编号互不相同，恰为 PR-000001 至 PR-000040，没有缺号；计数文件为 40；文件里正好 40 行。
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    paths = StoragePaths(tmp_path)
+
+    def build(record_id: str, records: object) -> rules.ProvenanceRecord:
+        return rules.build_record(record_id, _request(), None, None, ENTERED, CODE, CONFIG)
+
+    def worker(_: int) -> list[str]:
+        return [store.append_new_record(paths, build, 30.0).record_id for _ in range(5)]
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        issued = [record_id for batch in pool.map(worker, range(8)) for record_id in batch]
+    assert sorted(issued) == [f"PR-{number:06d}" for number in range(1, 41)]
+    assert [record.record_id for record in store.read_records(paths)] == sorted(issued)
+    assert store.issued_number(paths) == 40 and not paths.provenance_lock_file.exists()
+    # 锁被占着时，等待超时即报错，不会硬闯进去。
+    with store.exclusive_lock(paths, 1.0), pytest.raises(rules.ProvenanceError, match="排他锁超时"):
+        store.append_new_record(paths, build, 0.05)
+    assert store.issued_number(paths) == 40
+
+
+def test_record_ids_are_never_reused_and_grow_beyond_six_digits(ctx: services.Context) -> None:
+    """录入三条后把记录文件的最后一行删掉（模拟误删）：下一条的编号是 PR-000004，不是被删掉的 PR-000003。
+
+    被拒绝的录入不占用编号。计数到 999999 之后，下一条是 PR-1000000（位数自动增长），再下一条 PR-1000001。
+    """
+    for value in ("50.00", "51.00", "52.00"):
+        _add(ctx, value)
+    file = ctx.paths.provenance_records_csv
+    lines = file.read_text(encoding="utf-8").splitlines(keepends=True)
+    file.write_text("".join(lines[:-1]), encoding="utf-8", newline="")
+    assert [record.record_id for record in store.read_records(ctx.paths)] == ["PR-000001", "PR-000002"]
+    with pytest.raises(services.ServiceError, match="取值须在"):
+        _add(ctx, "101")
+    assert _add(ctx, "53.00").record_id == "PR-000004"
+    assert rules.next_record_id(["PR-000001", "PR-000002"], 3) == "PR-000004"
+    assert rules.next_record_id(["PR-000005"], 3) == "PR-000006"
+    assert rules.next_record_id([], 999999) == "PR-1000000" and rules.record_number("PR-1000000") == 1000000
+    ctx.paths.provenance_counter_file.write_text("999999\n", encoding="utf-8")
+    big = _add(ctx, "54.00")
+    assert big.record_id == "PR-1000000" and _add(ctx, "55.00").record_id == "PR-1000001"
+    assert store.read_records(ctx.paths)[-2] == big
+    rows = {row["record_id"] for row in _table(ctx, schema.provenance_records)}
+    assert {"PR-1000000", "PR-1000001"} <= rows and "PR-000003" not in rows
+    with pytest.raises(rules.ProvenanceError, match="不合法"):
+        rules.record_number("PR-12345")
+
+
+def test_times_are_saved_with_their_utc_offset_and_unknown_times_stay_empty(ctx: services.Context) -> None:
+    """所有时间字段按带时区偏移的 ISO 8601 保存：首次取得时间换成美东（夏令时 −04:00、冬令时 −05:00），
+
+    录入时间与确认时间为 +00:00，来源发布时间保留给出的偏移。未知的时间留空，不用录入时间代替。
+    北京时间 2026-09-26 05:00（+08:00）即美东 2026-09-25 17:00（−04:00）。
+    """
+    beijing = dt.timezone(dt.timedelta(hours=8))
+    record = _add(ctx, first_obtained_at=dt.datetime(2026, 9, 26, 5, 0, tzinfo=beijing),
+                  source_published_at=dt.datetime(2026, 9, 26, 4, 30, tzinfo=beijing))
+    services.provenance_confirm(ctx, record.record_id, "stone", dt.datetime(2026, 9, 26, 9, 0, tzinfo=beijing),
+                                CONFIG)
+    row = _table(ctx, schema.provenance_records)[0]
+    assert row["first_obtained_at_et"] == "2026-09-25T17:00:00-04:00"
+    assert row["entered_at_utc"] == "2026-09-25T22:00:00+00:00"
+    assert row["source_published_at"] == "2026-09-26T04:30:00+08:00"
+    assert _table(ctx, schema.provenance_confirmations)[0]["confirmed_at_utc"] == "2026-09-26T01:00:00+00:00"
+    winter = _add(ctx, trade_date=dt.date(2026, 12, 18),
+                  first_obtained_at=dt.datetime(2026, 12, 18, 22, 0, tzinfo=dt.UTC),
+                  now=dt.datetime(2026, 12, 19, 0, 0, tzinfo=dt.UTC))
+    assert winter.first_obtained_at_et is not None
+    assert winter.first_obtained_at_et.isoformat() == "2026-12-18T17:00:00-05:00"
+    unknown = _add(ctx, trade_date=dt.date(2015, 6, 1), first_obtained_at=None, historical_backfill=True)
+    line = ctx.paths.provenance_records_csv.read_text(encoding="utf-8").splitlines()[-1].split(",")
+    position = store.RECORD_FIELDS.index("first_obtained_at_et")
+    assert unknown.first_obtained_at_et is None and line[position] == "" and line[position + 1] != ""
+    assert line[store.RECORD_FIELDS.index("source_published_at")] == ""
+
+
+def test_late_boundary_on_daylight_saving_switch_days() -> None:
+    """夏令时切换日的迟到判断，按 America/New_York 的规则：
+
+    2026-03-08 凌晨起为夏令时（UTC−4）：当日美东 18:30:00 = 22:30:00 UTC；前一天（冬令时，UTC−5）为 23:30:00 UTC。
+    2026-11-01 凌晨起回到冬令时（UTC−5）：当日美东 18:30:00 = 23:30:00 UTC；前一天（夏令时）为 22:30:00 UTC。
+    各自恰为截止时刻不算迟到，晚 1 秒算迟到；按“固定 UTC−5”去算会把 3 月 8 日 22:30:01 UTC 误判成未迟到。
+    """
+    cases = {dt.date(2026, 3, 7): (23, 30), dt.date(2026, 3, 8): (22, 30),
+             dt.date(2026, 10, 31): (22, 30), dt.date(2026, 11, 1): (23, 30)}
+    for day, (hour, minute) in cases.items():
+        cutoff = dt.datetime(day.year, day.month, day.day, hour, minute, tzinfo=dt.UTC)
+        assert cutoff.astimezone(NEW_YORK).time() == dt.time(18, 30)
+        assert rules.is_late(cutoff, day, CONFIG) is False
+        assert rules.is_late(cutoff + dt.timedelta(seconds=1), day, CONFIG) is True
+        assert rules.is_late(cutoff - dt.timedelta(seconds=1), day, CONFIG) is False
+    assert rules.is_late(dt.datetime(2026, 3, 8, 22, 30, 1, tzinfo=dt.UTC), dt.date(2026, 3, 8), CONFIG) is True
+
+
+def test_dataset_version_only_for_indicators_in_the_dataset_and_source_file_hash(ctx: services.Context) -> None:
+    """数据版本：S5FI 在数据集清单的序列里 → 记清单的 SHA-256；NDTW 不在数据集里 → 数据版本留空。
+
+    NDTW 有已入库的来源文件时，保存该文件自身的 SHA-256（只记路径与哈希，不复制）。来源文件须在存储根目录之内。
+    来源文件事后被改动，核对能查出来。
+    """
+    manifest = ctx.paths.market_manifest
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text('{"series": {"S5FI": {}, "S5TW": {}, "SPX": {}}}', encoding="utf-8")
+    raw = ctx.paths.tv_raw_root / "2026-09-26" / "INDEX_NDTW, 1D.csv"
+    raw.parent.mkdir(parents=True)
+    raw.write_bytes(b"time,close\n2026-09-25,40.00\n")
+    s5fi = _add(ctx)
+    ndtw = _add(ctx, "40.00", indicator="NDTW", source="TradingView INDEX:NDTW 导出文件", source_file=raw)
+    assert s5fi.data_version == store.file_sha256(manifest) and s5fi.source_file_sha256 is None
+    assert ndtw.data_version is None
+    assert ndtw.source_file_path == "data/manual/tradingview/raw/2026-09-26/INDEX_NDTW, 1D.csv"
+    assert ndtw.source_file_sha256 == store.file_sha256(raw)
+    rows = {row["record_id"]: row for row in _table(ctx, schema.provenance_records)}
+    assert rows[ndtw.record_id]["data_version"] is None
+    assert rows[ndtw.record_id]["source_file_sha256"] == store.file_sha256(raw)
+    assert services.provenance_verify_snapshots(ctx) == []
+    outside = ctx.paths.root.parent / f"{ctx.paths.root.name}_outside.csv"
+    outside.write_bytes(b"x")
+    with pytest.raises(services.ServiceError, match="存储根目录之内"):
+        _add(ctx, "40.00", indicator="NDTW", source_file=outside)
+    raw.write_bytes(b"time,close\n2026-09-25,41.00\n")
+    assert services.provenance_verify_snapshots(ctx) == [
+        f"{ndtw.record_id}：来源文件的 SHA-256 与记录不符（{ndtw.source_file_path}）"]
+
+
+def test_missing_snapshot_needs_a_reason_and_the_query_shows_it(ctx: services.Context, tmp_path: Path) -> None:
+    """原始快照为空时必须写明缺失原因；查询结果显示“无快照”及原因。有快照时不应再写原因，查询显示“有”。"""
+    with pytest.raises(services.ServiceError, match="必须写明缺失原因"):
+        _add(ctx, snapshot_missing_reason="")
+    with pytest.raises(services.ServiceError, match="必须写明缺失原因"):
+        _add(ctx, snapshot_missing_reason="   ")
+    plain = _add(ctx)
+    source = tmp_path / "shot.png"
+    source.write_bytes(b"png")
+    with pytest.raises(services.ServiceError, match="不应再写缺失原因"):
+        _add(ctx, snapshot_file=source, snapshot_missing_reason="没有")
+    shot = _add(ctx, snapshot_file=source)
+    assert (plain.snapshot_missing_reason, shot.snapshot_missing_reason) == (NO_SNAPSHOT, None)
+    views = services.provenance_list(ctx)
+    assert [view.snapshot for view in views] == [f"无快照：{NO_SNAPSHOT}", "有"]
+    rows = {row["record_id"]: row for row in _table(ctx, schema.provenance_records)}
+    assert rows[plain.record_id]["snapshot_missing_reason"] == NO_SNAPSHOT
+    assert rows[shot.record_id]["snapshot_missing_reason"] is None and len(store.read_records(ctx.paths)) == 2

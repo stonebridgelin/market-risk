@@ -6,16 +6,26 @@
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import datetime as dt
 import hashlib
+import os
 import shutil
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Iterator, Sequence
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from market_risk.provenance import Confirmation, ProvenanceError, ProvenanceRecord, Snapshot
+from market_risk.provenance import (
+    Confirmation,
+    ProvenanceError,
+    ProvenanceRecord,
+    Snapshot,
+    SourceFile,
+    next_record_id,
+)
 from market_risk.storage.paths import StoragePaths
 
 RECORD_FIELDS = (
@@ -23,7 +33,8 @@ RECORD_FIELDS = (
     "normalized_value", "source", "acquisition_method", "first_obtained_at_et", "entered_at_utc", "entered_by",
     "is_late", "source_published_at", "snapshot_path", "snapshot_sha256", "data_version", "code_version",
     "code_dirty", "revises_record_id", "revision_kind", "correction_original_value", "correction_corrected_value",
-    "correction_evidence", "historical_backfill")
+    "correction_evidence", "historical_backfill", "snapshot_missing_reason", "source_file_path",
+    "source_file_sha256")
 CONFIRMATION_FIELDS = ("record_id", "confirmed_by", "confirmed_at_utc", "self_confirmed")
 SIGNAL_INPUT_FIELDS = ("signal_key", "record_id", "note")
 YES, NO = "是", "否"
@@ -67,6 +78,8 @@ def record_row(record: ProvenanceRecord) -> dict[str, str]:
         "correction_corrected_value": record.correction_corrected_value or "",
         "correction_evidence": record.correction_evidence or "",
         "historical_backfill": _flag(record.historical_backfill),
+        "snapshot_missing_reason": record.snapshot_missing_reason or "",
+        "source_file_path": record.source_file_path or "", "source_file_sha256": record.source_file_sha256 or "",
     }
 
 
@@ -83,7 +96,9 @@ def record_from_row(row: dict[str, str]) -> ProvenanceRecord:
         row["snapshot_path"] or None, row["snapshot_sha256"] or None, row["data_version"] or None,
         row["code_version"], _bool(row["code_dirty"]), row["revises_record_id"] or None,
         row["revision_kind"] or None, row["correction_original_value"] or None,
-        row["correction_corrected_value"] or None, row["correction_evidence"] or None, backfill)
+        row["correction_corrected_value"] or None, row["correction_evidence"] or None, backfill,
+        row["snapshot_missing_reason"] or None, row["source_file_path"] or None,
+        row["source_file_sha256"] or None)
 
 
 def _read(path: Path, fields: Sequence[str]) -> list[dict[str, str]]:
@@ -118,6 +133,70 @@ def append_record(paths: StoragePaths, record: ProvenanceRecord) -> None:
     _append(paths.provenance_records_csv, RECORD_FIELDS, record_row(record))
 
 
+# ---------------------------------------------------------------------------
+# 排他锁与编号分配
+# ---------------------------------------------------------------------------
+
+@contextlib.contextmanager
+def exclusive_lock(paths: StoragePaths, timeout_seconds: float) -> Iterator[None]:
+    """对留痕目录加排他锁：以“独占方式创建锁文件”实现，同一时刻只有一个进程或线程能拿到。
+
+    拿不到时等待重试，超过 timeout_seconds 即报错（锁文件若是异常中断留下的，核实后手工删除）。
+    """
+    lock = paths.provenance_lock_file
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        try:
+            handle = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except (FileExistsError, PermissionError) as exc:
+            if time.monotonic() >= deadline:
+                raise ProvenanceError(f"等待留痕目录的排他锁超时：{lock}") from exc
+            time.sleep(0.01)
+    try:
+        os.close(handle)
+        yield
+    finally:
+        lock.unlink()
+
+
+def issued_number(paths: StoragePaths) -> int:
+    """已发出的最大顺序号（持久保存；记录文件里的行即使被删除，编号也不复用）。没有计数文件时为 0。"""
+    counter = paths.provenance_counter_file
+    if not counter.exists():
+        return 0
+    text = counter.read_text(encoding="utf-8").strip()
+    if not text.isdigit():
+        raise ProvenanceError(f"编号计数文件的内容不合法：{text!r}")
+    return int(text)
+
+
+def _write_counter(paths: StoragePaths, number: int) -> None:
+    """原子写入：先写临时文件，再替换计数文件。"""
+    counter = paths.provenance_counter_file
+    temporary = counter.with_name(counter.name + ".tmp")
+    temporary.write_text(f"{number}\n", encoding="utf-8", newline="\n")
+    os.replace(temporary, counter)
+
+
+def append_new_record(paths: StoragePaths, build: Callable[[str, Sequence[ProvenanceRecord]], ProvenanceRecord],
+                      timeout_seconds: float) -> ProvenanceRecord:
+    """在排他锁内分配编号、生成记录、追加到文件并更新计数：并发录入不会拿到同一个编号。
+
+    build 接收新分配的编号与当前已有的全部记录，返回要追加的记录；它报错时不留下任何行，也不占用编号。
+    """
+    with exclusive_lock(paths, timeout_seconds):
+        records = read_records(paths)
+        record_id = next_record_id([item.record_id for item in records], issued_number(paths))
+        record = build(record_id, records)
+        if record.record_id != record_id:
+            raise ProvenanceError("生成的记录没有使用分配的编号")
+        append_record(paths, record)
+        _write_counter(paths, int(record_id.rsplit("-", 1)[1]))
+    return record
+
+
 def read_confirmations(paths: StoragePaths) -> tuple[Confirmation, ...]:
     result = []
     for row in _read(paths.provenance_confirmations_csv, CONFIRMATION_FIELDS):
@@ -132,6 +211,16 @@ def append_confirmation(paths: StoragePaths, item: Confirmation) -> None:
     _append(paths.provenance_confirmations_csv, CONFIRMATION_FIELDS,
             {"record_id": item.record_id, "confirmed_by": item.confirmed_by,
              "confirmed_at_utc": _time(item.confirmed_at_utc), "self_confirmed": _flag(item.self_confirmed)})
+
+
+def append_new_confirmation(paths: StoragePaths,
+                            build: Callable[[Sequence[ProvenanceRecord], Sequence[Confirmation]], Confirmation],
+                            timeout_seconds: float) -> Confirmation:
+    """在排他锁内核对并追加确认记录：并发确认同一条记录时只有一个成功。"""
+    with exclusive_lock(paths, timeout_seconds):
+        item = build(read_records(paths), read_confirmations(paths))
+        append_confirmation(paths, item)
+    return item
 
 
 # ---------------------------------------------------------------------------
@@ -164,17 +253,34 @@ def store_snapshot(paths: StoragePaths, indicator: str, trade_date: dt.date, sou
     return Snapshot(target.relative_to(paths.root).as_posix(), digest)
 
 
+def source_file(paths: StoragePaths, file: Path) -> SourceFile:
+    """已有的来源文件：只记录相对存储根目录的路径与该文件自身的 SHA-256，不复制。
+
+    文件须在存储根目录之内（如已入库的原始导出），这样以后才能按路径重新核对；不在其内的文件请作为原始快照提供。
+    """
+    resolved = file.resolve()
+    if not resolved.is_file():
+        raise ProvenanceError(f"来源文件不存在：{file}")
+    try:
+        relative = resolved.relative_to(paths.root.resolve())
+    except ValueError as exc:
+        raise ProvenanceError("来源文件须在存储根目录之内；不在其内的文件请作为原始快照提供") from exc
+    return SourceFile(relative.as_posix(), file_sha256(resolved))
+
+
 def snapshot_problems(paths: StoragePaths, records: Sequence[ProvenanceRecord]) -> list[str]:
-    """原始快照哈希核对：逐条重算快照文件的 SHA-256，与记录比较。返回问题清单（空即全部一致）。"""
+    """原始快照与来源文件的哈希核对：逐条重算文件的 SHA-256，与记录比较。返回问题清单（空即全部一致）。"""
     problems = []
     for record in records:
-        if record.snapshot_path is None:
-            continue
-        target = paths.root / record.snapshot_path
-        if not target.is_file():
-            problems.append(f"{record.record_id}：快照文件不存在（{record.snapshot_path}）")
-        elif file_sha256(target) != record.snapshot_sha256:
-            problems.append(f"{record.record_id}：快照文件的 SHA-256 与记录不符（{record.snapshot_path}）")
+        for name, path, digest in (("快照文件", record.snapshot_path, record.snapshot_sha256),
+                                   ("来源文件", record.source_file_path, record.source_file_sha256)):
+            if path is None:
+                continue
+            target = paths.root / path
+            if not target.is_file():
+                problems.append(f"{record.record_id}：{name}不存在（{path}）")
+            elif file_sha256(target) != digest:
+                problems.append(f"{record.record_id}：{name}的 SHA-256 与记录不符（{path}）")
     return problems
 
 
