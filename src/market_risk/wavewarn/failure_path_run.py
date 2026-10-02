@@ -42,7 +42,7 @@ from market_risk.wavewarn.extended_nav_report import nav_daily
 from market_risk.wavewarn.extended_nav_run import NAV_PLACES, load_price_inputs
 from market_risk.wavewarn.failure_path import GREEN, PathError, executed_lights
 from market_risk.wavewarn.failure_path_analysis import ObjectAnalysis, ObjectInput, WindowInput, analyse_window
-from market_risk.wavewarn.failure_path_context import MergedEvent, annual_returns
+from market_risk.wavewarn.failure_path_context import ClassTotal, MergedEvent, annual_returns
 from market_risk.wavewarn.failure_path_report import (
     CASE_HEADER,
     CHANNEL_HEADER,
@@ -55,6 +55,7 @@ from market_risk.wavewarn.failure_path_report import (
     SEGMENT_HEADER,
     SUMMARY_HEADER,
     case_table,
+    channel_note,
     channel_table,
     environment_table,
     event_table,
@@ -68,16 +69,18 @@ from market_risk.wavewarn.failure_path_report import (
 )
 from market_risk.wavewarn.inputs import load_inputs_until
 from market_risk.wavewarn.labels_zz import MergedZZEvent, UnknownLabels, ZZEvent, merge_zz_events
-from market_risk.wavewarn.lock_guard import find_git, run_git
+from market_risk.wavewarn.lock_guard import find_git, find_gzip, run_git
 from market_risk.wavewarn.loss import configured_loss_settings
 from market_risk.wavewarn.timing import ma200_states
 from market_risk.wavewarn.v14_model import FULL, prepare_v14
+from market_risk.wavewarn.validation_output import gzip_file
 from market_risk.wavewarn.validation_run import CONFIG_FILE
 
 FAILURE_PATH_CONFIG = "config/wavewarn_v14_failure_path.yaml"
 DEVELOPMENT, MIGRATION = "development", "migration"
 SELECTED_V14, PRICE_ONLY_NAME, FULLY_INVESTED = "修正后的 v1.4（K=5，θ_P=2.5%）", "纯价格版本（K=5，θ_P=2.5%）", "满仓"
 TAIL_REASON = "尾段（寻峰）"
+INTERVALS = "intervals.csv"
 PRICE_FILES = {"SPX": "data/market/daily/SPX.csv", "QQQ": "data/market/daily/QQQ.csv"}
 
 
@@ -92,6 +95,7 @@ class WindowOutput:
     checks: dict[str, object]                  # 一致性检查的记录
     notes: tuple[str, ...]
     labels: dict[str, object] | None           # 迁移评估另行生成的标签；开发期为空
+    channel_texts: tuple[str | None, ...]      # 各对象通道同时出现统计的加注（对照没有通道，为空）
 
 
 @dataclass(frozen=True)
@@ -277,7 +281,7 @@ def development_output(root: Path, validation: ValidationConfig, round2: Round2C
              "系统执行灯色、收盘价（v1.4 另加激活通道）与已入库的修正后逐日明细逐行一致；"
              "带缓冲带的 200 日均线的平均暴露与计费切换次数与已入库参照行一致。详见 `consistency_checks.json`。", ""]
     return WindowOutput(DEVELOPMENT, "失败路径分析：开发期（修正后的 v1.4 选定设定）", window, results, checks,
-                        tuple(notes), None)
+                        tuple(notes), None, channel_texts(results, None))
 
 
 # ---------------------------------------------------------------------------
@@ -384,8 +388,14 @@ def crossing_state(item: Mapping[str, object], events: Mapping[str, Sequence[ZZE
     return "不是事件，也不在尾段未定区间内"
 
 
-def migration_output(root: Path, validation: ValidationConfig, round2: Round2Config,
-                     config: FailurePathConfig) -> WindowOutput:
+def channel_texts(results: Sequence[ObjectAnalysis],
+                  reference: Sequence[ClassTotal] | None) -> tuple[str | None, ...]:
+    """各对象通道同时出现统计的加注；reference 为开发期选定设定的同一统计（只在迁移评估报告里对照方向）。"""
+    return tuple(None if item.totals is None else channel_note(item.totals, reference, "开发期") for item in results)
+
+
+def migration_output(root: Path, validation: ValidationConfig, round2: Round2Config, config: FailurePathConfig,
+                     reference: Sequence[ClassTotal]) -> WindowOutput:
     model = validation.model
     cutoff = model.history_end
     inputs = load_price_inputs(root, cutoff, validation.vix3m_file)
@@ -450,15 +460,18 @@ def migration_output(root: Path, validation: ValidationConfig, round2: Round2Con
              "（当时的实施细则写明“危险标签取自完整标签”，危险区间取区间起点日 d 满足 P ≤ d < Tr）。"
              f"结果：{usage}这里只按日期清点，没有重算损失，也没有修改任何已入库的历史输出。", ""]
     return WindowOutput(MIGRATION, "失败路径分析：冻结参数的纯价格版本迁移评估", window, results, checks,
-                        tuple(notes), labels)
+                        tuple(notes), labels, channel_texts(results, reference))
 
 
 # ---------------------------------------------------------------------------
 # 写出
 # ---------------------------------------------------------------------------
 
-def write_window(destination: Path, item: WindowOutput, config: FailurePathConfig) -> str:
-    """写出一个窗口的账本、汇总、对账、一致性检查与报告；返回报告的 SHA-256。"""
+def write_window(destination: Path, item: WindowOutput, config: FailurePathConfig, gzip_executable: str) -> str:
+    """写出一个窗口的账本、汇总、对账、一致性检查与报告；返回报告的 SHA-256。
+
+    逐区间账本用 gzip -n 压缩入库，压缩前后的 SHA-256 都记在哈希清单里。
+    """
     destination.mkdir(parents=True)
     tables = [("segments.csv", SEGMENT_HEADER, segment_table(item.results)),
               ("classification_summary.csv", SUMMARY_HEADER, summary_table(item.results)),
@@ -466,12 +479,13 @@ def write_window(destination: Path, item: WindowOutput, config: FailurePathConfi
               ("event_position_summary.csv", POSITION_HEADER, position_table(item.results)),
               ("environment_summary.csv", ENVIRONMENT_HEADER, environment_table(item.results)),
               ("reconciliation.csv", RECONCILIATION_HEADER, reconciliation_table(item.results, config.settings)),
-              ("intervals.csv", INTERVAL_HEADER, interval_table(item.results)),
+              (INTERVALS, INTERVAL_HEADER, interval_table(item.results)),
               ("merged_events.csv", EVENT_HEADER, event_table(item.window.events))]
     if item.window.case_periods:
         tables.append(("case_periods.csv", CASE_HEADER, case_table(item.results)))
     for name, header, rows in tables:
         write_csv(destination / name, header, rows)
+    packed = gzip_file(destination / INTERVALS, gzip_executable)
     if item.labels is not None:
         folder = destination / "labels"
         folder.mkdir()
@@ -482,10 +496,11 @@ def write_window(destination: Path, item: WindowOutput, config: FailurePathConfi
     (destination / "consistency_checks.json").write_text(
         json.dumps(item.checks, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     report = destination / REPORT_NAME
-    report.write_text("\n".join(report_lines(item.title, item.window, item.results, config.settings, item.notes)),
-                      encoding="utf-8")
+    report.write_text("\n".join(report_lines(item.title, item.window, item.results, config.settings, item.notes,
+                                             item.channel_texts)), encoding="utf-8")
     hashes = {path.relative_to(destination).as_posix(): file_sha256(path)
               for path in sorted(destination.rglob("*")) if path.is_file()}
+    hashes[f"{INTERVALS}（压缩前，不入库）"] = packed.raw
     (destination / HASH_FILE).write_text(json.dumps(hashes, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return file_sha256(report)
 
@@ -500,13 +515,17 @@ def run_v14_failure_path(root: Path) -> FailurePathRun:
         raise FileExistsError(f"失败路径分析目录已存在，拒绝覆盖：{output}")
     if config.environment.bear_markets != validation.model.bear_markets:
         raise PathError("熊市区间与 v1.4 配置登记的不一致")
-    windows = (development_output(root, validation, round2, config),
-               migration_output(root, validation, round2, config))
+    gzip_executable = find_gzip(validation.gzip_executable)
+    development = development_output(root, validation, round2, config)
+    selected = development.results[0].totals
+    if selected is None:
+        raise PathError("开发期选定设定缺少通道同时出现统计")
+    windows = (development, migration_output(root, validation, round2, config, selected))
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".staging_", dir=output.parent) as temporary:
         staging = Path(temporary) / "result"
         staging.mkdir()
-        reports = tuple(write_window(staging / item.name, item, config) for item in windows)
+        reports = tuple(write_window(staging / item.name, item, config, gzip_executable) for item in windows)
         staging.rename(output)
     return FailurePathRun(output, tuple((item.window.label, len(item.window.days) - 1, len(item.results[0].segments))
                                         for item in windows), reports)

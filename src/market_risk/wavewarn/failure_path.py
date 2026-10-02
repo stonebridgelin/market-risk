@@ -108,7 +108,7 @@ class Span:
 
     start: int                     # u：第一个执行灯色非绿的区间
     end: int                       # v：之后第一个执行灯色恢复为绿的区间；未闭合时为区间总数
-    left_truncated: bool           # 窗口第一个计入区间即为非绿
+    at_window_start: bool          # 窗口第一个计入区间即为非绿（是否左截断还要看窗口前的执行灯色）
     unclosed: bool                 # 到窗口末仍非绿
 
 
@@ -150,9 +150,21 @@ def outcome_of(gap: float, band: float) -> str:
     return DRAGGED if gap < -band else NEUTRAL
 
 
-def start_type_of(span: Span, lights: Sequence[str]) -> str:
-    """按启动方式分类；左截断的段一律归 (d)，不把窗口第一天的颜色当成启动转换。"""
-    if span.left_truncated:
+def started_before_window(span: Span, prior_lights: Sequence[str]) -> bool:
+    """段是否在窗口开始之前已经启动（左截断）。
+
+    窗口第一个计入区间即为非绿，且窗口前最后一个执行灯色不是绿灯（或没有窗口前的记录）时为真。
+    窗口前最后一个执行灯色是绿灯时，该段在窗口第一个区间启动（“窗口首日启动”），不属于窗口开始前已启动。
+    """
+    return span.at_window_start and not (bool(prior_lights) and prior_lights[-1] == GREEN)
+
+
+def start_type_of(span: Span, lights: Sequence[str], left_truncated: bool) -> str:
+    """按启动方式分类；左截断的段归 (d)，不把窗口第一天的颜色当成启动转换。
+
+    窗口首日启动的段（窗口前最后一个执行灯色为绿）按窗口第一个区间的执行灯色正常归入 (a)(b)(c)。
+    """
+    if left_truncated:
         return START_BEFORE
     if lights[span.start] == RED:
         return START_RED
@@ -170,15 +182,14 @@ class PriorStart:
 def prior_start(prior_days: Sequence[dt.date], prior_lights: Sequence[str]) -> PriorStart | None:
     """依据窗口前已有的执行灯色序列（自 t0 起连续）找出左截断段的实际启动转换。
 
-    没有窗口前的记录、或记录里找不到此前的绿灯时返回空（没有合法记录）。
-    窗口前最后一个执行灯色是绿灯时，该段其实启动于窗口第一个区间：规格没有写明这种情形归哪一类，报错停下。
+    没有窗口前的记录、或记录里找不到此前的绿灯时返回空（没有合法记录）。只对左截断的段调用。
     """
     if len(prior_days) != len(prior_lights):
         raise PathError("窗口前的日期与执行灯色不等长")
     if not prior_lights:
         return None
     if prior_lights[-1] == GREEN:
-        raise PathError("左截断的段在窗口前一个区间的执行灯色为绿：规格未写明其启动方式的归类，待负责人裁决")
+        raise PathError("窗口前最后一个执行灯色为绿的段不是左截断，不应查找窗口前的启动转换")
     index = len(prior_lights) - 1
     while index >= 0 and prior_lights[index] != GREEN:
         index -= 1
@@ -240,6 +251,8 @@ class SegmentRow:
     outcome: str
     start_type: str
     prior: PriorStart | None               # 只对 (d) 的段填写
+    left_truncated: bool                   # 确实在窗口开始之前已经启动
+    first_day_start: bool                  # 窗口首日启动：窗口第一个区间即非绿，而窗口前最后一个执行灯色为绿
 
 
 def segment_row(number: int, span: Span, path: WindowPath, settings: PathSettings) -> SegmentRow:
@@ -248,7 +261,8 @@ def segment_row(number: int, span: Span, path: WindowPath, settings: PathSetting
     total = math.fsum(gaps)
     pairs = list(itertools.pairwise(lights))
     up, down = pairs.count((YELLOW, RED)), pairs.count((RED, YELLOW))
-    start_type = start_type_of(span, path.lights)
+    left_truncated = started_before_window(span, path.prior_lights)
+    start_type = start_type_of(span, path.lights, left_truncated)
     return SegmentRow(
         number, span, path.days[span.start], path.days[span.end], path.signal_days[span.start],
         None if span.unclosed else path.signal_days[span.end], span.end - span.start, total, math.expm1(total),
@@ -258,7 +272,8 @@ def segment_row(number: int, span: Span, path: WindowPath, settings: PathSetting
         max_drawdown(wealth_from(path.full[cells])), max_drawdown(wealth_from(path.strategy[cells])),
         span.end - span.start <= settings.short_segment, up, down, min(up, down),
         outcome_of(total, settings.neutral_band), start_type,
-        prior_start(path.prior_days, path.prior_lights) if start_type == START_BEFORE else None)
+        prior_start(path.prior_days, path.prior_lights) if left_truncated else None,
+        left_truncated, span.at_window_start and not left_truncated)
 
 
 def segment_rows(path: WindowPath, settings: PathSettings) -> tuple[SegmentRow, ...]:

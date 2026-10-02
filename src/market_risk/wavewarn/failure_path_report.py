@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from market_risk.wavewarn.failure_path import (
     DRAGGED,
@@ -17,26 +18,46 @@ from market_risk.wavewarn.failure_path import (
     PathSettings,
 )
 from market_risk.wavewarn.failure_path_analysis import ObjectAnalysis, WindowInput
-from market_risk.wavewarn.failure_path_context import ENVIRONMENTS, POSITIONS, MergedEvent
+from market_risk.wavewarn.failure_path_context import (
+    ENVIRONMENTS,
+    HOLD,
+    MULTIPLE,
+    POSITIONS,
+    PULLBACK,
+    STRESS,
+    TREND,
+    ClassTotal,
+    MergedEvent,
+)
 
 Row = tuple[object, ...]
 REPORT_NAME = "失败路径分析报告.md"
 OPENING = ("本报告仅使用各窗口授权截止日以内的数据；只作描述，不改变模型规则、参数、选定设定与γ；"
            "不构成任何机制的选择依据，机制选择另由负责人裁决。")
+REVIEW_SCOPE = ("复核范围：开发期的收益区间数、非绿段、全窗口 Σd、ln(净值比)，以及逐段起止日、段长与 D，"
+                "已由产品经理与复核者分别从已入库逐日明细独立复算，结果一致；复核未审计整条信号生成链，"
+                "未运行项目测试，未独立重建迁移窗口的信号。")
 CHANNEL_TITLE = "损失时段与哪些通道激活、重叠及系统保持规则同时出现"
+GROUP_NOTE = "按启动特征分组，统计完整执行段的结果；不是启动动作的因果效果，也不是对应事件阶段的逐日结果。"
+MEAN_NOTE = "均值只作描述，不是显著性检验。"
+LONG_SHORT_NOTE = ("长段贡献了主要累计拖累；短段占用时间少，但单位区间的平均拖累更大。两种问题可以同时存在。"
+                   + MEAN_NOTE)
 NOT_APPLICABLE = "不适用"
 OUTCOMES = (IMPROVED, DRAGGED, NEUTRAL)
 START_TYPES = (START_YELLOW, START_YELLOW_RED, START_RED, START_BEFORE)
+SHORT, LONG = "短段", "长段"
+LENGTHS = (SHORT, LONG)
+BASIS_POINTS = 10000
 
 SEGMENT_HEADER = ("object", "segment", "start_execution_date", "end_execution_date", "start_signal_date",
                   "end_signal_date", "left_truncated", "unclosed", "length", "D", "exp_D_minus_1", "mean_exposure",
                   "full_log_return", "strategy_log_return", "full_max_drawdown", "strategy_max_drawdown", "short",
                   "yellow_to_red", "red_to_yellow", "round_trips", "outcome", "start_type", "prior_start_date",
                   "prior_start_transition", "event_position", "position_event", "matching_events",
-                  "environment_at_start")
-SUMMARY_HEADER = ("object", "dimension", "category", "segments", "days", "D_sum")
+                  "environment_at_start", "window_first_day_start")
+SUMMARY_HEADER = ("object", "dimension", "category", "segments", "intervals", "D_sum", "mean_d_bp")
 CHANNEL_HEADER = ("object", "class", "days", "d_sum")
-POSITION_HEADER = ("object", "category", "segments", "days", "D_sum")
+POSITION_HEADER = ("object", "category", "segments", "intervals", "D_sum", "mean_d_bp")
 ENVIRONMENT_HEADER = ("object", "label", "segments_by_start_date", "non_green_days", "d_sum", "intervals")
 CASE_HEADER = ("object", "start", "end", "intervals", "non_green_days", "d_sum", "strategy_log_return",
                "full_log_return", "strategy_max_drawdown", "full_max_drawdown", "mean_exposure", "segments")
@@ -62,39 +83,64 @@ def segment_table(results: Sequence[ObjectAnalysis]) -> tuple[Row, ...]:
         for row, position in zip(item.segments, item.positions, strict=True):
             span = row.span
             rows.append((item.path.name, row.number, row.start_date, row.end_date, blank(row.start_signal_date),
-                         blank(row.end_signal_date), flag(span.left_truncated), flag(span.unclosed), row.length,
+                         blank(row.end_signal_date), flag(row.left_truncated), flag(span.unclosed), row.length,
                          repr(row.gap), repr(row.gap_simple), repr(row.mean_exposure), repr(row.full_log_return),
                          repr(row.strategy_log_return), repr(row.full_drawdown), repr(row.strategy_drawdown),
                          flag(row.short), row.yellow_to_red, row.red_to_yellow, row.round_trips, row.outcome,
                          row.start_type, row.prior.date if row.prior else "", row.prior.transition if row.prior else "",
                          position.category, blank(position.event), ";".join(str(number) for number in position.matches),
-                         item.environments[span.start]))
+                         item.environments[span.start], flag(row.first_day_start)))
     return tuple(rows)
 
 
-def _grouped(item: ObjectAnalysis, key: Sequence[str], categories: Sequence[str]) -> list[tuple[str, int, int, float]]:
-    """按类别汇总段数、天数与原始 D 之和；中性带内的值不改成零。"""
-    return [(name, sum(value == name for value in key),
-             sum(row.length for row, value in zip(item.segments, key, strict=True) if value == name),
-             math.fsum(row.gap for row, value in zip(item.segments, key, strict=True) if value == name))
+@dataclass(frozen=True)
+class Group:
+    """一个类别的段数、区间数、原始 D 之和与每区间平均 d（基点）。"""
+
+    name: str
+    segments: int
+    intervals: int
+    gap: float
+
+    @property
+    def mean_bp(self) -> float | None:
+        """每区间平均 d（基点）= ΣD ÷ 区间数 × 10000；没有区间时为空。只作描述，不是显著性检验。"""
+        return self.gap / self.intervals * BASIS_POINTS if self.intervals else None
+
+
+def grouped(item: ObjectAnalysis, key: Sequence[str], categories: Sequence[str]) -> list[Group]:
+    """按类别汇总段数、区间数与原始 D 之和；中性带内的值不改成零。"""
+    return [Group(name, sum(value == name for value in key),
+                  sum(row.length for row, value in zip(item.segments, key, strict=True) if value == name),
+                  math.fsum(row.gap for row, value in zip(item.segments, key, strict=True) if value == name))
             for name in categories]
 
 
+def length_groups(item: ObjectAnalysis) -> list[Group]:
+    """按段长：短段（段长不超过规定的收益区间数）与长段。"""
+    return grouped(item, [SHORT if row.short else LONG for row in item.segments], LENGTHS)
+
+
+def position_groups(item: ObjectAnalysis) -> list[Group]:
+    return grouped(item, [position.category for position in item.positions], POSITIONS)
+
+
+def _mean(group: Group) -> str:
+    return "" if group.mean_bp is None else repr(group.mean_bp)
+
+
 def summary_table(results: Sequence[ObjectAnalysis]) -> tuple[Row, ...]:
-    """按结果、按启动方式、以及两者交叉的汇总。"""
+    """按结果、按启动方式、两者交叉、按段长的汇总。"""
     rows: list[Row] = []
     for item in results:
         outcomes = [row.outcome for row in item.segments]
         starts = [row.start_type for row in item.segments]
         crossed = [f"{a}｜{b}" for a, b in zip(outcomes, starts, strict=True)]
-        for dimension, key, categories in (
-                ("按结果", outcomes, OUTCOMES), ("按启动方式", starts, START_TYPES),
-                ("结果×启动方式", crossed, [f"{a}｜{b}" for a in OUTCOMES for b in START_TYPES])):
-            rows.extend((item.path.name, dimension, name, count, days, repr(total))
-                        for name, count, days, total in _grouped(item, key, categories))
-        short = [row for row in item.segments if row.short]
-        rows.append((item.path.name, "短段", "段长不超过规定的收益区间数", len(short),
-                     sum(row.length for row in short), repr(math.fsum(row.gap for row in short))))
+        groups = (("按结果", grouped(item, outcomes, OUTCOMES)), ("按启动方式", grouped(item, starts, START_TYPES)),
+                  ("结果×启动方式", grouped(item, crossed, [f"{a}｜{b}" for a in OUTCOMES for b in START_TYPES])),
+                  ("按段长", length_groups(item)))
+        rows.extend((item.path.name, dimension, group.name, group.segments, group.intervals, repr(group.gap),
+                     _mean(group)) for dimension, members in groups for group in members)
     return tuple(rows)
 
 
@@ -109,8 +155,8 @@ def channel_table(results: Sequence[ObjectAnalysis]) -> tuple[Row, ...]:
 
 
 def position_table(results: Sequence[ObjectAnalysis]) -> tuple[Row, ...]:
-    return tuple((item.path.name, name, count, days, repr(total)) for item in results
-                 for name, count, days, total in _grouped(item, [p.category for p in item.positions], POSITIONS))
+    return tuple((item.path.name, group.name, group.segments, group.intervals, repr(group.gap), _mean(group))
+                 for item in results for group in position_groups(item))
 
 
 def environment_rows(item: ObjectAnalysis) -> list[tuple[str, int, int, float, int]]:
@@ -171,9 +217,72 @@ def num(value: float) -> str:
     return f"{value:.6f}".replace("-0.000000", "0.000000")
 
 
+def points(value: float | None) -> str:
+    """基点，保留一位小数；负号用“−”。"""
+    return "—" if value is None else f"{value:.1f}".replace("-", "−")
+
+
 def md_table(header: Sequence[str], rows: Sequence[Sequence[object]]) -> list[str]:
     return ["| " + " | ".join(header) + " |", "|" + "---|" * len(header),
             *("| " + " | ".join(str(cell) for cell in row) + " |" for row in rows), ""]
+
+
+def group_table(groups: Sequence[Group]) -> list[str]:
+    return md_table(("类别", "段数", "区间数", "ΣD", "每区间平均 d（基点）"),
+                    [(group.name, group.segments, group.intervals, num(group.gap), points(group.mean_bp))
+                     for group in groups])
+
+
+def _sign(value: float) -> str:
+    return "正" if value > 0 else "负" if value < 0 else "零"
+
+
+def length_note(item: ObjectAnalysis) -> str:
+    """按段长汇总的加注：只写本窗口成立的事实，不把一个窗口的结论套用到另一个窗口。
+
+    长段合计为负且占累计拖累的大部分、短段区间数更少、短段的每区间平均 d 更低——四条都成立时，
+    写“长段贡献了主要累计拖累；短段占用时间少，但单位区间的平均拖累更大”；否则按本窗口的数字如实描述。
+    """
+    short, long = length_groups(item)
+    if short.mean_bp is None or long.mean_bp is None:
+        return MEAN_NOTE
+    if (long.gap < 0 and long.gap < short.gap < 0 and short.intervals < long.intervals
+            and short.mean_bp < long.mean_bp):
+        return LONG_SHORT_NOTE
+    drag = "拖累" if short.gap < 0 else "d"
+    return (f"短段合计为{_sign(short.gap)}，单位区间的平均{drag}为 {points(short.mean_bp)} 基点；"
+            f"长段合计为{_sign(long.gap)}。{MEAN_NOTE}")
+
+
+def _verdict(value: float) -> str:
+    return "有益" if value > 0 else "有害"
+
+
+def channel_note(totals: Sequence[ClassTotal], reference: Sequence[ClassTotal] | None, reference_label: str) -> str:
+    """通道同时出现统计的加注：各类的方向取自本窗口的数字。
+
+    reference 为另一个窗口的同一统计（没有时为空）：方向与之不同的类别逐一列出，不作横向比较。
+    """
+    by_name = {row.name: row for row in totals}
+    parts = ["分类按通道是否激活划分，不要求各层输出红灯。"]
+    clauses = []
+    for name, layer, tail in ((PULLBACK, "回调层", "它与其他层重叠的区间计入“多层同时激活”"),
+                              (TREND, "趋势层", "它参与的重叠区间没有计入这一类")):
+        row = by_name[name]
+        if row.days and row.gap != 0:
+            clauses.append(f"“{name}”为{_sign(row.gap)}，不能证明{layer}总体{_verdict(row.gap)}，{tail}")
+    if clauses:
+        parts.append("；".join(clauses) + "。")
+    parts.append("本统计可以定位拖累发生在哪里，不能识别是哪一层造成的。")
+    if reference is not None:
+        other = {row.name: row for row in reference}
+        flipped = [name for name in (HOLD, PULLBACK, TREND, STRESS, MULTIPLE)
+                   if by_name[name].days and other[name].days
+                   and _sign(by_name[name].gap) != _sign(other[name].gap)]
+        if flipped:
+            names = "、".join(f"“{name}”" for name in flipped)
+            parts.append(f"本窗口{names}的 Σd 方向与{reference_label}不同；两个窗口的输入与环境不同，不作横向比较。")
+    return "".join(parts)
 
 
 def overview_lines(results: Sequence[ObjectAnalysis]) -> list[str]:
@@ -182,42 +291,35 @@ def overview_lines(results: Sequence[ObjectAnalysis]) -> list[str]:
         path, total = item.path, item.reconciliation.total_gap
         non_green = sum(light != GREEN for light in path.lights)
         rows.append((path.name, len(path.lights), non_green, len(item.segments),
-                     sum(row.span.left_truncated for row in item.segments),
+                     sum(row.left_truncated for row in item.segments),
+                     sum(row.first_day_start for row in item.segments),
                      sum(row.span.unclosed for row in item.segments),
                      num(math.fsum(path.exposures) / len(path.lights)), num(total), num(math.expm1(total))))
-    return [*md_table(("对象", "区间数", "非绿执行区间", "非绿执行段", "左截断", "未闭合", "平均暴露",
+    return [*md_table(("对象", "区间数", "非绿执行区间", "非绿执行段", "左截断", "窗口首日启动", "未闭合", "平均暴露",
                        "全窗口 Σd_j", "exp(Σd_j) − 1"), rows),
             "Σd_j = ln(W_策略,末 ÷ W_满仓,末)；exp(Σd_j) − 1 是期末净值比减 1。"
             "各对象按同一本账列出，不作比较选优。", ""]
 
 
-def object_lines(item: ObjectAnalysis) -> list[str]:
+def object_lines(item: ObjectAnalysis, channel_text: str | None) -> list[str]:
+    """一个对象的分类汇总。channel_text 为通道同时出现统计的加注（对照没有通道，为空）。"""
     lines = [f"### {item.path.name}", ""]
     if not item.segments:
         return [*lines, "没有非绿执行段。", ""]
     outcomes, starts = [row.outcome for row in item.segments], [row.start_type for row in item.segments]
     lines += ["按结果（D > 中性带为“相对满仓收益改善”，D < −中性带为“相对满仓收益拖累”，其余“接近零”；"
-              "汇总用原始 D，中性带内的值不改成零）：", "",
-              *md_table(("类别", "段数", "天数", "ΣD"),
-                        [(name, count, days, num(total)) for name, count, days, total
-                         in _grouped(item, outcomes, OUTCOMES)]),
-              "按启动方式：", "",
-              *md_table(("类别", "段数", "天数", "ΣD"),
-                        [(name, count, days, num(total)) for name, count, days, total
-                         in _grouped(item, starts, START_TYPES)])]
-    short = [row for row in item.segments if row.short]
-    lines += [f"短段（段长不超过规定的收益区间数）{len(short)} 段，共 {sum(row.length for row in short)} 天，"
-              f"ΣD = {num(math.fsum(row.gap for row in short))}。段内黄红往返次数合计 "
-              f"{sum(row.round_trips for row in item.segments)}。", ""]
-    lines += [f"{CHANNEL_TITLE}：", ""]
-    if item.totals is None:
+              "汇总用原始 D，中性带内的值不改成零）：", "", *group_table(grouped(item, outcomes, OUTCOMES)),
+              "按启动方式：", "", *group_table(grouped(item, starts, START_TYPES)), GROUP_NOTE, "",
+              "按段长（短段为段长不超过规定的收益区间数的段，其余为长段）：", "", *group_table(length_groups(item)),
+              length_note(item), "",
+              f"段内黄红往返次数合计 {sum(row.round_trips for row in item.segments)}。", "",
+              f"{CHANNEL_TITLE}：", ""]
+    if item.totals is None or channel_text is None:
         lines += [f"{NOT_APPLICABLE}（对照没有通道）。", ""]
     else:
-        lines += md_table(("类别", "天数", "Σd_j"), [(row.name, row.days, num(row.gap)) for row in item.totals])
-    lines += ["段相对事件的位置（按每段起始执行日）：", "",
-              *md_table(("位置", "段数", "天数", "ΣD"),
-                        [(name, count, days, num(total)) for name, count, days, total
-                         in _grouped(item, [p.category for p in item.positions], POSITIONS)]),
+        lines += [*md_table(("类别", "天数", "Σd_j"), [(row.name, row.days, num(row.gap)) for row in item.totals]),
+                  channel_text, ""]
+    lines += ["段相对事件的位置（按每段起始执行日）：", "", *group_table(position_groups(item)), GROUP_NOTE, "",
               "市场环境（天数与 Σd_j 按区间归类，段数按起始执行日归类）：", "",
               *md_table(("标签", "段数", "非绿天数", "Σd_j", "窗口内区间数"),
                         [(name, segments, days, num(total), intervals)
@@ -266,21 +368,26 @@ def method_lines(window: WindowInput, settings: PathSettings) -> list[str]:
         "- 价格收益模拟口径：每日收盘按总暴露、两资产各半再平衡，现金收益为 0，不含分红与费用。"
         "任何 1 + R 不大于 0 时程序报错停下。",
         "- 非绿执行段：执行灯色连续为非绿的最长区间串 [u, v)，一律按执行日记录，信号日另列。"
-        "未闭合的段终点取最后一个计入区间的后一交易日收盘；窗口第一个计入区间即为非绿的标“左截断”。"
+        "未闭合的段终点取最后一个计入区间的后一交易日收盘。"
+        "窗口第一个计入区间即为非绿、且窗口前最后一个执行灯色也不是绿灯的段，标“左截断”（窗口开始前已启动）；"
+        "窗口前最后一个执行灯色是绿灯的，不属于窗口开始前已启动，标“窗口首日启动”，按正常规则归入启动方式。"
         "段长按收益区间数。D = Σd_j 可以相加；exp(D) − 1 不可相加。",
         f"- 按结果：D > {settings.neutral_band:g} 为“相对满仓收益改善”，D < −{settings.neutral_band:g} "
         "为“相对满仓收益拖累”，其余为“接近零”——落在预先规定的报告中性带内，不表示结果严格相同，"
         "也不表示差异只来自舍入。",
         "- 按启动方式：(a) 绿→黄启动、段内未出现红灯；(b) 绿→黄启动、段内出现过红灯；(c) 绿→红直接启动；"
         "(d) 窗口开始前已启动。属于 (d) 的段另列窗口前的实际启动方式，不把窗口第一天的颜色当成启动转换。",
-        f"- 短段：段长不超过 {settings.short_segment} 个收益区间。黄红往返次数取“黄→红次数”与“红→黄次数”的较小值。",
+        f"- 短段：段长不超过 {settings.short_segment} 个收益区间；其余为长段。"
+        "每区间平均 d（基点）= ΣD ÷ 区间数 × 10000。黄红往返次数取“黄→红次数”与“红→黄次数”的较小值。",
         "- 通道同时出现统计：每个非绿区间 j 按信号日 j−1 的通道状态归入唯一一类"
-        "（系统保持、只有回调层、只有趋势层、只有压力层、多层同时）；同层通道对两个资产取并集。"
+        "（系统保持、只有回调层、只有趋势层、只有压力层、多层同时激活、系统处于非绿）；同层通道对两个资产取并集。"
         "已入库逐日明细里每一行的 active_channels 与同一行的 signal_light 是同一天（该行日期）的状态，"
         "所以区间 j 取日期 j−1 那一行。“系统保持”只作描述，不表示这种保持合理；没有做逐通道的反事实回测。",
         f"- 段相对事件的位置：按起始执行日 s，用半开区间——确认前 [P, T0)、确认后 [T0, Tr)、低点后 [Tr, End)、"
         f"高点前{window.lookback}日 [P 前第 {window.lookback} 个交易日, P)；End 当日不属于该事件。"
-        "先匹配正在发生的事件（多个时取高点最晚的），再匹配高点前的（多个时取高点最早的），都不匹配归事件外。",
+        "先匹配正在发生的事件（多个时取高点最晚的），再匹配高点前的（多个时取高点最早的），都不匹配归事件外。"
+        "没有任何事件匹配时：两个资产都处于尾段未定归“事件外（尾段未定）”，"
+        "只有一个资产处于尾段未定归“事件外（部分资产尾段未定）”。",
         "- 市场环境：熊市优先（区间起点日 d 满足 P ≤ d < Tr）；其余按所在日历年的 SPX 价格指数年度收益"
         "（当年最后一个收盘价 ÷ 上一年最后一个收盘价 − 1）分上涨年、下跌年、平淡年；平淡年不等同于震荡市。"
         "完整日历年没有在授权截止日以内结束的，标“完整年度分类不可得”。标签只作描述，不进入任何信号与选择。",
@@ -288,9 +395,13 @@ def method_lines(window: WindowInput, settings: PathSettings) -> list[str]:
 
 
 def report_lines(title: str, window: WindowInput, results: Sequence[ObjectAnalysis], settings: PathSettings,
-                 notes: Sequence[str]) -> list[str]:
-    """一个窗口的报告；notes 为读写边界给出的附加小节（标签口径、一致性检查、输入与哈希）。"""
-    return [f"# {title}", "", OPENING, "", *method_lines(window, settings), "## 对象概览", "",
+                 notes: Sequence[str], channel_texts: Sequence[str | None]) -> list[str]:
+    """一个窗口的报告。
+
+    notes 为读写边界给出的附加小节（标签口径、一致性检查、输入与哈希）；
+    channel_texts 与 results 一一对应，为各对象通道同时出现统计的加注（对照为空）。
+    """
+    return [f"# {title}", "", OPENING, "", REVIEW_SCOPE, "", *method_lines(window, settings), "## 对象概览", "",
             *overview_lines(results), "## 各对象的分类汇总", "",
-            *(line for item in results for line in object_lines(item)), *case_lines(results),
-            *reconciliation_lines(results, settings), *notes]
+            *(line for item, text in zip(results, channel_texts, strict=True) for line in object_lines(item, text)),
+            *case_lines(results), *reconciliation_lines(settings=settings, results=results), *notes]

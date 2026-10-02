@@ -52,6 +52,7 @@ from market_risk.wavewarn.failure_path_context import (
     HOLD,
     MULTIPLE,
     OUTSIDE,
+    OUTSIDE_PARTIAL_TAIL,
     OUTSIDE_TAIL,
     PRE_PEAK,
     PULLBACK,
@@ -59,6 +60,7 @@ from market_risk.wavewarn.failure_path_context import (
     TREND,
     UP_YEAR,
     YEAR_UNAVAILABLE,
+    ClassTotal,
     EnvironmentSettings,
     MergedEvent,
     annual_returns,
@@ -68,7 +70,16 @@ from market_risk.wavewarn.failure_path_context import (
     environment_of,
     segment_position,
 )
-from market_risk.wavewarn.failure_path_report import segment_table, summary_table
+from market_risk.wavewarn.failure_path_report import (
+    LONG_SHORT_NOTE,
+    SEGMENT_HEADER,
+    SUMMARY_HEADER,
+    channel_note,
+    length_groups,
+    length_note,
+    segment_table,
+    summary_table,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 SETTINGS = PathSettings(0.0001, 5, 1e-10)
@@ -142,7 +153,7 @@ def test_stops_when_one_plus_return_is_not_positive() -> None:
 def test_segment_boundaries_left_truncated_and_unclosed() -> None:
     """执行灯色 黄、红、绿、绿、黄、黄（6 个区间）：
 
-    段 1 = [0, 2)：窗口第一个区间即非绿 → 左截断；v = 2（第一个恢复绿灯的区间），段长 2。
+    段 1 = [0, 2)：窗口第一个区间即非绿，窗口前最后一个执行灯色是黄 → 左截断；v = 2（第一个恢复绿灯的区间），段长 2。
     段 2 = [4, 6)：到窗口末仍非绿 → 未闭合；终点取最后一个计入区间的后一交易日（第 7 个日期），段长 2。
     满仓 R 每个区间 +1%：段 1 的 D = [ln(1.005) − ln(1.01)] + [0 − ln(1.01)]；段 2 的 D = 2·[ln(1.005) − ln(1.01)]。
     """
@@ -162,6 +173,8 @@ def test_segment_boundaries_left_truncated_and_unclosed() -> None:
     assert first.mean_exposure == pytest.approx(0.25) and first.full_log_return == pytest.approx(2 * math.log(1.01))
     assert (first.yellow_to_red, first.red_to_yellow, first.round_trips) == (1, 0, 0)
     assert first.short and second.short
+    assert (first.left_truncated, first.first_day_start) == (True, False)
+    assert (second.left_truncated, second.first_day_start) == (False, False)
 
 
 def test_segment_drawdowns_include_both_end_points_and_round_trips() -> None:
@@ -183,23 +196,45 @@ def test_start_types_and_actual_start_before_the_window() -> None:
 
     (d) 的段另查窗口前的执行灯色（自 t0 起连续）：绿、绿、红、黄 → 该段实际在窗口前第 2 个区间启动，转换为“绿→红”，
     而不是按窗口第一天的颜色（黄）判成绿→黄。没有窗口前的记录时留空。
-    窗口前最后一个执行灯色是绿时，该段其实启动于窗口第一个区间，规格没有写明归类：报错停下。
     """
-    assert start_type_of(Span(1, 3, False, False), "绿黄黄绿") == START_YELLOW
-    assert start_type_of(Span(1, 4, False, False), "绿黄红黄绿") == START_YELLOW_RED
-    assert start_type_of(Span(1, 3, False, False), "绿红黄绿") == START_RED
-    assert start_type_of(Span(0, 2, True, False), "黄黄绿") == START_BEFORE
+    assert start_type_of(Span(1, 3, False, False), "绿黄黄绿", False) == START_YELLOW
+    assert start_type_of(Span(1, 4, False, False), "绿黄红黄绿", False) == START_YELLOW_RED
+    assert start_type_of(Span(1, 3, False, False), "绿红黄绿", False) == START_RED
+    assert start_type_of(Span(0, 2, True, False), "黄黄绿", True) == START_BEFORE
     (row,) = segment_rows(_path("黄黄绿", (0.01, 0.01, 0.01), prior="绿绿红黄"), SETTINGS)
     assert row.start_type == START_BEFORE and row.prior is not None
     assert (row.prior.date, row.prior.transition) == (DAYS[8], "绿→红")
     (blank,) = segment_rows(_path("黄黄绿", (0.01, 0.01, 0.01)), SETTINGS)
-    assert blank.start_type == START_BEFORE and blank.prior is None
+    assert blank.start_type == START_BEFORE and blank.prior is None and blank.left_truncated
     assert prior_start(DAYS[:2], ("红", "黄")) is None                 # 记录里找不到此前的绿灯：没有合法记录
-    with pytest.raises(PathError, match="规格未写明"):
-        segment_rows(_path("黄黄绿", (0.01, 0.01, 0.01), prior="绿绿"), SETTINGS)
     # 不是左截断的段不查窗口前的记录。
     (inside,) = segment_rows(_path("绿黄绿", (0.01, 0.01, 0.01), prior="绿红"), SETTINGS)
     assert inside.start_type == START_YELLOW and inside.prior is None
+
+
+def test_segment_starting_on_the_first_window_day_is_not_left_truncated() -> None:
+    """补充规格 2(a)：窗口第一个区间即非绿，但窗口前最后一个执行灯色是绿 → 该段在窗口第一个区间启动，
+
+    不属于“窗口开始前已启动”：“左截断”记否，另标“窗口首日启动”，按窗口第一个区间的执行灯色正常归类。
+    窗口前 绿、绿，窗口内 黄、黄、绿 → (a)；黄、红、绿 → (b)；红、黄、绿 → (c)。都不查窗口前的启动转换。
+    对比：窗口前最后一个执行灯色是黄（绿、黄）时，同样的窗口内灯色是左截断、归 (d)。
+    """
+    expected = {"黄黄绿": START_YELLOW, "黄红绿": START_YELLOW_RED, "红黄绿": START_RED}
+    for lights, start_type in expected.items():
+        (row,) = segment_rows(_path(lights, (0.01, 0.01, 0.01), prior="绿绿"), SETTINGS)
+        assert (row.start_type, row.left_truncated, row.first_day_start, row.prior) == (start_type, False, True, None)
+        assert row.span.at_window_start and row.start_date == DAYS[10]
+        (before,) = segment_rows(_path(lights, (0.01, 0.01, 0.01), prior="绿黄"), SETTINGS)
+        assert (before.start_type, before.left_truncated, before.first_day_start) == (START_BEFORE, True, False)
+    with pytest.raises(PathError, match="不是左截断"):
+        prior_start(DAYS[:2], ("绿", "绿"))
+    # 段账本：窗口首日启动的段“左截断”一列写否，最后一列“窗口首日启动”写是。
+    # 自 t0 起的信号 黄、黄、绿……：t0 当日执行的是初始的绿灯，窗口的三个区间执行 黄、黄、绿。
+    days = DAYS[10:14]
+    analysis = analyse_object(ObjectInput("对象", ("黄", "黄", "绿", "绿", "绿"), None),
+                              _window(days, (0.01, 0.01, 0.01)), SETTINGS, ENVIRONMENT)
+    (line,) = segment_table([analysis])
+    assert (line[6], line[-1], line[21]) == ("否", "是", START_YELLOW)
 
 
 def test_neutral_band_changes_the_class_but_never_the_raw_value() -> None:
@@ -349,7 +384,8 @@ def test_event_position_right_censored_and_tail_unknown() -> None:
 
     s = 第 21 日 → 确认前；第 23 日 → 确认后；第 25、29 日 → 低点后（事件未结束）（[暂定低点, 窗口末)）。
     尾段未定：两个资产都把第 33—36 日标为“尾段（寻峰）”，且不属于任何事件 → 事件外（尾段未定）。
-    只有一个资产标了的日子，规格没有写明合并口径：报错停下。尾段未定的日子若落在事件里，仍按事件归类。
+    补充规格 2(b)：只有一个资产标了、且没有任何事件匹配 → 事件外（部分资产尾段未定）；
+    另一资产有正在发生的事件（合并事件匹配）时按该事件归类，高点前 20 日匹配时也按事件归类。
     """
     events = (_event(1, 20, 22, 25, None),)
     expected = {21: BEFORE_T0, 23: AFTER_T0, 25: AFTER_TROUGH_OPEN, 29: AFTER_TROUGH_OPEN}
@@ -359,11 +395,16 @@ def test_event_position_right_censored_and_tail_unknown() -> None:
     position = segment_position(DAYS[34], (_event(1, 5, 6, 7, 8),), DAYS, tail, 20, DAYS[39])
     assert (position.category, position.event, position.matches) == (OUTSIDE_TAIL, None, ())
     assert segment_position(DAYS[32], (_event(1, 5, 6, 7, 8),), DAYS, tail, 20, DAYS[39]).category == OUTSIDE
-    with pytest.raises(PathError, match="规格未写明"):
-        segment_position(DAYS[34], (), DAYS, {"SPX": frozenset(DAYS[33:37]), "QQQ": frozenset()}, 20, DAYS[39])
-    inside = segment_position(DAYS[34], (_event(1, 33, 35, 36, 38),), DAYS,
-                              {"SPX": frozenset(DAYS[33:37]), "QQQ": frozenset()}, 20, DAYS[39])
-    assert inside.category == BEFORE_T0
+    partial = {"SPX": frozenset(DAYS[33:37]), "QQQ": frozenset()}
+    position = segment_position(DAYS[34], (), DAYS, partial, 20, DAYS[39])
+    assert (position.category, position.event, position.matches) == (OUTSIDE_PARTIAL_TAIL, None, ())
+    assert segment_position(DAYS[34], (_event(1, 5, 6, 7, 8),), DAYS, partial, 20, DAYS[39]).category == (
+        OUTSIDE_PARTIAL_TAIL)
+    inside = segment_position(DAYS[34], (_event(1, 33, 35, 36, 38),), DAYS, partial, 20, DAYS[39])
+    assert (inside.category, inside.event) == (BEFORE_T0, 1)
+    ahead = segment_position(DAYS[34], (_event(1, 37, 38, 39, None),), DAYS, partial, 20, DAYS[39])
+    assert (ahead.category, ahead.event) == (PRE_PEAK, 1)
+    assert segment_position(DAYS[32], (), DAYS, partial, 20, DAYS[39]).category == OUTSIDE
 
 
 def test_bear_market_is_half_open_and_has_priority() -> None:
@@ -454,3 +495,68 @@ def test_failure_path_algorithm_modules_do_not_import_io_modules() -> None:
             "print(json.dumps(bad))\n")
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert json.loads(out.stdout) == []
+
+
+def test_length_groups_mean_in_basis_points_and_window_specific_notes() -> None:
+    """按段长的汇总与加注。每区间平均 d（基点）= ΣD ÷ 区间数 × 10000。
+
+    窗口一（8 + 1 + 2 = 11 个区间）：执行 绿、红×6、绿、黄、绿、绿，满仓 R：长段 6 个区间各 +0.5%，短段 1 个区间 +1%。
+    长段（6 个区间，e = 0）：D = −6·ln(1.005) = −0.029925，每区间 −49.9 基点；
+    短段（1 个区间，e = 0.5）：D = ln(1.005) − ln(1.01) = −0.004963，每区间 −49.6 基点。
+    长段合计更负、短段区间更少，但短段的每区间平均并不更低（−49.6 > −49.9）→ 不满足“短段单位区间平均拖累更大”，
+    不得写开发期那句话，只按本窗口的数字描述。
+    窗口二：把短段的满仓 R 改为 +3%：短段 D = ln(1.015) − ln(1.03) = −0.014670，每区间 −146.7 基点 < −49.9 →
+    四条都成立，写“长段贡献了主要累计拖累；短段占用时间少，但单位区间的平均拖累更大”。
+    窗口三：长段各 −0.5%（空仓躲过下跌，长段合计为正）：写“短段合计为负……长段合计为正”，不套用别的窗口的结论。
+    """
+    lights = "绿红红红红红红绿黄绿绿"
+
+    def analysis(long_return: float, short_return: float):
+        full = (0.0, *(long_return,) * 6, 0.0, short_return, 0.0, 0.0)
+        return analyse_object(ObjectInput("对象", (*lights, "绿", "绿"), None), _window(DAYS[10:22], full), SETTINGS,
+                              ENVIRONMENT)
+
+    first = analysis(0.005, 0.01)
+    short, long = length_groups(first)
+    assert (short.segments, short.intervals, long.segments, long.intervals) == (1, 1, 1, 6)
+    assert long.gap == pytest.approx(-6 * math.log(1.005)) and long.mean_bp == pytest.approx(-49.875, abs=1e-3)
+    assert short.gap == pytest.approx(math.log(1.005) - math.log(1.01))
+    assert short.mean_bp == pytest.approx(-49.628, abs=1e-3)
+    tail = "均值只作描述，不是显著性检验。"
+    assert length_note(first) == f"短段合计为负，单位区间的平均拖累为 −49.6 基点；长段合计为负。{tail}"
+    second = analysis(0.005, 0.03)
+    assert length_groups(second)[0].mean_bp == pytest.approx(-146.70, abs=1e-2)
+    assert length_note(second) == LONG_SHORT_NOTE
+    third = analysis(-0.005, 0.01)
+    assert length_note(third) == f"短段合计为负，单位区间的平均拖累为 −49.6 基点；长段合计为正。{tail}"
+    # 汇总表：列名为区间数与每区间平均 d；按段长的两行与按结果的三行都带这一列，没有区间的类别为空。
+    assert SUMMARY_HEADER[4:] == ("intervals", "D_sum", "mean_d_bp") and SEGMENT_HEADER[-1] == "window_first_day_start"
+    rows = {(row[1], row[2]): row for row in summary_table([first])}
+    assert rows["按段长", "长段"][3:5] == (1, 6)
+    assert float(rows["按段长", "长段"][6]) == pytest.approx(-49.875, abs=1e-3)
+    assert rows["按结果", "相对满仓收益改善"][3:5] == (0, 0) and rows["按结果", "相对满仓收益改善"][6] == ""
+
+
+def test_channel_note_takes_its_signs_from_the_window_itself() -> None:
+    """通道同时出现统计的加注：方向取自本窗口的数字，不把另一个窗口的方向写进来。
+
+    本窗口：只有回调层 +0.05、只有趋势层 −0.10、多层同时激活 −0.50 → “只有回调层为正，不能证明回调层总体有益……
+    只有趋势层为负，不能证明趋势层总体有害……”。
+    另一个窗口：回调层 −0.09、趋势层 +0.27、多层 +0.29 → 方向正好相反；与前一个窗口对照时列出三类方向不同，
+    并注明不作横向比较。没有天数的类别（只有压力层）不写方向，也不参加对照。
+    """
+    def totals(pullback: float, trend: float, multiple: float, stress_days: int) -> tuple[ClassTotal, ...]:
+        return (ClassTotal(HOLD, 5, -0.02), ClassTotal(PULLBACK, 6, pullback), ClassTotal(TREND, 7, trend),
+                ClassTotal(STRESS, stress_days, 0.03 if stress_days else 0.0), ClassTotal(MULTIPLE, 9, multiple))
+
+    development, migration = totals(0.05, -0.10, -0.50, 4), totals(-0.09, 0.27, 0.29, 0)
+    note = channel_note(development, None, "开发期")
+    assert note.startswith("分类按通道是否激活划分，不要求各层输出红灯。")
+    assert "“只有回调层”为正，不能证明回调层总体有益，它与其他层重叠的区间计入“多层同时激活”" in note
+    assert "“只有趋势层”为负，不能证明趋势层总体有害，它参与的重叠区间没有计入这一类。" in note
+    assert note.endswith("本统计可以定位拖累发生在哪里，不能识别是哪一层造成的。") and "方向" not in note
+    other = channel_note(migration, development, "开发期")
+    assert "“只有回调层”为负，不能证明回调层总体有害" in other and "“只有趋势层”为正，不能证明趋势层总体有益" in other
+    assert other.endswith("本窗口“只有回调层”、“只有趋势层”、“多层同时激活、系统处于非绿”的 Σd 方向与开发期不同；"
+                          "两个窗口的输入与环境不同，不作横向比较。")
+    assert "只有压力层" not in other and MULTIPLE == "多层同时激活、系统处于非绿"

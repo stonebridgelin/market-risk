@@ -15,13 +15,16 @@ from dataclasses import dataclass
 
 from market_risk.wavewarn.failure_path import GREEN, PathError
 
-HOLD, PULLBACK, TREND, STRESS, MULTIPLE = "系统保持", "只有回调层", "只有趋势层", "只有压力层", "多层同时"
+HOLD, PULLBACK, TREND, STRESS, MULTIPLE = (
+    "系统保持", "只有回调层", "只有趋势层", "只有压力层", "多层同时激活、系统处于非绿")
 CHANNEL_CLASSES = (HOLD, PULLBACK, TREND, STRESS, MULTIPLE)
 LAYER_CLASS = {"回调层": PULLBACK, "趋势层": TREND, "压力层": STRESS}
 
-BEFORE_T0, AFTER_T0, AFTER_TROUGH, AFTER_TROUGH_OPEN, PRE_PEAK, OUTSIDE, OUTSIDE_TAIL = (
-    "确认前", "确认后", "低点后", "低点后（事件未结束）", "高点前20日", "事件外", "事件外（尾段未定）")
-POSITIONS = (BEFORE_T0, AFTER_T0, AFTER_TROUGH, AFTER_TROUGH_OPEN, PRE_PEAK, OUTSIDE, OUTSIDE_TAIL)
+BEFORE_T0, AFTER_T0, AFTER_TROUGH, AFTER_TROUGH_OPEN, PRE_PEAK, OUTSIDE, OUTSIDE_TAIL, OUTSIDE_PARTIAL_TAIL = (
+    "确认前", "确认后", "低点后", "低点后（事件未结束）", "高点前20日", "事件外", "事件外（尾段未定）",
+    "事件外（部分资产尾段未定）")
+POSITIONS = (BEFORE_T0, AFTER_T0, AFTER_TROUGH, AFTER_TROUGH_OPEN, PRE_PEAK, OUTSIDE, OUTSIDE_TAIL,
+             OUTSIDE_PARTIAL_TAIL)
 
 BEAR, UP_YEAR, DOWN_YEAR, FLAT_YEAR, YEAR_UNAVAILABLE = "熊市", "上涨年", "下跌年", "平淡年", "完整年度分类不可得"
 ENVIRONMENTS = (BEAR, UP_YEAR, DOWN_YEAR, FLAT_YEAR, YEAR_UNAVAILABLE)
@@ -40,7 +43,10 @@ def channel_layer(name: str) -> str:
 
 
 def channel_class(active: Sequence[str]) -> str:
-    """一个非绿区间按信号日激活的通道归入唯一一类。"""
+    """一个非绿区间按信号日激活的通道归入唯一一类。
+
+    分类按通道是否激活划分，不要求各层输出红灯：跨两层及以上有通道激活即“多层同时激活、系统处于非绿”。
+    """
     layers = {channel_layer(name) for name in active}
     if not layers:
         return HOLD
@@ -115,8 +121,9 @@ def segment_position(start: dt.date, events: Sequence[MergedEvent], axis: Sequen
     """段的起始执行日 start 相对合并事件的位置。
 
     先匹配正在发生的事件，多个时取高点最晚的；没有时再匹配“高点前 lookback 个交易日”，多个时取高点最早的；
-    都不匹配归事件外。尾段未定按资产分别给出：起始日在两个资产里一个属于尾段未定、另一个不属于时，
-    规格没有写明怎样归类，报错停下。
+    都不匹配归事件外。尾段未定按资产分别给出，且只在没有任何事件匹配时才看（另一资产有正在发生的事件时，
+    合并事件已经匹配，按该事件归类）：全部资产都处于尾段未定归“事件外（尾段未定）”，
+    只有部分资产处于尾段未定归“事件外（部分资产尾段未定）”。
     """
     index = {day: number for number, day in enumerate(axis)}
     current = [(event, category) for event in events
@@ -129,10 +136,10 @@ def segment_position(start: dt.date, events: Sequence[MergedEvent], axis: Sequen
         return Position(category, event.number, matches)
     if ahead:
         return Position(PRE_PEAK, min(ahead, key=lambda item: item.peak).number, matches)
-    flags = {symbol: start in days for symbol, days in tail_unknown.items()}
-    if len(set(flags.values())) > 1:
-        raise PathError(f"{start} 只在部分资产里属于尾段未定：规格未写明合并口径，待负责人裁决")
-    return Position(OUTSIDE_TAIL if any(flags.values()) else OUTSIDE, None, matches)
+    flags = [start in days for days in tail_unknown.values()]
+    if flags and all(flags):
+        return Position(OUTSIDE_TAIL, None, matches)
+    return Position(OUTSIDE_PARTIAL_TAIL if any(flags) else OUTSIDE, None, matches)
 
 
 @dataclass(frozen=True)
