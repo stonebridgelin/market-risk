@@ -22,8 +22,11 @@ VERSION_OF_COMMIT = {
     **dict.fromkeys(("5bc227f",), "v1.4（开发期评价）"),
     **dict.fromkeys(("e8bbc18", "514836c", "09afca0"), "v1.4（验证期工程）"),
     **dict.fromkeys(("db3d208", "e85f63d", "bfe78a0", "a0a8ec0"), "v1.4（检验口径与诊断补充）"),
+    **dict.fromkeys(("176c9ae",), "v1.4（失败路径分析，T2）"),
+    **dict.fromkeys(("e505ceb",), "v1.4（旧补充历史的标签影响量化）"),
 }
-RECOMPUTE = ("evaluate-v14-development", "v14-extended-history", "v14-diagnostics-round2", "v14-extended-nav")
+RECOMPUTE = ("evaluate-v14-development", "v14-extended-history", "v14-diagnostics-round2", "v14-extended-nav",
+             "v14-failure-path", "v14-label-cutoff-impact")
 
 
 def git(*args: str) -> str:
@@ -85,8 +88,13 @@ def commands(root: Path, known: set[str], graph: dict[str, set[str]]) -> dict[st
     return result
 
 
+V14_TESTS = ("_v14", "failure_path", "label_cutoff")       # 文件名里没有版本号的 v1.4 测试也在此登记
+
+
 def test_version(name: str) -> str:
-    return "v1.4" if "_v14" in name else "v1.3" if "_v13" in name else "v1.2.1"
+    if any(mark in name for mark in V14_TESTS):
+        return "v1.4"
+    return "v1.3" if "_v13" in name else "v1.2.1"
 
 
 def table(header: tuple[str, ...], rows: list[tuple[str, ...]]) -> list[str]:
@@ -170,14 +178,14 @@ def main() -> None:
         "口径：", "",
         "- “所属版本”按模块首次提交所在的批次归类；之后被别的版本改过的，看“最后修改”一列。",
         "- “直接导入它的测试”只算测试文件里直接 import 的；“可到达它的命令”按 services 函数里的导入逐层展开。",
-        f"- “复算命令”指阶段二复算用的四条：{joined(list(RECOMPUTE))}；“复算工具”指 `docs/audit/` 下的脚本。",
+        f"- “复算命令”指已入库输出的复算命令：{joined(list(RECOMPUTE))}；“复算工具”指 `docs/audit/` 下的脚本。",
         "- 引用关系是静态的：能到达不等于每次运行都会执行到。", "",
         f"## 一、模块（{len(module_rows)} 个）", "",
         *table(("模块", "所属版本", "首次提交", "最后修改", "直接导入它的测试", "可到达它的命令", "导入它的复算工具",
                 "状态"), module_rows),
         f"没有任何引用的模块：{'、'.join(unreferenced) if unreferenced else '无'}。", "",
         f"## 二、命令（{len(command_rows)} 条）", "",
-        *table(("命令", "入口函数", "是否阶段二的复算命令", "可到达的波段预警模块数"), command_rows),
+        *table(("命令", "入口函数", "是否复算命令", "可到达的波段预警模块数"), command_rows),
         f"## 三、测试（{len(test_rows)} 个文件）", "",
         *table(("测试文件", "对应版本", "直接导入的波段预警模块数"), test_rows),
         "## 四、配置", "", *table(("文件", "版本"), config_rows),
