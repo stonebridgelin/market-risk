@@ -64,7 +64,7 @@ from market_risk.wavewarn_v20.research_run import (
 )
 from market_risk.wavewarn_v20.selection import Outcome, select
 from market_risk.wavewarn_v20.snapshot import Snapshot, make_snapshot
-from market_risk.wavewarn_v20.state_machine import evidence_series, run_channels
+from market_risk.wavewarn_v20.state_machine import Risk, SystemState, evidence_series, run_channels
 
 FIRST = dt.date(2003, 1, 2)
 END = dt.date(2005, 12, 30)
@@ -555,3 +555,24 @@ def test_l1_policy_result_types_without_missing_prices(base: WindowResult) -> No
     for candidate in SUBSET:
         assert isinstance(base.candidates[candidate].outcome.policy, PolicyResult)
         assert isinstance(base.candidates[candidate].outcome.signal_nav, NavResult)
+
+
+# ---------------------------------------------------------------------------
+# 甲补修二（A2 补充一裁决 1）：“灯色相同、计数器不同”按定稿二第五节的“任意两次运行”口径（L2）
+# ---------------------------------------------------------------------------
+
+
+def test_l2_same_risk_different_counters_any_two_runs() -> None:
+    """三条内存构造的运行：第 0 日两条 S 同为正常而计数不同、第三条为二级 → 记录（原“全部运行 S 相同”口径不记录）；
+    第 1 日三条完整状态全同 → 不记录；收敛位置及之后的日不记录。"""
+    days = (dt.date(2004, 1, 5), dt.date(2004, 1, 6), dt.date(2004, 1, 7))
+    normal = SystemState(Risk.NORMAL, 1, 1)
+    runs = (research_run.EnumeratedRun(SystemState(Risk.NORMAL, 0, 0),
+                                       (SystemState(Risk.NORMAL, 0, 0), normal, SystemState(Risk.NORMAL, 0, 1))),
+            research_run.EnumeratedRun(SystemState(Risk.NORMAL, 1, 1), (normal, normal, normal)),
+            research_run.EnumeratedRun(SystemState(Risk.LEVEL2, 0, 0),
+                                       (SystemState(Risk.LEVEL2, 0, 0), normal, normal)))
+    first_day = [run.states[0] for run in runs]
+    assert len({state.risk for state in first_day}) == 2      # 原口径（全部运行 S 相同）不会记录第 0 日
+    assert research_run._same_risk_different_counters(days, runs, 3) == (days[0], days[2])   # 第 1 日全同，不记录
+    assert research_run._same_risk_different_counters(days, runs, 1) == (days[0],)            # 收敛位置起不再记录

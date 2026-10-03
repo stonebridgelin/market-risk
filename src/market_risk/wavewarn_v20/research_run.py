@@ -836,12 +836,20 @@ def _system_runs(evidence: Sequence[Evidence], k: int, h: int) -> tuple[Enumerat
                  for initial in system_initial_states(h))
 
 
-def _same_risk_different_counters(days: Sequence[dt.date], runs: tuple[EnumeratedRun, ...]) -> tuple[dt.date, ...]:
-    """系统各运行中“S 相同而完整状态不同”的日期。"""
+def _same_risk_different_counters(days: Sequence[dt.date], runs: tuple[EnumeratedRun, ...],
+                                  first_common_local: int) -> tuple[dt.date, ...]:
+    """“灯色相同、计数器不同”的日期（定稿二第五节：“构造场景，使某一日两个不同初始状态的运行 S 相同、但 c₁ 或 c₂
+    不同。”；甲线补充裁决：《A2 补充二》第二节及负责人 2026-10-03 追认）。收敛日（first_common_local）之前的每一天，
+    若存在任意两次运行该日 S 相同而 (c₁, c₂) 不同，记该日。"""
     result = []
-    for day, states in zip(days, zip(*(run.states for run in runs), strict=True), strict=True):
-        risks = {state.risk for state in states if isinstance(state, SystemState)}
-        if len(risks) == 1 and len(set(states)) > 1:
+    for index, (day, states) in enumerate(zip(days, zip(*(run.states for run in runs), strict=True), strict=True)):
+        if index >= first_common_local:
+            break
+        counters: dict[Risk, set[tuple[int, int]]] = {}
+        for state in states:
+            if isinstance(state, SystemState):
+                counters.setdefault(state.risk, set()).add((state.c1, state.c2))
+        if any(len(values) > 1 for values in counters.values()):
             result.append(day)
     return tuple(result)
 
@@ -864,10 +872,10 @@ def _diagnostics(result: WindowResult, progress: _Progress, parameters: RunParam
         kappa = window.convergences[candidate].kappa_channel
         evidence = progress.evidence[(candidate.k, theta)][kappa - t0:]
         system_runs = _system_runs(evidence, candidate.k, candidate.h)
+        system = _enumerated("系统", kappa + 1, system_runs)
         convergence[candidate] = ConvergenceDiag(
-            MappingProxyType({name: _enumerated(name, k, channels[name]) for name in CHANNEL_NAMES}),
-            _enumerated("系统", kappa + 1, system_runs),
-            _same_risk_different_counters([item.day for item in evidence], system_runs))
+            MappingProxyType({name: _enumerated(name, k, channels[name]) for name in CHANNEL_NAMES}), system,
+            _same_risk_different_counters([item.day for item in evidence], system_runs, system.first_common_local))
     reference_runs = tuple(EnumeratedRun(initial, tuple(item.risk for item in run_reference(initial, trend, average)))
                            for initial in reference_initial_states())
     return Diagnostics(MappingProxyType({"SPX": _drawdowns(progress.spx), "QQQ": _drawdowns(progress.qqq)}),

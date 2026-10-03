@@ -25,7 +25,7 @@ from wavewarn_v20_helpers import POLICY, POSITIONS, TOLERANCE, WINDOWS
 
 from market_risk.calendar import stock_trading_days
 from market_risk.storage.paths import StoragePaths
-from market_risk.wavewarn_v20 import config_v20, data_v20, nav, r1
+from market_risk.wavewarn_v20 import config_v20, data_v20, nav, r1, research_run
 from market_risk.wavewarn_v20.confirmatory import stationary_bootstrap_indices
 from market_risk.wavewarn_v20.convergence import (
     CHANNEL_NAMES,
@@ -50,11 +50,14 @@ from market_risk.wavewarn_v20.execution import (
     switches,
 )
 from market_risk.wavewarn_v20.inputs import below_average, drawdown_reaches, snapshot_asset_days, snapshot_trend_days
+from market_risk.wavewarn_v20.labels_r2 import R2Thresholds
+from market_risk.wavewarn_v20.r2 import R2Rule
 from market_risk.wavewarn_v20.reference import run_reference
 from market_risk.wavewarn_v20.selection import registered_candidates
 from market_risk.wavewarn_v20.snapshot import Snapshot, make_snapshot
 from market_risk.wavewarn_v20.state_machine import (
     Risk,
+    SystemState,
     direct_level2_days,
     evidence_series,
     level1_release_checks,
@@ -572,7 +575,7 @@ def project_bootstrap(items: Sequence[Mapping]) -> list[dict]:
 
 # 四种比对状态，另加“路径差异”（乙补修二第二节：项目两条路径的异常类别不同，已知原因，不计一致）。
 # 窗口末日边界按负责人 2026-10-03 裁决记“未比较”，另以 window_end() 单独计数。
-STATUSES = ("一致", "不一致", "未比较", "接口差异", "路径差异")
+STATUSES = ("一致", "不一致", "未比较", "接口差异", "路径差异", "裁决差异（D13-甲）")
 
 
 @dataclass
@@ -617,6 +620,14 @@ class Recorder:
     def total(self, status: str) -> int:
         return sum(count for (_, _, kind), count in self.counts.items() if kind == status)
 
+    def drop(self, layer: str, item: str | None = None) -> int:
+        """删去某层（或某层某项）的全部计数与明细，返回删去的条数（第二轮消化第一轮的未比较占位）。"""
+        keys = [key for key in self.counts if key[0] == layer and (item is None or key[1] == item)]
+        removed = sum(self.counts.pop(key) for key in keys)
+        self.details = [entry for entry in self.details
+                        if not (entry["layer"] == layer and (item is None or entry["item"] == item))]
+        return removed
+
     def window_end(self) -> int:
         """窗口末日边界的条数（工具在 E 日标“止损无法确定”的对象数）。"""
         return sum(count for (_, item, _), count in self.counts.items() if item == WINDOW_END_ITEM)
@@ -633,8 +644,8 @@ GAP_ITEM = "W 自首个缺价日 m 起不可计算且不恢复（工具 W 为空
 GAP_RETURN_NOTE = "项目接口未提供：PartialPolicyResult 不保留缺价后收益"
 
 
-def compare_undetermined_reason(record: Recorder, key: str, tool_reason: object, mine_reason: object) -> None:
-    layer = "候选执行政策研究模拟"
+def compare_undetermined_reason(record: Recorder, key: str, tool_reason: object, mine_reason: object,
+                                layer: str = "候选执行政策研究模拟") -> None:
     expected = UNDETERMINED_REASONS.get(tool_reason) if isinstance(tool_reason, str) else None
     if expected is None:
         record.add(layer, UNDETERMINED_ITEM, "未比较", key, tool_reason, mine_reason, "工具的原因不在映射表中")
@@ -756,8 +767,9 @@ def next_trading_day(axis: Sequence[str], day: str) -> str | None:
     return axis[position + 1] if position + 1 < len(axis) else None
 
 
-def compare_exec_sim(record: Recorder, key: str, tool: Mapping, mine: Mapping, signals: Sequence[Mapping]) -> None:
-    layer = "候选执行政策研究模拟"
+def compare_exec_sim(record: Recorder, key: str, tool: Mapping, mine: Mapping, signals: Sequence[Mapping],
+                     layer: str = "候选执行政策研究模拟") -> None:
+    """layer 默认为候选；第二轮主参照执行政策研究模拟用同一函数，只换层名（《比对第二轮A》第三节第 6 项）。"""
     tool_failed = tool.get("failed")
     if mine.get("failed") is not None or (tool_failed is not None and tool_failed.get("type") != "缺价"):
         record.exact(layer, "failed", key, tool.get("failed"), mine.get("failed"))
@@ -784,7 +796,7 @@ def compare_exec_sim(record: Recorder, key: str, tool: Mapping, mine: Mapping, s
         record.check(layer, "undetermined（e == d⁺）", e == plus, key, {"d": d, "d⁺": plus}, e)
         stop_index = axis.index(plus)
         compare_undetermined_reason(record, key, tool_days[axis.index(d)].get("stop_check"),
-                                    mine["undetermined"].get("reason"))
+                                    mine["undetermined"].get("reason"), layer)
     gap = first_gap_index(axis, tool_failed)
     for index, (left, signal) in enumerate(zip(tool_days, signals, strict=True)):
         where = f"{key} {left['idx']}"
@@ -1104,3 +1116,731 @@ def compare_bootstrap(record: Recorder, tool: Mapping, project: Sequence[Mapping
         for name in ("seed", "b", "n"):
             record.exact("抽样索引", name, where, left[name], right[name])
         record.exact("抽样索引", "sequences", where, left["sequences"], right["sequences"])
+
+
+# ---------------------------------------------------------------------------
+# 第二轮（A2）：研究组合层接入（《接线会话指令：构造比对第二轮（A2）》）
+# 只做表示换算，不新增推导规则；字段映射表见接线说明第十一节。
+# ---------------------------------------------------------------------------
+
+A2_THRESHOLDS = R2Thresholds(Decimal("0.95"), Decimal("1.05"), Decimal("0.97"))   # 登记第三节
+A2_RULE = R2Rule(3, 5, 20)                                                       # 产品规格第八节
+A2_R1_RATIO = 0.5                                                                # 登记第五节第 1 小节
+SELF_SAME, SELF_DIFFERENT, SELF_NO_BASELINE, SELF_NO_FIELD = "相同", "不同", "无第一轮基准", "停止前无字段"
+# 《A2 补充二》第四节第 2 条：Unavailable 只接受这两种（source, reason_code）组合，其他记“未比较（映射表外）”。
+ALLOWED_UNAVAILABLE = {("basket_prefix", "缺少必需价格"), ("labels_r2.r2_events", "缺少必需价格")}
+# 第二轮消化的第一轮“未比较”占位：（层，项目；None 为整层）。只在组合层未停止时删去并以新层的比对代替。
+SUPERSEDED = (("未比较（项目尚缺组合层）", None), ("未比较（all_valid 的登记取值待组合层设计裁决）", None),
+              ("未比较（项目接口未提供）", "selection.reasons、ledger.pre_window_count"), ("输入派生量", "d"),
+              ("信号模拟", "nav.lev_factor、lev_ok"), ("主参照信号模拟", "nav.lev_factor、lev_ok"),
+              ("收敛", "channel_conv.runs、system_conv.runs、same_s_diff_counter_days"))
+EXIT_TO_TOOL = {research_run.Exit.NO_START: "t0 不存在", research_run.Exit.NOT_CONVERGED: "未收敛",
+                research_run.Exit.EMPTY_WINDOW: "评价窗口为空"}
+
+
+def self_state(check: object) -> str:
+    return check["状态"] if isinstance(check, dict) else str(check)
+
+
+def assert_self_consistent(checks: Mapping[str, object], name: str) -> None:
+    """自洽检查任一“不同”即停（《A2 修订二》第二节、第六节）；“无第一轮基准”“停止前无字段”不计相同也不计不同。"""
+    different = [field for field, check in checks.items() if self_state(check) == SELF_DIFFERENT]
+    assert not different, f"{name} 自洽检查不同：{different}"
+
+
+def research_histories(root: Path) -> dict[str, dt.date]:
+    """登记历史起点：构造配置 config/wavewarn_v20.yaml 中两资产的 first_date（经 config_v20 读取，不手写）。"""
+    config = config_v20.load_v20_config(root)
+    return {asset: config.registered[asset].first_date for asset in ASSETS}
+
+
+def declared_late_starts(scenario: Mapping) -> list[dict]:
+    """《A2 补充二》第三节第 2 条：原始场景定义（meta，由生成脚本写入，工具不读）明确声明某资产自某日起才开始
+    提供价格。识别条件：meta.类型 以“晚开始”结尾且含资产名，且 meta.缺价 中该资产有“起 = 0”的一项；
+    声明开始下标 = 该项“长度”（生成脚本把该资产前“长度”日的价格置空）。只读场景定义，不读生成脚本运行结果。"""
+    meta = scenario.get("meta") or {}
+    kind = meta.get("类型")
+    found: list[dict] = []
+    if not isinstance(kind, str) or not kind.endswith("晚开始"):
+        return found
+    for gap in meta.get("缺价") or []:
+        asset = gap.get("资产")
+        if asset in ASSETS and asset in kind and gap.get("起") == 0 and isinstance(gap.get("长度"), int):
+            start = gap["长度"]
+            found.append({"资产": asset, "声明开始下标": start, "声明开始日": scenario["axis"][start],
+                          "依据": {"meta.类型": kind, "meta.缺价项": dict(gap)},
+                          "声明日之前有价格": any(value is not None for value in scenario["prices"][asset][:start])})
+    return found
+
+
+def construct_histories(scenario: Mapping, configured: Mapping[str, dt.date]) -> tuple[dict[str, dt.date], list[dict]]:
+    """构造历史起点（裁决 2 收紧版）：默认取构造配置 first_date；只对场景定义明确声明晚开始、且声明日之前该资产
+    无任何价格的资产，改为声明开始日。返回（histories，逐资产依据表）。"""
+    histories = dict(configured)
+    table = []
+    for item in declared_late_starts(scenario):
+        asset = item["资产"]
+        corrected = not item["声明日之前有价格"]
+        if corrected:
+            histories[asset] = dt.date.fromisoformat(item["声明开始日"])
+        table.append({"资产": asset, "原起点（配置 first_date）": day_text(configured[asset]),
+                      "新起点": day_text(histories[asset]), "依据（场景定义字段原文）": item["依据"],
+                      "声明开始日": item["声明开始日"], "声明日之前有价格": "有" if item["声明日之前有价格"] else "无",
+                      "处理": "修正为声明开始日" if corrected else "维持原起点（声明日之前有价格）"})
+    return histories, table
+
+
+def start_disclosure(corrected: research_run.WindowResult, corrected_choice: object,
+                     original: research_run.WindowResult, original_choice: object) -> dict:
+    """修正起点的场景：两套起点下 R2 事件可得性、记录差异与选择出口的摘要（《A2 补充二》第三节第 4 条）。"""
+    def events(result: research_run.WindowResult) -> dict:
+        if result.common is None:
+            return {}
+        return {asset: (f"不可得（{value.source}，{value.reason_code}，缺 {len(value.missing)} 日）"
+                        if isinstance(value, research_run.Unavailable) else f"可得（{len(value)} 个事件）")
+                for asset, value in result.common.events.items()}
+
+    differences = []
+    for left, right in zip(corrected.records, original.records, strict=True):
+        for name in ("failed", "r1", "r2", "log_wealth", "switches"):
+            a, b = getattr(left, name), getattr(right, name)
+            if (dict(a) if name == "r2" else a) != (dict(b) if name == "r2" else b):
+                differences.append({"组": group_key(left.candidate), "字段": name,
+                                    "修正起点": dict(a) if name == "r2" else a,
+                                    "原起点": dict(b) if name == "r2" else b})
+
+    def outcome(choice: object) -> object:
+        return None if choice is None else choice.selection.outcome.value          # type: ignore[attr-defined]
+
+    return {"R2 事件（修正起点）": events(corrected), "R2 事件（原起点）": events(original),
+            "记录差异条数": len(differences), "记录差异": differences,
+            "选择出口（修正起点）": outcome(corrected_choice), "选择出口（原起点）": outcome(original_choice)}
+
+
+def run_research(snapshot: Snapshot, histories: Mapping[str, dt.date]) -> tuple[research_run.WindowResult,
+                                                                              research_run.DevelopmentSelection | None]:
+    """开发期、登记 27 组、诊断开启的一次运行；未停止时调用 select_development（容差 1e-10）。"""
+    spec = research_run.WindowSpec(research_run.Purpose.DEVELOPMENT, None, snapshot.day, histories,
+                                   research_run.InitialStates(REGISTERED_CHANNELS, REGISTERED_SYSTEM,
+                                                              REGISTERED_REFERENCE),
+                                   research_run.Continuity.COMPLETE_TRADING_AXIS)
+    parameters = research_run.RunParameters(WINDOWS, POSITIONS, POLICY, A2_THRESHOLDS, A2_RULE, COMMON_START_OFFSET,
+                                            TOLERANCE, A2_R1_RATIO, (), True)
+    result = research_run.run_window(snapshot, spec, parameters, research_run.REGISTERED_CANDIDATES)
+    chosen = research_run.select_development(result, TOLERANCE) if result.stop is None else None
+    return result, chosen
+
+
+def missing_fields(missing: Sequence[tuple[str, dt.date]]) -> list[list[str]]:
+    return [[asset, day_text(day)] for asset, day in missing]
+
+
+def signal_sim_fields(outcome: research_run.ObjectOutcome, basket: Sequence[float]) -> dict:
+    """组合层对象结果 → 第一轮 signal_simulation 的同构表示（首个执行日来源记“初始建仓”）。"""
+    plan = []
+    for index, (target, record) in enumerate(zip(outcome.targets, outcome.signals, strict=True)):
+        item = target_fields(target, "初始建仓" if index == 0 else None)
+        item.update({"signal_idx": day_text(record.day), "S": RISK_NAMES[record.risk]})
+        plan.append(item)
+    result: dict = {"plan": plan, "switches": len(outcome.switches), "switch_list": switch_fields(outcome.switches),
+                    "failed": None, "nav": None, "summary": None}
+    if isinstance(outcome.signal_nav, research_run.Unavailable):
+        result["failed"] = {"type": "缺价", "missing": missing_fields(outcome.signal_nav.missing)}
+        return result
+    result.update(nav_fields(outcome.signal_nav, basket))
+    return result
+
+
+def policy_fields(policy: nav.PolicyResult | nav.PartialPolicyResult, basket: Sequence[float]) -> dict:
+    """执行政策研究模拟结果 → 第一轮 policy_simulation 的同构表示。basket 为窗口的收益前缀。"""
+    changes = switches(policy.targets, POSITIONS)
+    if isinstance(policy, nav.PolicyResult):
+        fields = nav_fields(policy.nav, basket)
+        return {"complete": True, "targets": [target_fields(item) for item in policy.targets], "days": fields["nav"],
+                "summary": fields["summary"], "undetermined": None, "missing": [], "switches": len(changes),
+                "switch_list": switch_fields(changes), "failed": None}
+    days = [{"idx": day_text(item.day), "W": item.wealth} for item in policy.executions]
+    for index in range(1, len(days)):
+        days[index]["U"], days[index]["R"] = basket[index - 1], policy.returns[index - 1]
+    undetermined = None if policy.undetermined is None else {
+        "day": day_text(policy.undetermined.day), "reason": policy.undetermined.reason}
+    return {"complete": False, "targets": [target_fields(item) for item in policy.targets], "days": days,
+            "summary": None, "undetermined": undetermined, "missing": missing_fields(policy.missing),
+            "switches": len(changes), "switch_list": switch_fields(changes), "failed": None}
+
+
+BASKET_UNAVAILABLE = ("basket_prefix", "缺少必需价格")        # ALLOWED_UNAVAILABLE 中信号净值与一直持有唯一允许的组合
+LABELS_UNAVAILABLE = ("labels_r2.r2_events", "缺少必需价格")
+SELF_OUT_OF_TABLE = "未比较（映射表外）"
+
+
+def unavailable_allowed(value: object, combination: tuple[str, str]) -> bool:
+    """Unavailable 的 (source, reason_code) 是否为映射表内的组合（补充二第四节第 2 条；补充三修订二第一节第 3 条）。"""
+    return (getattr(value, "source", None), getattr(value, "reason_code", None)) == combination and \
+        combination in ALLOWED_UNAVAILABLE
+
+
+def nav_or_missing(value: object, basket: Sequence[float]) -> dict:
+    """信号净值或一直持有 → 第一轮同构表示；Unavailable 只接受 (basket_prefix, 缺少必需价格)，表外组合保留原值。"""
+    if isinstance(value, research_run.Unavailable):
+        if not unavailable_allowed(value, BASKET_UNAVAILABLE):
+            return {"映射表外": {"source": value.source, "reason_code": value.reason_code}}
+        return {"failed": {"type": "缺价", "missing": missing_fields(value.missing)}, "nav": None, "summary": None}
+    return {"failed": None, **nav_fields(value, basket)}
+
+
+def research_fields(result: research_run.WindowResult, axis: Sequence[dt.date]) -> dict:
+    """组合层结果 → 第一轮项目字段的同构表示（自洽检查用；只做表示换算）。只放入实际已产生的部分：
+    窗口（window）、主参照（reference 且 common）、一直持有（common）、已完成的候选组（candidates）。"""
+    window, common, reference = result.window, result.common, result.reference
+    fields: dict = {"映射表外": {}, "groups": {}}
+    if window is not None:
+        fields.update({"t0": day_text(axis[window.t0]), "kappa_all": day_text(axis[window.kappa_all]),
+                       "j0": day_text(axis[window.j0]), "j0_index": window.j0, "n": window.n,
+                       "E": day_text(axis[-1]), "E_index": window.e_index,
+                       "window_first_signal_day": day_text(axis[window.j0 - 1]),
+                       "reference": {"conv_day": day_text(axis[window.reference_index])}})
+    basket = common.prefix.values if common is not None else ()
+    if window is not None and reference is not None and common is not None:
+        signal = nav_or_missing(reference.outcome.signal_nav, basket)
+        fields["reference"].update({
+            "days": [{"day": day_text(item.day), "L": item.level, "S": RISK_NAMES[item.risk]}
+                     for item in reference.days],
+            "signal_sim": None if "映射表外" in signal else signal_sim_fields(reference.outcome, basket),
+            "all_valid": list(reference.all_valid)})
+        if "映射表外" in signal:
+            fields["映射表外"]["reference.signal_sim"] = signal["映射表外"]
+    if common is not None:
+        fields["hold"] = nav_or_missing(common.hold, basket)
+        fields["common.prefix"] = {"values": list(common.prefix.values), "first_missing": common.prefix.first_missing}
+    for candidate, outcome in result.candidates.items():
+        assert window is not None
+        convergence = window.convergences[candidate]
+        signal = nav_or_missing(outcome.outcome.signal_nav, basket)
+        key = group_key(candidate)
+        fields["groups"][key] = {
+            "channel_conv": {name: day_text(axis[index]) for name, index in convergence.channel_indices.items()},
+            "kappa_ch": day_text(axis[convergence.kappa_channel]),
+            "system_conv": day_text(axis[convergence.system_index]),
+            "days": [{"day": day_text(item.day), "S": RISK_NAMES[item.risk], "c1": item.c1, "c2": item.c2,
+                      "L": item.level, "A1": item.a1, "A2": item.a2} for item in outcome.system],
+            "signal_sim": None if "映射表外" in signal else signal_sim_fields(outcome.outcome, basket),
+            "exec_sim": policy_fields(outcome.outcome.policy, basket),
+            # 第一轮 exec_signals 为窗口各执行日当日的信号；组合层的净值模拟信号覆盖 axis[j0−1 .. E−1]，取其第 2 项起。
+            "exec_signals": [{"idx": day_text(item.day), "S": RISK_NAMES[item.risk], "all_valid": item.all_valid,
+                              "signal_target": exposure_of(position_of(item.risk))}
+                             for item in outcome.outcome.signals[1:]]}
+        if "映射表外" in signal:
+            fields["映射表外"][f"{key}.signal_sim"] = signal["映射表外"]
+    return fields
+
+
+def canonical(value: object) -> object:
+    """经同一 JSON 序列化与解析，消除元组与列表、float 与 Decimal 文字的表示差别。"""
+    return parse_json(dump_json(value))
+
+
+MISSING = object()          # 哨兵：第一轮项目字段缺键（不与合法的 None 混同）
+
+
+def leaves(value: object, path: str = "") -> dict[str, object]:
+    """嵌套字典与列表展开为 路径 → 叶值；列表下标写入路径。空字典、空列表本身作为叶保留（路径与类型都参与比较）。"""
+    found: dict[str, object] = {}
+    if isinstance(value, dict) and value:
+        for key, item in value.items():
+            found.update(leaves(item, f"{path}.{key}" if path else str(key)))
+    elif isinstance(value, list) and value:
+        for index, item in enumerate(value):
+            found.update(leaves(item, f"{path}[{index}]"))
+    else:
+        found[path] = value
+    return found
+
+
+def leaf_same(left: object, right: object) -> bool:
+    """浮点（float、Decimal）沿用第一轮容差口径 abs_tol = 1e-12；布尔、整数、文字、None、空容器精确相等（类型须同）。"""
+    if isinstance(left, bool) or isinstance(right, bool) or left is None or right is None:
+        return type(left) is type(right) and left == right
+    if isinstance(left, int) and isinstance(right, int):
+        return left == right
+    if isinstance(left, float | Decimal) and isinstance(right, float | Decimal):
+        return close(float(left), float(right))
+    return type(left) is type(right) and left == right
+
+
+def grown_from_empty(path: str, value: object, left: Mapping[str, object]) -> bool:
+    """第一轮该路径为空字典或空列表，而组合层在同一路径下有同类型的子项：只是组合层多出的键。"""
+    if isinstance(value, dict) and not value:
+        return any((key.startswith(f"{path}.") if path else not key.startswith("[")) for key in left)
+    if isinstance(value, list) and not value:
+        return any(key.startswith(f"{path}[") for key in left)
+    return False
+
+
+def compare_group(mine: object, saved: object) -> dict:
+    """一组字段逐叶比较（负责人口径）：组合层多出的键记“无第一轮基准”；第一轮已有的键在组合层缺失、或由非空变为空
+    （字典、列表同样），一律判“不同”；任一叶不同则该组“不同”。第一轮缺该组为“无第一轮基准”。"""
+    if saved is MISSING:
+        return {"状态": SELF_NO_BASELINE, SELF_SAME: 0, SELF_DIFFERENT: 0, SELF_NO_BASELINE: len(leaves(mine)),
+                "组合层实际值": mine if not isinstance(mine, dict | list) else "（见逐场景记录）"}
+    left, right = leaves(mine), leaves(saved)
+    counts = {SELF_SAME: 0, SELF_DIFFERENT: 0, SELF_NO_BASELINE: 0}
+    for path, value in left.items():
+        if path not in right:
+            counts[SELF_NO_BASELINE] += 1
+        else:
+            counts[SELF_SAME if leaf_same(value, right[path]) else SELF_DIFFERENT] += 1
+    for path, value in right.items():
+        if path not in left and not grown_from_empty(path, value, left):
+            counts[SELF_DIFFERENT] += 1
+    if counts[SELF_DIFFERENT]:
+        state = SELF_DIFFERENT
+    elif counts[SELF_SAME]:
+        state = SELF_SAME
+    else:
+        state = SELF_NO_BASELINE
+    return {"状态": state, **counts}
+
+
+def key_of(mapping: object, key: str) -> object:
+    return mapping[key] if isinstance(mapping, dict) and key in mapping else MISSING
+
+
+def no_field() -> dict:
+    return {"状态": SELF_NO_FIELD, SELF_SAME: 0, SELF_DIFFERENT: 0, SELF_NO_BASELINE: 0}
+
+
+def compare_stop(stop: research_run.StopRecord, saved_stop: object) -> dict[str, dict]:
+    """停止字段按已登记映射分别比较（补充三修订二第一节第 2 条）：已登记的只有 STOP_REASONS 表的三个原因码
+    （无法确定 t0、始终不收敛、评价窗口为空），其取值与组合层出口文字、原因码同一套。出口或原因码在表内的，
+    与第一轮 stop.reason 比较，异常类名与第一轮 stop.class、细分与第一轮同名字段直接比较；不在表内的一律记
+    “无第一轮基准”并保留实际值，不为补齐映射猜测对应。第一轮明确记录未停止（stop 为 null）而组合层以表内
+    出口停止，判“不同”。"""
+    registered = stop.exit.value in STOP_REASONS
+    if saved_stop is None:
+        reference: object = {"reason": None, "class": None, **{name: None for name in stop.detail}}
+    else:
+        reference = saved_stop if isinstance(saved_stop, dict) else {}
+    checks = {
+        "stop.exit ↔ 第一轮 stop.reason": compare_group(stop.exit.value, key_of(reference, "reason")
+                                                         if registered else MISSING),
+        "stop.reason_code ↔ 第一轮 stop.reason": compare_group(
+            stop.reason_code, key_of(reference, "reason") if stop.reason_code in STOP_REASONS else MISSING),
+        "stop.exception_type ↔ 第一轮 stop.class": compare_group(stop.exception_type, key_of(reference, "class")
+                                                                 if registered else MISSING)}
+    for name, value in stop.detail.items():
+        checks[f"stop.detail.{name}"] = compare_group(canonical(value), key_of(reference, name)
+                                                      if registered else MISSING)
+    return checks
+
+
+def self_consistency(result: research_run.WindowResult, project: Mapping,
+                     axis: Sequence[dt.date]) -> dict[str, dict]:
+    """组合层输出与 _2 项目字段逐字段组比较（《A2 修订二》第二节；补充二第四节第 1 条；补充三修订二第一节）。
+    四种状态：相同 / 不同 / 无第一轮基准 / 停止前无字段；信号净值或一直持有的 Unavailable 为表外组合时，该组记
+    “未比较（映射表外）”。逐字段组判断是否在停止前已产生：已产生且第一轮有对应项的照常比较，未产生的记
+    “停止前无字段”。project 已由 parse_json 解析，不再重复序列化。"""
+    checks: dict[str, dict] = {}
+    saved_stop = key_of(project, "stop")
+    if result.stop is not None:
+        checks.update(compare_stop(result.stop, saved_stop))
+    else:
+        checks["stop"] = compare_group(None, saved_stop)
+    fields = research_fields(result, axis)
+    out_of_table = fields.pop("映射表外")
+    mine = canonical(fields)
+    saved_reference = key_of(project, "reference")
+    mine_reference = mine.get("reference", {})
+
+    def produced(name: str, value: object, saved: object) -> None:
+        checks[name] = no_field() if value is MISSING else compare_group(value, saved)
+
+    for name in ("t0", "kappa_all", "j0", "j0_index", "n", "E", "E_index", "window_first_signal_day"):
+        produced(name, mine.get(name, MISSING), key_of(project, name))
+    produced("reference.conv_day", mine_reference.get("conv_day", MISSING), key_of(saved_reference, "conv_day"))
+    first = day_text(axis[result.window.j0 - 2]) if result.window is not None else ""
+    saved_days = key_of(saved_reference, "days")
+    produced("reference.days", mine_reference.get("days", MISSING), MISSING if saved_days is MISSING else [
+        {name: item[name] for name in ("day", "L", "S") if name in item} for item in saved_days
+        if item["day"] >= first])
+    if "reference.signal_sim" in out_of_table:
+        checks["reference.signal_sim"] = {"状态": SELF_OUT_OF_TABLE, **out_of_table["reference.signal_sim"]}
+    else:
+        produced("reference.signal_sim", mine_reference.get("signal_sim", MISSING),
+                 key_of(saved_reference, "signal_sim"))
+    produced("reference.all_valid", mine_reference.get("all_valid", MISSING), MISSING)
+    if isinstance(mine.get("hold"), dict) and "映射表外" in mine["hold"]:
+        checks["hold"] = {"状态": SELF_OUT_OF_TABLE, **mine["hold"]["映射表外"]}
+    else:
+        produced("hold", mine.get("hold", MISSING), key_of(project, "hold"))
+    produced("common.prefix", mine.get("common.prefix", MISSING), MISSING)
+    saved_groups = key_of(project, "groups")
+    completed = list(mine["groups"])
+    if result.stop is None:
+        checks["groups 键"] = compare_group(sorted(completed),
+                                           MISSING if saved_groups is MISSING else sorted(saved_groups))
+    elif completed:
+        # 候选阶段停止：只比已完成的候选组，各组须在第一轮组中。
+        checks["groups 键（已完成候选）"] = compare_group(completed, MISSING if saved_groups is MISSING else [
+            key for key in saved_groups if key in mine["groups"]])
+    else:
+        checks["groups 键（已完成候选）"] = no_field()
+    for key, group in mine["groups"].items():
+        other = key_of(saved_groups, key)
+        for name in ("channel_conv", "kappa_ch", "system_conv", "exec_sim"):
+            checks[f"{key}.{name}"] = compare_group(group[name], key_of(other, name))
+        if f"{key}.signal_sim" in out_of_table:
+            checks[f"{key}.signal_sim"] = {"状态": SELF_OUT_OF_TABLE, **out_of_table[f"{key}.signal_sim"]}
+        else:
+            checks[f"{key}.signal_sim"] = compare_group(group["signal_sim"], key_of(other, "signal_sim"))
+        other_signals = key_of(other, "exec_signals")
+        last = group["exec_signals"][-1]["idx"] if group["exec_signals"] else ""
+        checks[f"{key}.exec_signals（axis[j0 .. E−1]）"] = compare_group(
+            group["exec_signals"], MISSING if other_signals is MISSING else [
+                item for item in other_signals if item["idx"] <= last])
+        other_days = key_of(other, "days")
+        checks[f"{key}.days"] = compare_group(group["days"], MISSING if other_days is MISSING else [
+            {name: item[name] for name in ("day", "S", "c1", "c2", "L", "A1", "A2") if name in item}
+            for item in other_days if item["day"] >= first])
+    return checks
+
+
+# 映射表第 1 至 11 项（接线说明第十一节）
+
+
+def compare_r2_events(record: Recorder, tool: Mapping, events: Mapping) -> None:
+    layer = "R2 事件"
+    errors = tool.get("r2_events_error") or {}
+    for asset in ASSETS:
+        mine = events[asset]
+        if isinstance(mine, research_run.Unavailable) and (mine.source, mine.reason_code) != (
+                "labels_r2.r2_events", "缺少必需价格"):
+            record.add(layer, "不可得（映射表外）", "未比较", asset, errors.get(asset),
+                       [mine.source, mine.reason_code], "未比较（映射表外）：只映射 labels_r2.r2_events + 缺少必需价格")
+            continue
+        if isinstance(mine, research_run.Unavailable):
+            error = errors.get(asset)
+            record.check(layer, "不可得（reason_code ↔ r2_events_error.reason）", error is not None and
+                         error.get("reason") == mine.reason_code, asset, error, mine.reason_code)
+            record.exact(layer, "不可得（missing ↔ missing_days）", asset,
+                         None if error is None else error.get("missing_days"),
+                         [day_text(day) for _, day in mine.missing])
+            continue
+        listed = (tool.get("r2_events") or {}).get(asset)
+        record.exact(layer, "可得", asset, listed is not None and asset not in errors, True)
+        if listed is None:
+            continue
+        record.exact(layer, "事件数", asset, len(listed), len(mine))
+        for left, right in zip(listed, mine, strict=False):
+            where = f"{asset} {left['P']}"
+            for name, value in (("P", day_text(right.peak)), ("T3", day_text(right.t3)), ("T5", day_text(right.t5)),
+                                ("Tr", day_text(right.trough)),
+                                ("End", None if right.end is None else day_text(right.end)),
+                                ("unfinished", right.unfinished)):
+                record.exact(layer, name, where, left[name], value)
+            record.exact(layer, "C_P", where, Decimal(str(left["C_P"])), right.peak_close)
+            record.exact(layer, "C_Tr", where, Decimal(str(left["C_Tr"])), right.trough_close)
+
+
+def ratio_pair(value: object) -> object:
+    """工具的 [a, b] 或 "无定义" ↔ 项目的 (a, b) 或 None。"""
+    return None if value == "无定义" else (None if value is None else list(value))
+
+
+def compare_r2_judgements(record: Recorder, key: str, tool_group: Mapping, results: Mapping) -> None:
+    layer = "R2 判定"
+    tool_r2 = tool_group.get("r2") or {}
+    for asset in ASSETS:
+        mine = results[asset]
+        where = f"{key} {asset}"
+        left = tool_r2.get(asset)
+        if mine is None or left is None:
+            record.exact(layer, "R2 无法计算（双方均无判定）", where, left is None, mine is None)
+            continue
+        record.exact(layer, "事件数", where, len(left["events"]), len(mine.judgements))
+        for event, judgement in zip(left["events"], mine.judgements, strict=False):
+            at = f"{where} {event['P']}"
+            pairs = (("P", day_text(judgement.event.peak)), ("category", judgement.category.value),
+                     ("first_new", None if judgement.first_new_day is None else day_text(judgement.first_new_day)),
+                     ("exec_idx", None if judgement.executable_day is None else day_text(judgement.executable_day)),
+                     ("offset_vs_T3", judgement.executable_offset),
+                     ("peak_new_uncertain", judgement.peak_new_uncertain),
+                     ("first_new_confirmable", judgement.peak_new_uncertain))
+            for name, value in pairs:
+                record.exact(layer, f"events.{name}", at, event[name], value)
+        record.exact(layer, "counts", where, dict(left["counts"]),
+                     {category.value: count for category, count in mine.counts.items()})
+        for name, value in (("denominator", mine.denominator), ("passed", mine.achieved),
+                            ("new_only", mine.new_only), ("computable", mine.computable),
+                            ("ratio_ok", mine.meets)):
+            record.exact(layer, name, where, left[name], value)
+        record.exact(layer, "excluding_insufficient", where, ratio_pair(left["excluding_insufficient"]),
+                     None if mine.excluding_insufficient is None else list(mine.excluding_insufficient))
+
+
+def compare_ledgers(record: Recorder, key: str, tool_group: Mapping, ledgers: Mapping) -> None:
+    layer = "提示段账"
+    left = tool_group.get("ledger")
+    for asset in ASSETS:
+        mine = ledgers[asset]
+        where = f"{key} {asset}"
+        if left is None or mine is None:
+            if left is None and mine is not None:
+                record.add(layer, "段账", "未比较", where, None, "有",
+                           "工具在任一资产 R2 事件不可得时不输出 ledger")
+            else:
+                record.exact(layer, "段账（双方均无）", where, left is None, mine is None)
+            continue
+        segments = left["segments"]
+        record.exact(layer, "段数", where, len(segments), len(mine.classes))
+        for segment, (span, category) in zip(segments, mine.classes, strict=False):
+            at = f"{where} {segment['start']}"
+            record.exact(layer, "segments.start、end、pre_window", at,
+                         [segment["start"], segment["end"], segment["pre_window"]],
+                         [day_text(span.start), day_text(span.end), span.pre_window])
+            # 工具对窗口前已启动的段不分资产归类（class 为 null）；项目记为“窗口前已启动”。
+            tool_class = research_pre_window_class() if segment["class"] is None else segment["class"][asset]
+            record.exact(layer, "segments.class", at, tool_class, category.value)
+        counts = {category.value: count for category, count in mine.counts.items()}
+        pre = counts.pop(research_pre_window_class())
+        record.exact(layer, "by_asset.counts", where, dict(left["by_asset"][asset]["counts"]), counts)
+        record.exact(layer, "pre_window_count", where, left["pre_window_count"], pre)
+        record.exact(layer, "false_alarm_ratio", where, ratio_pair(left["by_asset"][asset]["false_alarm_ratio"]),
+                     None if mine.false_alarm_ratio is None else list(mine.false_alarm_ratio))
+
+
+def research_pre_window_class() -> str:
+    return "窗口前已启动"
+
+
+def compare_r1(record: Recorder, key: str, tool_group: Mapping, mine: object) -> None:
+    layer = "R1"
+    left = tool_group.get("r1") or {}
+    record.exact(layer, "computable", key, left.get("computable"), mine.computable)
+    record.exact(layer, "ok", key, left.get("ok"), mine.satisfied)
+    record.number(layer, "mdd_signal", key, left.get("mdd_signal"), mine.signal_drawdown)
+    record.number(layer, "mdd_hold", key, left.get("mdd_hold"), mine.hold_drawdown)
+    if "ratio" in left:
+        record.add(layer, "ratio", "未比较", key, left["ratio"], None, "项目接口未提供：R1Result 不给出回撤比")
+    for _ in left.get("segments") or []:
+        record.add(layer, "segments", "未比较", key, note="本轮不比分段报告（工具无对应的项目分段输入）")
+
+
+def compare_records_and_selection(record: Recorder, tool: Mapping, result: research_run.WindowResult,
+                                  chosen: research_run.DevelopmentSelection | None) -> None:
+    layer = "候选记录与选择"
+    records = tool.get("records") or []
+    record.exact(layer, "记录数", "records", len(records), len(result.records))
+    for left, right in zip(records, result.records, strict=False):
+        where = left["key"]
+        record.exact(layer, "key", where, left["key"], group_key(right.candidate))
+        record.exact(layer, "order", where, left["order"], right.order)
+        record.exact(layer, "failure ↔ failed", where, left["failure"] is not None, right.failed)
+        record.number(layer, "lnW_end", where, left["lnW_end"], right.log_wealth)
+        record.exact(layer, "r1_ok", where, left["r1_ok"], right.r1)
+        record.exact(layer, "r2_ok", where, dict(left["r2_ok"]), dict(right.r2))
+        record.exact(layer, "switches", where, left["switches"], right.switches)
+        for name in ("nav_missing", "r2_computable"):
+            record.add(layer, name, "未比较", where, left[name], None,
+                       "项目接口未提供：CandidateRecord 不给出合并标记（以 lnW_end、r2_ok 的 None 分项比对）")
+    selection = tool.get("selection")
+    if selection is None or chosen is None:
+        record.exact(layer, "selection 是否存在", "selection", selection is None, chosen is None)
+        return
+    mine = chosen.selection
+    record.exact(layer, "exit ↔ outcome", "selection", selection["exit"], mine.outcome.value)
+    record.exact(layer, "selected", "selection", selection.get("selected"),
+                 None if mine.selected is None else group_key(mine.selected))
+    record.exact(layer, "feasible", "selection", selection.get("feasible", []), [group_key(c) for c in mine.feasible])
+    record.exact(layer, "tie_group ↔ tied", "selection", selection.get("tie_group", []),
+                 [group_key(c) for c in mine.tied])
+    record.number(layer, "M ↔ maximum", "selection", selection.get("M"), mine.maximum)
+    if "reasons" in selection:
+        record.add(layer, "selection.reasons", "未比较", "selection", selection["reasons"], None,
+                   "项目接口未提供：SelectionResult 不给出原因文字")
+
+
+def reference_exec_signals(reference: research_run.ReferenceOutcome) -> list[dict]:
+    """主参照窗口各执行日（axis[j0 .. E]）当日的信号：reference.days 与 all_valid 自 axis[j0−2] 起，取第 3 项起。"""
+    return [{"idx": day_text(item.day), "S": RISK_NAMES[item.risk], "all_valid": valid,
+             "signal_target": exposure_of(position_of(item.risk))}
+            for item, valid in zip(reference.days[2:], reference.all_valid[2:], strict=True)]
+
+
+def compare_drawdowns(record: Recorder, tool: Mapping, diagnostics: research_run.Diagnostics,
+                      cutoff_index: int) -> None:
+    layer = "诊断 D/D̂"
+    for asset in ASSETS:
+        tool_days = tool["inputs"][asset][:cutoff_index + 1]
+        mine = diagnostics.drawdowns[asset]
+        record.exact(layer, "日数", asset, len(tool_days), len(mine))
+        for left, right in zip(tool_days, mine, strict=False):
+            where = f"{asset} {left['day']}"
+            record.exact(layer, "day", where, left["day"], day_text(right.day))
+            record.exact(layer, "d ↔ drawdown（Decimal）", where,
+                         None if left.get("d") is None else Decimal(str(left["d"])), right.drawdown)
+            record.exact(layer, "h_complete ↔ not is_estimate", where, left["h_complete"], not right.is_estimate)
+
+
+def compare_leverage(record: Recorder, key: str, tool_nav: Sequence[Mapping] | None,
+                     mine: Sequence[research_run.LeverageDiag]) -> None:
+    layer = "诊断杠杆因子"
+    if tool_nav is None:
+        for item in mine:
+            record.add(layer, "lev_factor、lev_ok", "未比较", f"{key} {day_text(item.end_day)}", None, item.factor,
+                       "工具在窗口内有缺价时不输出 nav")
+        return
+    by_day = {entry["idx"]: entry for entry in tool_nav}
+    record.exact(layer, "区间数", key, len(tool_nav) - 1, len(mine))
+    for item in mine:
+        where = f"{key} {day_text(item.end_day)}"
+        left = by_day.get(day_text(item.end_day), {})
+        if item.checked:
+            record.number(layer, "lev_factor", where, left.get("lev_factor"), item.factor)
+            record.exact(layer, "lev_ok", where, left.get("lev_ok"), item.ok)
+        else:
+            record.exact(layer, "杠杆权重为 0（工具 lev_factor、lev_ok 为 null）", where,
+                         [left.get("lev_factor"), left.get("lev_ok")], [None, None])
+
+
+def state_text(state: object) -> object:
+    if isinstance(state, SystemState):
+        return [RISK_NAMES[state.risk], state.c1, state.c2]
+    if isinstance(state, Risk):
+        return RISK_NAMES[state]
+    return state.value                                                             # ChannelState
+
+
+def compare_enumeration(record: Recorder, where: str, tool_runs: Sequence[Sequence], tool_inits: Sequence,
+                        tool_start: str, tool_conv: str | None, mine: research_run.EnumeratedConvergence,
+                        axis: Sequence[dt.date]) -> None:
+    """工具每条运行自起点（初始状态）至收敛日（含）；项目运行自起点的下一日起到 E。表示换算：
+    工具运行 = [初始状态] + 项目逐日状态的前 len − 1 项；工具起点 = axis[local_origin − 1]；
+    收敛日 = axis[first_common_global]；工具运行中的收敛位置 = first_common_local + 1。"""
+    layer = "诊断收敛枚举"
+    # 两侧初始状态的排列顺序不同（工具按其输出顺序，项目按状态域枚举顺序），按初始状态对齐，集合另比。
+    tool_by_init = {json.dumps(init, ensure_ascii=False): run for init, run in zip(tool_inits, tool_runs, strict=True)}
+    mine_inits = [json.dumps(state_text(run.initial), ensure_ascii=False) for run in mine.runs]
+    record.exact(layer, "初始状态集合", where, sorted(tool_by_init), sorted(mine_inits))
+    record.exact(layer, "start", where, tool_start, day_text(axis[mine.local_origin - 1]))
+    record.exact(layer, "conv_day ↔ first_common_global", where, tool_conv, day_text(axis[mine.first_common_global]))
+    for init, run in zip(mine_inits, mine.runs, strict=True):
+        if init not in tool_by_init:
+            continue
+        tool_run = tool_by_init[init]
+        expected = [state_text(run.initial), *(state_text(state) for state in run.states[:len(tool_run) - 1])]
+        record.exact(layer, "runs（逐日完整状态）", f"{where} {state_text(run.initial)}", list(tool_run), expected)
+        record.exact(layer, "收敛位置 ↔ first_common_local + 1", f"{where} {state_text(run.initial)}",
+                     len(tool_run) - 1, mine.first_common_local + 1)
+
+
+def compare_convergence_diag(record: Recorder, tool: Mapping, diagnostics: research_run.Diagnostics,
+                             axis: Sequence[dt.date]) -> None:
+    for candidate, found in diagnostics.convergence.items():
+        key = group_key(candidate)
+        group = tool["groups"][key]
+        for name in CHANNEL_NAMES:
+            conv = group["channel_conv"][name]
+            runs = conv["runs"]
+            compare_enumeration(record, f"{key} {name}", list(runs.values()), list(runs), conv["start"],
+                                conv["conv_day"], found.channels[name], axis)
+        system = group["system_conv"]
+        compare_enumeration(record, f"{key} 系统", system["runs"], system["inits"], system["start"],
+                            system["conv_day"], found.system, axis)
+        record.exact("诊断收敛枚举", "same_s_diff_counter_days ↔ same_risk_different_counters", key,
+                     list(system["same_s_diff_counter_days"]),
+                     [day_text(day) for day in found.same_risk_different_counters])
+    conv = tool["reference_conv"]
+    runs = {name: [entry["S"] for entry in days] for name, days in conv["runs"].items()}
+    compare_enumeration(record, "主参照", list(runs.values()), list(runs), conv["start"], conv["conv_day"],
+                        diagnostics.reference, axis)
+    for name in conv["runs"]:
+        record.add("诊断收敛枚举", "主参照 runs.L", "未比较", f"主参照 {name}",
+                   note="项目接口未提供：主参照枚举路径只保存 Risk")
+
+
+D13_STATUS = "裁决差异（D13-甲）"
+
+
+def d13_evidence(tool: Mapping, result: research_run.WindowResult) -> dict:
+    """D13 的五项条件逐项核实（补充三修订二第零节），返回逐项结果与证据；五项全部成立才记“裁决差异（D13-甲）”。
+    1 某资产 R2 事件不可得：项目 Unavailable（labels_r2.r2_events，缺少必需价格），工具 r2_events_error 有该资产；
+    2 另一资产的段账因段前信号状态无法确定而停止：exit = 分类无法确定，exception_type = R2Undeterminable，
+      stage = R2，object 为候选键或另一资产，message 含“起始日无法判断”，且另一资产的 R2 事件可得；
+    3 工具不输出任何组的 ledger；4 工具选择出口为“缺值无法评价”；5 工具没有 stop_reason。"""
+    stop, common = result.stop, result.common
+    events = dict(common.events) if common is not None else {}
+    errors = tool.get("r2_events_error") or {}
+    missing = [asset for asset, value in events.items()
+               if isinstance(value, research_run.Unavailable) and unavailable_allowed(value, LABELS_UNAVAILABLE)
+               and asset in errors]
+    others = [asset for asset, value in events.items() if not isinstance(value, research_run.Unavailable)]
+    candidate_keys = {research_run.candidate_key(c) for c in research_run.REGISTERED_CANDIDATES}
+    stop_ok = (stop is not None and stop.exit is research_run.Exit.UNDETERMINABLE
+               and stop.exception_type == "R2Undeterminable" and stop.stage == "R2"
+               and (stop.object in candidate_keys or stop.object in others) and "起始日无法判断" in stop.message)
+    groups = tool.get("groups") or {}
+    items = {
+        "1 某资产 R2 事件不可得（项目 labels_r2 缺价、工具 r2_events_error）": bool(missing),
+        "2 另一资产段账段前状态无法确定而停止（R2Undeterminable，阶段 R2，起始日无法判断）": stop_ok and bool(others),
+        "3 工具不输出任何组的 ledger": bool(groups) and not any("ledger" in group for group in groups.values()),
+        "4 工具选择出口为缺值无法评价": (tool.get("selection") or {}).get("exit") == "缺值无法评价",
+        "5 工具没有 stop_reason": "stop_reason" not in tool}
+    return {"成立": all(items.values()), "逐项": items,
+            "证据": {"项目 R2 事件不可得资产": missing, "项目 R2 事件可得资产": others,
+                     "项目停止": None if stop is None else {
+                         "exit": stop.exit.value, "exception_type": stop.exception_type, "stage": stop.stage,
+                         "object": stop.object, "message": stop.message},
+                     "工具 r2_events_error 资产": sorted(errors), "工具含 ledger 的组数": sum(
+                         1 for group in groups.values() if "ledger" in group),
+                     "工具选择出口": (tool.get("selection") or {}).get("exit"),
+                     "工具 stop_reason": tool.get("stop_reason")}}
+
+
+def compare_research(record: Recorder, tool: Mapping, result: research_run.WindowResult,
+                     chosen: research_run.DevelopmentSelection | None, axis: Sequence[dt.date],
+                     cutoff_index: int) -> None:
+    """映射表第 1 至 11 项。组合层停止时只比停止原因（第 7 项），不继续其他层。"""
+    if result.stop is not None:
+        stop = tool.get("stop_reason") or {}
+        # 三要素分别映射（《A2 修订二》第三节第 7 项）：出口、原因码、下标。只换算映射表内的出口与原因码，
+        # 表外的（如计算失败、未预期异常）按项目原值比较，不自动对应为工具的正常停止。
+        # D13（补充三修订二第零节）：五项条件逐项核实全部成立时，只豁免出口差异，记“裁决差异（D13-甲）”。
+        d13 = d13_evidence(tool, result) if "stop_reason" not in tool else None
+        if d13 is not None and d13["成立"]:
+            record.add("停止原因（组合层）", "exit ↔ stop_reason.reason", D13_STATUS, "场景", None,
+                       result.stop.exit.value, json.dumps(d13, ensure_ascii=False))
+        else:
+            record.exact("停止原因（组合层）", "exit ↔ stop_reason.reason", "场景", stop.get("reason"),
+                         EXIT_TO_TOOL.get(result.stop.exit, result.stop.exit.value))
+            if d13 is not None:
+                record.add("停止原因（组合层）", "D13 五项核实（未全部成立）", "未比较", "场景", None, None,
+                           json.dumps(d13, ensure_ascii=False))
+        record.exact("停止原因（组合层）", "reason_code ↔ stop_reason.reason", "场景", stop.get("reason"),
+                     STOP_REASONS.get(result.stop.reason_code, result.stop.reason_code))
+        if result.stop.exit is research_run.Exit.EMPTY_WINDOW:
+            record.exact("停止原因（组合层）", "detail ↔ sub_reason", "场景", stop.get("sub_reason"),
+                         EMPTY_WINDOW_DETAILS.get(result.stop.detail.get("detail")))
+            record.add("停止原因（组合层）", "j0_index、E_index", "未比较", "场景",
+                       [stop.get("j0_index"), stop.get("E_index")], None,
+                       "项目接口未提供：StopRecord.detail 只含评价窗口为空的细分")
+        return
+    for layer, item in SUPERSEDED:
+        record.drop(layer, item)
+    common, reference, diagnostics = result.common, result.reference, result.diagnostics
+    assert common is not None and reference is not None and diagnostics is not None
+    compare_r2_events(record, tool, common.events)
+    for candidate, outcome in result.candidates.items():
+        key = group_key(candidate)
+        group = tool["groups"][key]
+        compare_r2_judgements(record, key, group, outcome.r2)
+        compare_ledgers(record, key, group, outcome.ledgers)
+        compare_r1(record, key, group, outcome.r1)
+        compare_leverage(record, key, group["signal_sim"].get("nav"), diagnostics.leverage[repr(candidate)])
+    compare_records_and_selection(record, tool, result, chosen)
+    compare_exec_sim(record, "主参照", tool["reference"]["exec_sim"],
+                     policy_fields(reference.outcome.policy, common.prefix.values), reference_exec_signals(reference),
+                     "主参照执行政策研究模拟")
+    compare_leverage(record, "主参照", tool["reference"]["signal_sim"].get("nav"), diagnostics.leverage["reference"])
+    compare_drawdowns(record, tool, diagnostics, cutoff_index)
+    compare_convergence_diag(record, tool, diagnostics, axis)
