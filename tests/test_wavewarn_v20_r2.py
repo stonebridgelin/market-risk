@@ -18,6 +18,7 @@ from market_risk.wavewarn_v20.r2 import (
     Prompt,
     R2Error,
     R2Rule,
+    R2Undeterminable,
     SegmentClass,
     Window,
     judge_event,
@@ -379,3 +380,38 @@ def test_new_field_is_false_in_every_other_case() -> None:
     assert [judge_event(EXAMPLE, states).peak_new_uncertain for states in cases] == [False] * 7
     left = marked(60, span(0, 59))
     assert judge_event(event(1, 3, 5, 6, 9), left).peak_new_uncertain is False      # 左截断
+
+
+# ---------------------------------------------------------------------------
+# “无法确定”影响分类的异常子类（阶段三补充裁决第十节第 1 条；研究组合层实现指令第四节）
+# ---------------------------------------------------------------------------
+
+
+def test_undeterminable_is_a_subclass_of_r2_error() -> None:
+    assert issubclass(R2Undeterminable, R2Error)
+
+
+def test_unknown_state_affecting_classification_raises_the_undeterminable_subclass() -> None:
+    """judge_event 的两个语义位置：[T3, Tr] 内无法确定（迟到与漏报）；P 前一日无法确定且 [P, T3) 内没有确定的转换。"""
+    with pytest.raises(R2Undeterminable, match="迟到") as excinfo:
+        judge_event(EXAMPLE, marked(131, {104: "?"}))
+    # 甲补修一第一节：字面量拆分后报错正文逐字不变（模板取自拆分前的原行）。
+    event = EXAMPLE
+    assert str(excinfo.value) == (
+        f"{event.asset} 高点 {event.peak} 的事件：[T3, Tr] 内有无法确定的状态，影响“迟到”与“漏报”的区分")
+    with pytest.raises(R2Undeterminable, match="前一日"):
+        judge_event(EXAMPLE, marked(131, {99: "?", 100: "Y"}))
+
+
+def test_unknown_state_before_a_segment_raises_the_undeterminable_subclass() -> None:
+    """prompt_segments 的语义位置：提示段开头的前一日状态无法确定。"""
+    with pytest.raises(R2Undeterminable, match="起始日无法判断"):
+        prompt_segments(marked(60, {30: "?", 31: "Y", 32: "Y"}))
+
+
+def test_window_construction_error_is_a_plain_r2_error() -> None:
+    """普通输入错误仍为 R2Error，且不是 R2Undeterminable。"""
+    days = tuple(numbered(number) for number in range(5))
+    with pytest.raises(R2Error, match="恰好覆盖") as caught:
+        Window(days, numbered(2), numbered(4), {day: Prompt.NO for day in days[2:]})
+    assert not isinstance(caught.value, R2Undeterminable)

@@ -35,12 +35,14 @@ FORBIDDEN = ("market_risk.wavewarn", "market_risk.scoring", "market_risk.outcome
 PURE = ("snapshot", "inputs", "channels", "state_machine", "convergence", "reference", "execution", "nav")
 # 阶段二新增的纯计算模块（另由下面新增的测试检查）。
 STAGE_TWO = ("labels_r2", "r2", "r1", "selection", "confirmatory")
+# 阶段四新增的纯计算模块（研究组合层实现指令第六节）。
+STAGE_FOUR = ("research_run",)
 
 # ---------------------------------------------------------------------------
 # 模块职责表（定稿第一节第 1 部分）
 # ---------------------------------------------------------------------------
 
-ALGORITHM = (*PURE, *STAGE_TWO, "dataset_v20", "provenance_v20")
+ALGORITHM = (*PURE, *STAGE_TWO, *STAGE_FOUR, "dataset_v20", "provenance_v20")
 BOUNDARY = ("data_v20", "config_v20", "verify_dataset")
 INITIALIZERS = (ROOT / "src" / "market_risk" / "__init__.py", PACKAGE / "__init__.py")
 
@@ -52,6 +54,7 @@ OUTSIDE: dict[str, frozenset[str]] = {
                            "market_risk.precision"}),
     "config_v20": frozenset({"market_risk", "market_risk.config"}),
     "verify_dataset": frozenset({"market_risk"}),
+    "research_run": frozenset({"market_risk"}),
 }
 # 实际加载的本包模块（不含包本身；每个集合都包含被检查模块自己）。
 INSIDE: dict[str, frozenset[str]] = {name: frozenset(items.split()) for name, items in {
@@ -73,6 +76,8 @@ INSIDE: dict[str, frozenset[str]] = {name: frozenset(items.split()) for name, it
     "data_v20": "data_v20 dataset_v20 snapshot",
     "config_v20": "config_v20 dataset_v20",
     "verify_dataset": "verify_dataset",
+    "research_run": "channels confirmatory convergence execution inputs labels_r2 nav r1 r2 reference research_run "
+                    "selection snapshot state_machine",
 }.items()}
 
 # ---------------------------------------------------------------------------
@@ -82,7 +87,8 @@ INSIDE: dict[str, frozenset[str]] = {name: frozenset(items.split()) for name, it
 
 PURE_TESTS = tuple(f"test_wavewarn_v20_{name}.py" for name in (
     "snapshot", "inputs", "channels", "state_machine", "convergence", "boundaries", "reference", "execution", "nav",
-    "labels_r2", "r2", "r1_selection", "confirmatory", "provenance"))
+    "labels_r2", "r2", "r1_selection", "confirmatory", "provenance", "research_run"))
+# test_wavewarn_v20_research_run.py：纯算法测试，导入 NYSE 日历库生成构造轴。
 TEST_DUTIES: dict[str, tuple[str, ...]] = {
     "纯算法测试": PURE_TESTS,
     "辅助文件": ("wavewarn_v20_helpers.py",),
@@ -92,6 +98,8 @@ TEST_DUTIES: dict[str, tuple[str, ...]] = {
     "插件自测": ("test_v20_data_guard.py",),
     # 定稿的测试职责表没有列出拦截插件本身；这里登记为“照旧”，不适用静态检查（待负责人确认）。
     "拦截插件": ("v20_data_guard.py",),
+    # 构造比对接线（A 定稿第三节）：适用与“子进程测试”相同的静态检查规则。独立工具自身的测试在工具分支，不在本仓库。
+    "比对接线": ("test_v20_independent_compare.py", "v20_compare_support.py"),
 }
 
 
@@ -376,6 +384,24 @@ TEST_EXCEPTIONS: frozenset[Allowed] = frozenset({
             "subprocess.run",
             "入口的验收必须在新的解释器里执行（定稿第七节第 5 部分）",
             "只以 sys.executable 启动子进程（-m 入口或 -c 登记脚本），工作目录与 --root 都是 tmp_path", 1, 1),
+    # 构造比对接线（A 定稿第三节）：逐处登记，不豁免整个文件。
+    Allowed("test_v20_independent_compare.py", "<module>", "import subprocess", "subprocess",
+            "比对须在子进程中运行独立工具（A 定稿第八节）", "只供本文件的 run_tool 使用", 1, 1),
+    Allowed("test_v20_independent_compare.py", "run_tool",
+            "done = subprocess.run([sys.executable, str(AUDIT), str(scenario), str(tool_out)], cwd=TOOL_ROOT,\n"
+            "                          env=environment, capture_output=True, text=True, encoding=\"utf-8\", "
+            "errors=\"replace\",\n                          check=False)",
+            "subprocess.run", "比对须在子进程中运行独立工具（A 定稿第八节）",
+            "只以 sys.executable 运行工具检出目录中哈希已核对的 audit_v20.py；参数为场景文件与比对输出目录中的输出文件",
+            1, 1),
+    Allowed("v20_compare_support.py", "put_bytes", "path.write_bytes(data)", "write_bytes",
+            "比对须先写构造 CSV 与配置，再由项目入口读取；比对结果须写出（A 定稿第五、八节）",
+            "只写仓库外的专用临时目录 D:\\temp_claude\\v20\\构造输入 与 V20_COMPARE_OUT 给出的比对输出目录", 1, 1),
+    # 不属于“写入构造文件、启动子进程”两类：比对须读取场景文件、两份 manifest 与工具输出（单独说明理由）。
+    Allowed("v20_compare_support.py", "get_bytes", "return path.read_bytes()", "read_bytes",
+            "比对须读取场景、manifest 与工具输出，并核对其 SHA-256（A 定稿第四、八节）",
+            "只读两份 manifest 所在目录中的场景与 manifest、工具检出目录中的 audit_v20.py（只算哈希）、"
+            "比对输出目录与构造目录中的文件、tests/ 下的接线源码（只算哈希）", 1, 1),
 })
 
 
@@ -397,7 +423,7 @@ def boundary_files() -> list[Path]:
 
 
 def constructed_test_files() -> list[Path]:
-    return [*duty_files("构造文件读写测试"), *duty_files("子进程测试")]
+    return [*duty_files("构造文件读写测试"), *duty_files("子进程测试"), *duty_files("比对接线")]
 
 
 def source_of(path: Path) -> str:
@@ -458,7 +484,7 @@ def test_static_check_covers_the_expected_files() -> None:
     registered = [name for names in TEST_DUTIES.values() for name in names]
     assert len(registered) == len(set(registered))                                # 每个文件恰好登记一次
     assert set(registered) == {path.name for path in TESTS.glob("*.py") if "v20" in path.name}
-    assert "wavewarn_v20_helpers.py" in registered and len(PURE_TESTS) == 14
+    assert "wavewarn_v20_helpers.py" in registered and len(PURE_TESTS) == 15
     for path in (*algorithm_files(), *boundary_files(), *constructed_test_files()):
         assert path.is_file(), path.name
 
@@ -497,18 +523,22 @@ def test_banned_list_is_the_registered_one() -> None:
     registered = sorted((item.file, item.function, item.item, item.in_function, item.in_file)
                         for item in TEST_EXCEPTIONS)
     assert registered == [
+        ("test_v20_independent_compare.py", "<module>", "subprocess", 1, 1),
+        ("test_v20_independent_compare.py", "run_tool", "subprocess.run", 1, 1),
         ("test_wavewarn_v20_config_entry.py", "write", "write_text", 1, 1),
         ("test_wavewarn_v20_data_entry.py", "put", "write_bytes", 1, 1),
         ("test_wavewarn_v20_verify_dataset.py", "<module>", "subprocess", 1, 1),
         ("test_wavewarn_v20_verify_dataset.py", "put", "write_bytes", 1, 1),
         ("test_wavewarn_v20_verify_dataset.py", "run", "subprocess.run", 1, 1),
+        ("v20_compare_support.py", "get_bytes", "read_bytes", 1, 1),
+        ("v20_compare_support.py", "put_bytes", "write_bytes", 1, 1),
     ]
     assert not {item.item for item in TEST_EXCEPTIONS} & set(TEST_NEVER)
 
 
 def test_stage_two_modules_import_only_this_package() -> None:
     """阶段二的五个模块也是纯计算：项目内只导入本包；产品代码不导入旧的波段预警包。"""
-    for name in STAGE_TWO:
+    for name in (*STAGE_TWO, *STAGE_FOUR):
         tree = ast.parse((PACKAGE / f"{name}.py").read_text(encoding="utf-8"))
         names: set[str] = set()
         for node in ast.walk(tree):

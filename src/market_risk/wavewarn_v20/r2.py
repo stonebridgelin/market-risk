@@ -20,6 +20,10 @@ class R2Error(ValueError):
     """输入不合法，或“无法确定”的状态影响了分类（停下报告，不归类）。"""
 
 
+class R2Undeterminable(R2Error):
+    """‘无法确定’的状态影响了分类：停下报告，不归类。它不是输入不合法。"""
+
+
 class Prompt(Enum):
     YES = "提示"
     NO = "非提示"
@@ -145,7 +149,7 @@ def judge_event(event: R2Event, window: Window) -> EventJudgement:
             restarts = [event.peak, *restarts]
         elif previous is Prompt.UNKNOWN:
             if not restarts:
-                raise R2Error(f"{event.asset} 高点 {event.peak} 的前一日状态无法确定，"
+                raise R2Undeterminable(f"{event.asset} 高点 {event.peak} 的前一日状态无法确定，"
                               "影响“新提示达标”与“提示中断”的区分")
             # 第 20 条：另有确定的转换，归“新提示达标”；但 P 当日是否为真实的新提示无法确定。
             uncertain = True
@@ -161,7 +165,8 @@ def judge_event(event: R2Event, window: Window) -> EventJudgement:
     if Prompt.YES in late:
         return EventJudgement(event, EventClass.LATE, None, None, None, False)
     if Prompt.UNKNOWN in late:
-        raise R2Error(f"{event.asset} 高点 {event.peak} 的事件：[T3, Tr] 内有无法确定的状态，影响“迟到”与“漏报”的区分")
+        raise R2Undeterminable(f"{event.asset} 高点 {event.peak} 的事件："
+                               "[T3, Tr] 内有无法确定的状态，影响“迟到”与“漏报”的区分")
     return EventJudgement(event, EventClass.MISSED, None, None, None, False)
 
 
@@ -208,7 +213,7 @@ def prompt_segments(window: Window) -> tuple[Segment, ...]:
         if prompting and start is None:
             previous = window.status[window.before(day)]
             if previous is Prompt.UNKNOWN:
-                raise R2Error(f"提示段在 {day} 开始，但前一日的状态无法确定，起始日无法判断")
+                raise R2Undeterminable(f"提示段在 {day} 开始，但前一日的状态无法确定，起始日无法判断")
             start, pre_window = day, day == window.first and previous is Prompt.YES
         elif not prompting and start is not None:
             segments.append(Segment(start, window.before(day), pre_window))
