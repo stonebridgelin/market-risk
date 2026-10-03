@@ -13,9 +13,35 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 
+# 原因码（补充裁决 Q5）：三类，运行入口只按类别或原因码判别，不解析报错文字。
+# data_v20 中另有取值相同的一组定义；两处一致只由 tests/test_v20_isolation.py 的测试保证，修改任何一边须同时修改另一边。
+REASON_MISSING_PRICE = "缺少必需价格"
+REASON_INVALID_INPUT = "输入校验失败"
+REASON_UNEXPECTED = "未预期异常"
+
 
 class LabelError(ValueError):
-    """输入不合法，或出现规格没有覆盖的情形。"""
+    """R2 标签生成的异常基类。实际抛出的都是下面三个子类之一，reason 为原因码。"""
+
+    reason = ""
+
+
+class MissingPriceError(LabelError):
+    """缺少必需价格：某个交易日的收盘价为空。"""
+
+    reason = REASON_MISSING_PRICE
+
+
+class LabelInputError(LabelError):
+    """输入校验失败：截止日之后的行、日期重复或乱序、价格非正或非有限、门槛参数不合法。"""
+
+    reason = REASON_INVALID_INPUT
+
+
+class UnexpectedLabelError(LabelError):
+    """未预期异常：内部断言失败（如 T3 晚于 T5）。是否为算法错误须另行排查，不仅凭发生异常断言。"""
+
+    reason = REASON_UNEXPECTED
 
 
 @dataclass(frozen=True)
@@ -30,7 +56,7 @@ class R2Thresholds:
         for name in ("confirm", "finish", "early"):
             value = getattr(self, name)
             if not isinstance(value, Decimal) or not value.is_finite() or value <= 0:
-                raise LabelError(f"事件门槛 {name} 必须是正的有限 Decimal：{value!r}")
+                raise LabelInputError(f"事件门槛 {name} 必须是正的有限 Decimal：{value!r}")
 
 
 @dataclass(frozen=True)
@@ -50,13 +76,13 @@ def _checked(rows: Sequence[tuple[dt.date, Decimal | None]], cutoff: dt.date) ->
     result: list[tuple[dt.date, Decimal]] = []
     for day, close in rows:
         if day > cutoff:
-            raise LabelError(f"出现了截止日 {cutoff} 之后的行：{day}")
+            raise LabelInputError(f"出现了截止日 {cutoff} 之后的行：{day}")
         if result and day <= result[-1][0]:
-            raise LabelError(f"交易日重复或乱序：{result[-1][0]} 之后是 {day}")
+            raise LabelInputError(f"交易日重复或乱序：{result[-1][0]} 之后是 {day}")
         if close is None:
-            raise LabelError(f"{day} 缺收盘价：不跳过，也不插补")
+            raise MissingPriceError(f"{day} 缺收盘价：不跳过，也不插补")
         if not isinstance(close, Decimal) or not close.is_finite() or close <= 0:
-            raise LabelError(f"{day} 的收盘价必须是正的有限 Decimal")
+            raise LabelInputError(f"{day} 的收盘价必须是正的有限 Decimal")
         result.append((day, close))
     return result
 
@@ -89,7 +115,7 @@ def r2_events(asset: str, rows: Sequence[tuple[dt.date, Decimal | None]], cutoff
             break
         early = next((index for index in range(peak + 1, len(data)) if data[index][1] <= thresholds.early * high), -1)
         if early < 0 or early > confirmed:
-            raise LabelError(f"{asset} 高点 {data[peak][0]} 的事件：T3 晚于 T5 或不存在")
+            raise UnexpectedLabelError(f"{asset} 高点 {data[peak][0]} 的事件：T3 晚于 T5 或不存在")
         low, trough = high, peak
         for index in range(peak, confirmed + 1):
             if data[index][1] <= low:

@@ -225,3 +225,26 @@ def test_all_enumerated_runs_agree_on_the_day_before_the_common_start() -> None:
         offset = target - model.position(result.kappa_channel) - 1
         for initial in system_initial_states(candidate.h):
             assert run_system(initial, tail, candidate.k, candidate.h)[offset].state == model.system[target].state
+
+
+def test_empty_window_and_non_convergence_are_distinguishable() -> None:
+    """补修 Q14：日期轴共 500 日（行号 0—499，最后一个收盘日 E = 499）。可计入收益区间数 n = E − j₀。
+    j₀ 在倒数第二日（n = 1）正常返回；在最后一日（n = 0）停止；超出日期轴停止；始终不收敛另为一类。
+    四种情形按异常类与原因码（reason、detail）区分，不解析报错文字。"""
+    from market_risk.wavewarn_v20 import convergence
+
+    assert common_start_index(100, [497], 63, 500) == 498                          # j₀ = 498，n = 1
+    with pytest.raises(convergence.ConvergenceError) as at_last:
+        common_start_index(100, [498], 63, 500)                                    # j₀ = 499 = E，n = 0
+    with pytest.raises(convergence.ConvergenceError) as beyond:
+        common_start_index(100, [499], 63, 500)                                    # j₀ = 500 > E
+    with pytest.raises(convergence.ConvergenceError) as never:
+        pullback_convergence([], 3, Decimal("0.015"), "P_SPX")                     # 没有任何一日相同：始终不收敛
+    assert type(at_last.value) is type(beyond.value) is convergence.EmptyWindowError
+    assert at_last.value.reason == beyond.value.reason == "评价窗口为空"
+    assert (at_last.value.detail, beyond.value.detail) == (convergence.EMPTY_AT_LAST_DAY,
+                                                           convergence.EMPTY_BEYOND_AXIS)
+    assert type(never.value) is convergence.NotConvergedError and never.value.reason == "始终不收敛"
+    reasons = {(type(item.value), item.value.reason, getattr(item.value, "detail", None))
+               for item in (at_last, beyond, never)}
+    assert len(reasons) == 3                                                         # 加上 n = 1 的正常返回，共四种

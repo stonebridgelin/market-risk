@@ -20,6 +20,7 @@ import numpy as np
 from market_risk.wavewarn_v20.labels_r2 import R2Event
 
 INVALID = "计算无效"
+EMPTY_WINDOW = "评价窗口为空"         # 计算无效的原因之一：可计入收益区间数 n = 0（补充裁决 Q14）
 WORDING = {
     "A": "在冻结后的历史检验中，满足风险与提示条件，收益改善检验通过，且改善点估计达到登记幅度",
     "B": "收益改善检验通过，但改善点估计未达到登记幅度",
@@ -292,7 +293,8 @@ def confirmatory_test(data: ConfirmatoryInput, parameters: ConfirmatoryParameter
     if len(data.candidate_returns) != n or len(data.reference_returns) != n:
         raise ConfirmatoryError("收益序列须与区间末日等长")
     if n == 0:
-        return _invalid("n = 0", n)
+        # 补充裁决 Q14：类别仍为“计算无效”，原因写为“评价窗口为空”（可计入收益区间数 n = 0）。
+        return _invalid(EMPTY_WINDOW, n)
     if data.r1 is None:
         return _invalid("R1 无法计算", n)
     if not data.r2 or any(value is None for value in data.r2.values()):

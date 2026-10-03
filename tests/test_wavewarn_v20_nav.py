@@ -156,3 +156,144 @@ def test_hold_is_always_at_the_normal_position() -> None:
     assert result.wealth[0] == 1.0
     assert result.returns == pytest.approx([1.4 * value for value in basket])
     assert [item.day for item in result.executions] == axis
+
+
+# ---------------------------------------------------------------------------
+# 研究模拟层（补充裁决 Q3；第九节分层裁决）：simulate_policy_with_gaps
+# 比较口径（第九节第 4 条）：净值、收益及浮点权重用 math.isclose(rel_tol=0.0, abs_tol=1e-12)；
+# 日期、状态、来源、上限标记、记录数量、停止日与原因精确比较。
+# ---------------------------------------------------------------------------
+
+STOP_PATH = ["100", "97", "90", "91", "92", "93", "94", "95", "96", "97", "98", "99", "100", "100", "101", "102"]
+
+
+def close(first: float, second: float) -> bool:
+    return math.isclose(first, second, rel_tol=0.0, abs_tol=1e-12)
+
+
+def same_targets(first, second) -> bool:
+    return len(first) == len(second) and all(
+        (a.day, a.position, a.source, a.cap_active) == (b.day, b.position, b.source, b.cap_active)
+        and close(a.core, b.core) and close(a.leverage, b.leverage) for a, b in zip(first, second, strict=True))
+
+
+def same_executions(first, second) -> bool:
+    return len(first) == len(second) and all(
+        (a.day, a.position) == (b.day, b.position) and close(a.core, b.core) and close(a.leverage, b.leverage)
+        and close(a.wealth, b.wealth) for a, b in zip(first, second, strict=True))
+
+
+def policy_with(prices: list[str | None]):
+    """两资产同价、日期轴为第 1 至 16 日、信号一直正常且完整（同执行层的端到端例子：第 2 日收盘止损确认，
+    第 3 日离场，第 4 至 13 日冷却，第 13 日收盘重入、第 14 日执行，第 15 日恢复杠杆）。"""
+    from wavewarn_v20_helpers import POLICY
+
+    from market_risk.wavewarn_v20 import nav
+
+    axis = days(16)
+    signals = [signal(number, Risk.NORMAL) for number in range(0, 16)]
+    return nav.simulate_policy_with_gaps(axis, signals, closes(prices, prices), POSITIONS, POLICY, TOLERANCE)
+
+
+def gapped(*missing_days: int) -> list[str | None]:
+    """STOP_PATH 中第 missing_days 日（从 1 起）缺价，其余照常。"""
+    return [None if number in missing_days else value for number, value in enumerate(STOP_PATH, start=1)]
+
+
+def test_research_1_gap_while_holding_keeps_day_m_target_and_stops_from_day_m_plus_1() -> None:
+    """研究层 1：持仓时缺少净值。第 15 日（m）缺价、此时处于本轮之内：
+    第 15 日的目标（由第 14 日已确定的信息产生）保留；第 16 日起“无法确定”；
+    第 14→15 日的区间收益与第 15 日净值无法计算（执行与净值只到第 14 日）。"""
+    from market_risk.wavewarn_v20 import nav
+
+    complete = policy_with(STOP_PATH)
+    partial = policy_with(gapped(15))
+    assert type(partial) is nav.PartialPolicyResult and not isinstance(partial, nav.PolicyResult)
+    assert same_targets(partial.targets, complete.targets[:15])                     # 第 1 至 15 日的目标
+    assert partial.undetermined == nav.Undetermined(numbered(16), nav.UNDETERMINED_REASON)
+    assert same_executions(partial.executions, complete.nav.executions[:14])        # 第 1 至 14 日
+    assert len(partial.returns) == 13
+    assert all(close(a, b) for a, b in zip(partial.returns, complete.nav.returns[:13], strict=True))
+    assert partial.missing == (("QQQ", numbered(15)), ("SPX", numbered(15)))
+    # 持仓初期缺价（第 2 日）：第 2 日目标保留，第 3 日起无法确定；只剩第 1 日的执行，没有任何区间收益。
+    early = policy_with(gapped(2))
+    assert same_targets(early.targets, complete.targets[:2]) and early.undetermined.day == numbered(3)
+    assert len(early.executions) == 1 and early.returns == ()
+
+
+def test_research_2_stop_confirmed_before_the_gap_is_kept() -> None:
+    """研究层 2：缺价之前已确认的止损（第 2 日收盘确认，第 3 日执行）保留，此后的现金目标保留。第 4 日缺价。"""
+    complete = policy_with(STOP_PATH)
+    partial = policy_with(gapped(4))
+    assert partial.targets[2].day == numbered(3) and partial.targets[2].source is TargetSource.STOP_CASH
+    assert [item.source for item in partial.targets[3:13]] == [TargetSource.OUT_CASH] * 10     # 第 4 至 13 日
+    assert same_targets(partial.targets, complete.targets[:14])                                 # 至重入日第 14 日
+    assert same_executions(partial.executions, complete.nav.executions[:3])                     # 第 1 至 3 日
+    assert partial.undetermined is not None and partial.undetermined.day == numbered(15)
+
+
+def test_research_3_gap_during_cooldown_keeps_cooldown_and_cash_targets() -> None:
+    """研究层 3：现金冷却期间（第 6 日）缺价，冷却与现金目标只依赖信号，照常保留。"""
+    complete = policy_with(STOP_PATH)
+    partial = policy_with(gapped(6))
+    assert [item.source for item in partial.targets[2:13]] == [TargetSource.STOP_CASH, *[TargetSource.OUT_CASH] * 10]
+    assert same_targets(partial.targets, complete.targets[:14])
+    assert same_executions(partial.executions, complete.nav.executions[:5])                     # 第 1 至 5 日
+
+
+def test_research_4_reentry_kept_and_undetermined_when_the_benchmark_reset_lacks_net_value() -> None:
+    """研究层 4：重入目标（第 13 日收盘由信号确定、第 14 日执行）保留；第 14 日缺价，重入后需以当日净值重置基准，
+    净值不可得，从下一执行日第 15 日起“无法确定”。"""
+    from market_risk.wavewarn_v20 import nav
+
+    complete = policy_with(STOP_PATH)
+    partial = policy_with(gapped(14))
+    assert partial.targets[13].day == numbered(14) and partial.targets[13].source is TargetSource.REENTRY_CAP
+    assert partial.targets[13].cap_active
+    assert same_targets(partial.targets, complete.targets[:14])
+    assert partial.undetermined == nav.Undetermined(numbered(15), nav.UNDETERMINED_REASON)
+    assert same_executions(partial.executions, complete.nav.executions[:13])                    # 第 1 至 13 日
+
+
+def test_research_5_research_path_does_not_resume_after_prices_come_back() -> None:
+    """研究层 5：第 4 日缺价、第 5 日起价格重新齐全：净值仍不可得（执行只到第 3 日），重入之后仍“无法确定”；
+    不补算缺口，也不重置止损基准继续推演。"""
+    partial = policy_with(gapped(4))
+    assert max(item.day for item in partial.executions) == numbered(3)
+    assert len(partial.returns) == len(partial.executions) - 1 == 2
+    assert partial.undetermined is not None and partial.undetermined.day == numbered(15)
+    assert all(item.day <= numbered(14) for item in partial.targets)
+    holding_gap = policy_with(gapped(15))                                            # 第 16 日价格恢复
+    assert max(item.day for item in holding_gap.executions) == numbered(14)
+    first_day_gap = policy_with(gapped(1))                                           # 首日缺价：没有任何执行记录
+    assert first_day_gap.executions == () and first_day_gap.returns == ()
+    assert first_day_gap.undetermined is not None and first_day_gap.undetermined.day == numbered(2)
+
+
+def test_research_6_complete_prices_give_exactly_the_same_result_as_simulate_policy() -> None:
+    """研究层 6：价格完整时，simulate_policy_with_gaps 与 simulate_policy 的结果完全相同（逐字段相等，不用容差）。"""
+    from wavewarn_v20_helpers import POLICY
+
+    from market_risk.wavewarn_v20 import nav
+
+    for prices, length in ((STOP_PATH, 16), (None, 300)):
+        axis = days(length)
+        if prices is None:
+            data = {"SPX": random_closes(91, length), "QQQ": random_closes(92, length)}
+            risks = [(Risk.NORMAL, Risk.LEVEL1, Risk.LEVEL2)[(number // 9) % 3] for number in range(length)]
+            signals = [signal(number, risk) for number, risk in enumerate(risks)]
+        else:
+            data = closes(prices, prices)
+            signals = [signal(number, Risk.NORMAL) for number in range(0, length)]
+        with_gaps = nav.simulate_policy_with_gaps(axis, signals, data, POSITIONS, POLICY, TOLERANCE)
+        direct = nav.simulate_policy(axis, signals, basket_returns(axis, data), POSITIONS, POLICY, TOLERANCE)
+        assert type(with_gaps) is nav.PolicyResult and with_gaps == direct
+
+
+def test_basket_prefix_stops_before_the_first_missing_day() -> None:
+    from market_risk.wavewarn_v20.nav import basket_prefix
+
+    prefix = basket_prefix(days(5), closes(["100", "101", "102", None, "104"], ["50", "51", "52", "53", "54"]))
+    assert prefix.first_missing == 3 and len(prefix.values) == 2                    # 第 1→2、2→3 日两个区间
+    assert prefix.missing == (("SPX", numbered(4)),)
+    assert basket_prefix(days(3), closes(["1", "2", "3"], ["1", "2", "3"])).first_missing is None

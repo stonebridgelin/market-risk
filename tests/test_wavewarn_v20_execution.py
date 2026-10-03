@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import dataclasses
+import math
 from decimal import Decimal
 from pathlib import Path
 
@@ -396,3 +397,21 @@ def test_switches_involving_cash_have_no_stage_count() -> None:
         (Position.NORMAL, Position.CASH, None), (Position.CASH, Position.LEVEL1, None),
         (Position.LEVEL1, Position.NORMAL, 1)]
     assert [item.exposure_change for item in found] == pytest.approx([-1.4, 0.6, 0.8])
+
+
+def close_to(actual: float, expected: float) -> bool:
+    """浮点比较：显式的绝对容差 1e-12。"""
+    return math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-12)
+
+
+def test_switch_reports_absolute_magnitude_and_signed_direction() -> None:
+    """补修 Q6：正常→二级，幅度 1.1（倍暴露）、方向 −1.1、计一次切换、阶段数 2；涉及现金时阶段数为空。"""
+    found = switches(planned([Position.NORMAL, Position.LEVEL2]), POSITIONS)
+    assert len(found) == 1
+    (item,) = found
+    assert close_to(item.exposure_magnitude, 1.1) and close_to(item.exposure_change, -1.1)
+    assert item.stages == 2
+    with_cash = switches(planned([Position.LEVEL1, Position.CASH, Position.NORMAL]), POSITIONS)
+    assert [(item.stages, round(item.exposure_magnitude, 12), round(item.exposure_change, 12))
+            for item in with_cash] == [(None, 0.6, -0.6), (None, 1.4, 1.4)]
+    assert all(close_to(item.exposure_magnitude, abs(item.exposure_change)) for item in with_cash)

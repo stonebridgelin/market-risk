@@ -45,7 +45,45 @@ REGISTERED_REFERENCE = Risk.NORMAL        # 主参照在 t0 的初始值；收�
 
 
 class ConvergenceError(ValueError):
-    """找不到 t0，或某个对象在给定的序列内始终不收敛。"""
+    """预热、收敛与共同起点的异常基类。实际抛出的都是下面的子类之一，reason 为原因码，可在机器层面区分。"""
+
+    reason = ""
+
+
+class NoStartError(ConvergenceError):
+    """序列内没有五个通道同时有效的交易日，无法确定 t0。"""
+
+    reason = "无法确定 t0"
+
+
+class NotConvergedError(ConvergenceError):
+    """某个对象在给定的序列内始终不收敛。"""
+
+    reason = "始终不收敛"
+
+
+class StartInputError(ConvergenceError):
+    """共同起点的输入不合法（如没有任何对象的系统收敛日）。"""
+
+    reason = "输入校验失败"
+
+
+# 评价窗口为空的细分（补充裁决 Q14）：两种情形主原因相同，细分字段区分。
+EMPTY_AT_LAST_DAY = "j₀ 等于最后一个收盘日"
+EMPTY_BEYOND_AXIS = "j₀ 超出日期轴"
+
+
+class EmptyWindowError(ConvergenceError):
+    """评价窗口为空：可计入收益区间数 n = 0（补充裁决 Q14）。与“始终不收敛”是不同的原因。
+
+    detail 为细分：EMPTY_AT_LAST_DAY 或 EMPTY_BEYOND_AXIS。
+    """
+
+    reason = "评价窗口为空"
+
+    def __init__(self, detail: str, start: int, length: int) -> None:
+        self.detail = detail
+        super().__init__(f"评价窗口为空（{detail}）：j₀ 行号 {start}，日期轴共 {length} 日，可计入收益区间数 n = 0")
 
 
 @dataclass(frozen=True)
@@ -70,7 +108,7 @@ def first_valid_index(spx: Sequence[AssetDay], qqq: Sequence[AssetDay], trend: S
     for index, (a, b, c) in enumerate(zip(spx, qqq, trend, strict=True)):
         if pullback_valid(a) and pullback_valid(b) and trend_valid(c):
             return index
-    raise ConvergenceError("序列内没有五个通道同时有效的交易日，无法确定 t0")
+    raise NoStartError("序列内没有五个通道同时有效的交易日，无法确定 t0")
 
 
 def channel_initial_states(domain: frozenset[ChannelState]) -> tuple[ChannelState, ...]:
@@ -93,7 +131,7 @@ def first_common_index(runs: Sequence[Sequence[Hashable]]) -> int | None:
 
 def _required(index: int | None, name: str) -> int:
     if index is None:
-        raise ConvergenceError(f"{name} 在给定的序列内始终不收敛")
+        raise NotConvergedError(f"{name} 在给定的序列内始终不收敛")
     return index
 
 
@@ -153,11 +191,19 @@ def common_start_index(t0_index: int, system_indices: Sequence[int], offset: int
     """j₀ = max(t0 + offset, κ_全 + 1)；offset 登记为 63。
 
     κ_全 为全部候选与主参照的系统收敛日的最大值：system_indices 须同时包含各候选与主参照的收敛日。
+
+    变量含义：t0_index、system_indices 与返回的 j₀ 都是日期轴上收盘日的行号（从 0 起）；length 是日期轴的天数，
+    日期轴的最后一日（行号 length − 1）即最后一个可用收盘日 E。收益区间为第 j 日收盘到第 j+1 日收盘，
+    可计入的区间要求 j ≥ j₀ 且 j+1 ≤ E，所以 n = E − j₀ = length − 1 − j₀（j₀ ≤ E 时）。
+    n = 0 时停止，原因为“评价窗口为空”（补充裁决 Q14）：j₀ = E 与 j₀ > E 两种情形用细分字段区分。
     """
     if not system_indices:
-        raise ConvergenceError("没有任何对象的系统收敛日")
+        raise StartInputError("没有任何对象的系统收敛日")
     start = max(t0_index + offset, max(system_indices) + 1)
-    if start >= length:
-        raise ConvergenceError("共同起点 j₀ 超出了给定的日期轴")
+    last = length - 1
+    if start > last:
+        raise EmptyWindowError(EMPTY_BEYOND_AXIS, start, length)
+    if start == last:
+        raise EmptyWindowError(EMPTY_AT_LAST_DAY, start, length)
     return start
 

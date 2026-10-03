@@ -308,7 +308,8 @@ def test_invalid_computation_exits(changes: dict, reason: str) -> None:
 
 def test_invalid_when_n_is_zero_or_values_are_not_finite() -> None:
     empty = confirmatory_test(data([]), parameters())
-    assert (empty.valid, empty.reason) == (False, "n = 0")
+    # 补修 Q14：原因由“n = 0”改为“评价窗口为空”，类别仍为“计算无效”。
+    assert (empty.valid, empty.reason, empty.conclusion, empty.n) == (False, "评价窗口为空", INVALID, 0)
     for bad in (math.inf, math.nan, -1.0):
         returns = (0.001, bad, *[0.001] * (N - 2))
         result = confirmatory_test(data([0.001] * N, candidate_returns=returns), parameters())

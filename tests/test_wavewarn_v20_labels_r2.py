@@ -135,3 +135,27 @@ def test_thresholds_must_be_positive_finite_decimals() -> None:
             values[position] = bad
             with pytest.raises(LabelError, match="门槛"):
                 R2Thresholds(*values)
+
+
+def test_label_errors_are_classified_into_three_reasons() -> None:
+    """补修 Q5：六种情形各自归入正确的类别（按子类与 reason 属性判别，不解析报错文字）。"""
+    from market_risk.wavewarn_v20 import labels_r2
+
+    data = rows(["100", "99", "98"])
+    cases = [
+        (lambda: events(["100", "99", "98"], cutoff=2), labels_r2.LabelInputError),                  # 截止日之后的行
+        (lambda: r2_events("SPX", [data[1], data[0]], numbered(3), THRESHOLDS), labels_r2.LabelInputError),  # 乱序
+        (lambda: events(["100", None, "94"]), labels_r2.MissingPriceError),                         # 收盘价为空
+        (lambda: r2_events("SPX", [(numbered(1), Decimal("-1"))], numbered(3), THRESHOLDS),
+         labels_r2.LabelInputError),                                                                  # 价格非正
+        (lambda: R2Thresholds(Decimal("0.95"), Decimal("1.05"), Decimal("NaN")), labels_r2.LabelInputError),  # 门槛
+        (lambda: r2_events("SPX", rows(["100", "94"]), numbered(2),
+                           R2Thresholds(Decimal("0.95"), Decimal("1.05"), Decimal("0.90"))),
+         labels_r2.UnexpectedLabelError),                                                             # T3 晚于 T5
+    ]
+    expected_reasons = {labels_r2.LabelInputError: "输入校验失败", labels_r2.MissingPriceError: "缺少必需价格",
+                        labels_r2.UnexpectedLabelError: "未预期异常"}
+    for action, kind in cases:
+        with pytest.raises(LabelError) as caught:
+            action()
+        assert type(caught.value) is kind and caught.value.reason == expected_reasons[kind]

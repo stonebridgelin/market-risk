@@ -1,0 +1,17 @@
+# 波段预警 v2.0：登记第零节绑定的数据集元数据（阶段三实施指令第二节第 2 部分）。
+# raw_sha256 为仓库文件原始字节的 SHA-256；normalized_sha256 为把 CRLF 换为 LF 之后的 SHA-256
+# （即登记第零节所写的哈希，见实施口径补充第 4 条）；data_rows 为不含表头的非空数据行数。
+# 这些是登记值，不是由程序生成的：修改须另行登记。
+dataset:
+  SPX:
+    raw_sha256: 6941ab293eddb8201e851d873476d64c6cbd584ec9573f5ff757447173bf0b00
+    normalized_sha256: 68af03b356689641a07f53966d6518dafba6e47eab0ac51765ed933dd2fb586f
+    data_rows: 9251
+    first_date: 1990-01-02
+    last_date: 2026-09-25
+  QQQ:
+    raw_sha256: d14e58edcab7ec94b4e6728ce65bbbf8a0a84565d53ce951a37a4e6143a56880
+    normalized_sha256: 7d0a431f79d50fe86cc2d6893beb3b786924ea041144becbe3eded94a9e44a30
+    data_rows: 6930
+    first_date: 1999-03-10
+    last_date: 2026-09-25

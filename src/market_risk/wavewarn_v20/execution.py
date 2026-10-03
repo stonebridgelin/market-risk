@@ -142,12 +142,19 @@ class ActualExecution:
 
 @dataclass(frozen=True)
 class Switch:
-    """一次目标状态切换及其调仓幅度（只作描述）。"""
+    """一次目标状态切换及其调仓幅度（只作描述）。
+
+    调仓幅度的两个字段，单位都是“倍暴露”（总暴露 = 核心 + λ × 杠杆）：
+    - exposure_magnitude：调仓幅度，取绝对值 |后 − 前|，按登记报告（补充裁决 Q6）；
+    - exposure_change：带符号的变化量（后 − 前），只作方向的辅助字段（负数为降低暴露）。
+    切换次数的计法不变：目标仓位与前一执行日不同计一次。
+    """
 
     day: dt.date
     before: Position
     after: Position
-    exposure_change: float     # 目标总暴露的变化量（后 − 前）
+    exposure_change: float     # 带符号的变化量（后 − 前），倍暴露；只作方向
+    exposure_magnitude: float  # 调仓幅度 |后 − 前|，倍暴露；按登记报告
     stages: int | None         # 正常、一级、二级之间的阶段变化数；涉及全部现金时无定义
 
 
@@ -257,6 +264,6 @@ def switches(targets: Sequence[PlannedTarget], positions: PositionMap) -> tuple[
             continue
         stages = (abs(_STAGE[after.position] - _STAGE[before.position])
                   if before.position in _STAGE and after.position in _STAGE else None)
-        result.append(Switch(after.day, before.position, after.position,
-                             positions.exposure(after.position) - positions.exposure(before.position), stages))
+        change = positions.exposure(after.position) - positions.exposure(before.position)
+        result.append(Switch(after.day, before.position, after.position, change, abs(change), stages))
     return tuple(result)
