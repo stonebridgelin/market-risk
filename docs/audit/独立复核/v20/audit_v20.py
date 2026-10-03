@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import datetime
 import itertools
 import json
 import math
@@ -31,7 +32,7 @@ from typing import Any
 
 import numpy as np
 
-TOOL_VERSION = "v20-indep-2"
+TOOL_VERSION = "v20-indep-3"
 
 # ---------------------------------------------------------------- 常量（全部出自登记或补充）
 
@@ -101,6 +102,8 @@ REASON_EMPTY = "评价窗口为空"
 REASON_NO_T0 = "t0 不存在"
 REASON_SEG_UNKNOWN = "提示段起始状态无法确定"
 REASON_CALC_FAIL = "计算失败"
+SUB_EMPTY_EQUAL = "起点等于最后一个收盘日"  # 修订二第五节第 2 条的细分码
+SUB_EMPTY_LATER = "起点晚于最后一个收盘日"
 
 
 class StopReport(Exception):
@@ -691,16 +694,21 @@ def simulate_exec(
 ) -> dict[str, Any]:
     """执行政策模拟：4% 止损、冷却 10 日、重入与上限 U（登记第一节第 6 小节，规格第八节第 2 条）。
 
-    补充条文第四节第 2 条：缺价之前已确定的记录照常保留；之后依赖净值的路径能唯一确定的保留，
-    不能唯一确定的标为“无法确定”。止损判断用时间加权净值 W 与基准；W 因缺价未知时，
-    若本轮（自最近一次建仓起）的区间收益全部可得，则用本轮内的相对净值判断（止损只依赖本轮内的比值）；
-    两者都未知时，自该信号日起路径无法唯一确定。现金期间区间收益为 0，不需要价格。
+    修订二第四节（保守研究口径）：
+    - 窗口内第一个缺少必需价格的交易日记为 m（任一资产任一收盘价缺失，即使持现金）；自 m 起研究净值 W
+      保持不可计算，不因持现金、价格恢复或重新建仓而恢复。m = j0 时，归一化的 W = 1 也不作为已知净值。
+    - 缺价前已确定的目标、止损确认、离场与记录保留；现金期间由信号与已知日期唯一确定的冷却、等待、
+      重入目标保留。
+    - 持仓日需要 W 判断止损而 W 不可得时，该日此前已确定的目标保留，自下一日的政策目标起“无法确定”。
+      重入执行日同理：重入目标保留，之后需要新一轮基准的判断“无法确定”。
+    - 不另设本轮相对净值等替代量。计划目标（next_target、held_exposure）、实际执行记录
+      （缺价日需要成交时记 execution_computable = false）与净值记录（W）分开。
     """
+    miss_days = {d for _a, d in missing}
+    m_first = min(miss_days) if miss_days else None
     mode = "持仓"
-    w: float | None = 1.0
-    base: float | None = 1.0
-    wr: float | None = 1.0  # 本轮内相对净值
-    br: float | None = 1.0  # 本轮内相对基准
+    w: float | None = None if m_first == j0 else 1.0
+    base: float | None = w
     cap = "无"
     k_idx: int | None = None
     s_idx: int | None = None
@@ -736,16 +744,18 @@ def simulate_exec(
                 fail = {"type": "杠杆因子不为正", "idx": d}
             elif r is not None and not math.isfinite(r):
                 fail = {"type": "非有限值", "idx": d}
-            if r is None:
-                w = wr = None
-            else:
+            if r is not None:
                 rs.append(r)
-                w = None if w is None else w * (1.0 + r)
-                wr = None if wr is None else wr * (1.0 + r)
-                if w is not None and fail is None and (not math.isfinite(w) or w <= 0):
+            if r is None or (m_first is not None and d >= m_first) or w is None:
+                w = None  # 修订二第四节第 2 条：首次缺价后研究净值保持不可计算
+            else:
+                w = w * (1.0 + r)
+                if fail is None and (not math.isfinite(w) or w <= 0):
                     fail = {"type": "非有限值", "idx": d}
         row["W"] = w
-        row["held_exposure"] = EXPO_TEXT[target[d]][0]  # 第 d 日收盘执行后的暴露
+        row["held_exposure"] = EXPO_TEXT[target[d]][0]  # 计划目标：第 d 日收盘执行的暴露
+        if d in miss_days and (target[d] != CASH or (d > j0 and target[d - 1] != CASH)):
+            row["execution_computable"] = False  # 修订二第四节第 8 条：目标已定，但缺价日的成交无法计算
         if fail is not None:
             days.append(row)
             break
@@ -754,21 +764,14 @@ def simulate_exec(
             events.append({"type": "止损执行", "idx": d})
         elif mode == "重入待执行" and d == (k_idx or 0) + 1:
             mode = "持仓"
-            base = w  # 新一轮，基准重置为该日收盘的时间加权净值（缺价后可能未知）
-            wr, br = 1.0, 1.0
+            base = w  # 新一轮，基准重置为该日收盘的时间加权净值（缺价后未知）
             events.append({"type": "重入执行", "idx": d})
         row["mode"] = mode
         if mode == "持仓":
-            if w is not None and base is not None and wr is not None and br is not None:
+            if w is not None and base is not None:
                 base = max(base, w)
-                br = max(br, wr)
                 stop = w <= STOP_RATIO * base
                 row["base"] = base
-            elif wr is not None and br is not None:
-                br = max(br, wr)
-                stop = wr <= STOP_RATIO * br
-                row["base"] = None
-                row["round_W"], row["round_base"] = wr, br
             else:
                 row["base"] = None
                 row["stop_check"] = "无法确定"
@@ -1075,55 +1078,67 @@ def select(
 def load_series(sc: dict[str, Any]) -> tuple[list[str], dict[str, list[Decimal | None]], int, dict[str, Any]]:
     """读入交易日轴与价格。
 
-    补充条文第三节第 1 条：先截取截止日以内的日期轴，再检查交易日完整性；截止日之后的日期与价格
-    不进入计算，对它们的检查只另列在 file_checks 中，不改变历史计算结果。
-    补充条文第五节：日期重复或乱序、价格非正或非有限等为“输入校验失败”；预期交易日整行缺失为
-    “缺少必需价格”——该日按两资产缺价处理并列在 missing_rows 中。
+    修订二第一节：历史计算只验证、只使用截止日以内的前缀。日期解析、长度检查、日历检查都在截取前缀之后进行；
+    截止日之后的记录只计入诊断字段 post_cutoff（标注“不影响历史计算”，内容“未验证”）。
+    修订二第二节：按 NYSE 日历在派生输入层标记整行缺失的日期（两资产价格设为 None，不补价、不压缩窗口）；
+    原始日期轴与派生日期轴分别输出；同时存在多余日期、重复、乱序时按“输入校验失败”停止。
     """
     raw_axis = sc.get("axis")
-    if not isinstance(raw_axis, list) or not raw_axis or not all(isinstance(x, str) for x in raw_axis):
-        raise StopReport(REASON_INPUT, "axis 须为非空的字符串列表")
+    if not isinstance(raw_axis, list) or not raw_axis:
+        raise StopReport(REASON_INPUT, "axis 须为非空列表")
     cutoff = sc.get("cutoff")
-    if cutoff is not None:
-        if cutoff not in raw_axis:
-            raise StopReport(REASON_INPUT, "截止日不在交易日轴上")
-        end = raw_axis.index(cutoff)
-    else:
+    if cutoff is None:
         end = len(raw_axis) - 1
+    else:
+        if not isinstance(cutoff, str):
+            raise StopReport(REASON_INPUT, "cutoff 须为字符串")
+        end = next((i for i, x in enumerate(raw_axis) if x == cutoff), -1)
+        if end < 0:
+            raise StopReport(REASON_INPUT, "截止日不在交易日轴上")
     axis = list(raw_axis[: end + 1])
+    if not all(isinstance(x, str) for x in axis):
+        raise StopReport(REASON_INPUT, "截止日以内的交易日轴须为字符串")
     if len(set(axis)) != len(axis):
         raise StopReport(REASON_INPUT, "截止日以内的交易日轴有重复")
     if any(a >= b for a, b in itertools.pairwise(axis)):
         raise StopReport(REASON_INPUT, "截止日以内的交易日轴不是严格递增")
-    file_checks: list[str] = []
-    tail = raw_axis[end + 1 :]
-    if tail:
-        file_checks.append(f"截止日之后有 {len(tail)} 行，未参与计算")
     if not isinstance(sc.get("prices"), dict):
         raise StopReport(REASON_INPUT, "prices 须为对象")
     prices: dict[str, list[Decimal | None]] = {}
+    after_prices: dict[str, int] = {}
     for a in ASSETS:
         raw = sc["prices"].get(a)
         if not isinstance(raw, list) or len(raw) < end + 1:
             raise StopReport(REASON_INPUT, f"{a} 价格缺少或短于截止日以内的交易日轴")
-        if len(raw) != len(raw_axis):
-            file_checks.append(f"{a} 价格长度 {len(raw)} 与场景交易日轴长度 {len(raw_axis)} 不同（截止日之后部分）")
+        after_prices[a] = len(raw) - end - 1
         prices[a] = [parse_price(x) for x in raw[: end + 1]]
-    missing_rows: list[str] = []
+    post_cutoff = {
+        "note": "不影响历史计算",
+        "status": "未验证",
+        "axis_rows_after_cutoff": len(raw_axis) - end - 1,
+        "price_rows_after_cutoff": after_prices,
+    }
+    added: list[dict[str, Any]] = []
+    derived = axis
     if sc.get("calendar") == "NYSE":
-        axis, prices, missing_rows = align_nyse(axis, prices)
+        derived, prices, added = align_nyse(axis, prices)
     elif sc.get("calendar") is not None:
         raise StopReport(REASON_INPUT, f"不支持的交易日历：{sc.get('calendar')}")
-    info = {"file_checks": file_checks, "missing_rows": missing_rows}
-    return axis, prices, len(axis) - 1, info
+    info = {"post_cutoff": post_cutoff, "raw_axis": axis, "derived_axis": derived, "added_dates": added}
+    return derived, prices, len(derived) - 1, info
 
 
 def align_nyse(
     axis: list[str], prices: dict[str, list[Decimal | None]]
-) -> tuple[list[str], dict[str, list[Decimal | None]], list[str]]:
-    """补充第 18 条：对照 NYSE 交易日轴检测整行缺失（只看截止日以内的前缀）。"""
+) -> tuple[list[str], dict[str, list[Decimal | None]], list[dict[str, Any]]]:
+    """补充第 18 条与修订二第二节：对照 NYSE 交易日轴（只看截止日以内的前缀）标记整行缺失。"""
     import pandas_market_calendars as mcal
 
+    for x in axis:
+        try:
+            datetime.date.fromisoformat(x)
+        except ValueError:
+            raise StopReport(REASON_INPUT, f"日期无法解析：{x!r}") from None
     sched = mcal.get_calendar("NYSE").schedule(start_date=axis[0], end_date=axis[-1])
     sessions = [x.strftime("%Y-%m-%d") for x in sched.index]
     extra = sorted(set(axis) - set(sessions))
@@ -1132,9 +1147,9 @@ def align_nyse(
     if sessions == axis:
         return axis, prices, []
     pos = {d: i for i, d in enumerate(axis)}
-    missing_rows = [d for d in sessions if d not in pos]
+    added = [{"date": d, "assets": list(ASSETS), "reason": "预期交易日整行缺失"} for d in sessions if d not in pos]
     new_prices = {a: [prices[a][pos[d]] if d in pos else None for d in sessions] for a in ASSETS}
-    return sessions, new_prices, missing_rows
+    return sessions, new_prices, added
 
 
 def ser_inputs(
@@ -1405,6 +1420,8 @@ def run_full(sc: dict[str, Any]) -> dict[str, Any]:
     if n_intervals == 0:
         out["stop_reason"] = {
             "reason": REASON_EMPTY,
+            "sub_reason": SUB_EMPTY_EQUAL if j0 == end else SUB_EMPTY_LATER,
+            "n": 0,
             "detail": "j0 不早于窗口末日，没有可计入收益的区间",
             "t0": axis[t0],
             "kappa_all": axis[kappa_all],
@@ -1700,13 +1717,20 @@ def bootstrap_row(d: list[float], delta: float, b: int, seed: int, big_b: int) -
 def run_confirm(sc: dict[str, Any]) -> dict[str, Any]:
     axis, prices, end, checks = load_series(sc)
     k, theta, h = parse_params([sc["params"]])[0]
-    if sc["window_start"] not in axis or sc["half_split"] not in axis:
-        raise StopReport(REASON_INPUT, "window_start 或 half_split 不在截止日以内的交易日轴上")
-    jv = axis.index(sc["window_start"])
+    ws = sc["window_start"]
+    if not isinstance(ws, str):
+        raise StopReport(REASON_INPUT, "window_start 须为字符串")
+    if ws not in axis:
+        if ws > axis[-1]:
+            # 修订二第五节：起点晚于最后一个收盘日，n = 0
+            raise StopReport(REASON_EMPTY, "确认性检验窗口内没有可计入收益的区间", sub_reason=SUB_EMPTY_LATER, n=0)
+        raise StopReport(REASON_INPUT, "window_start 不在截止日以内的交易日轴上")
+    jv = axis.index(ws)
+    if jv == end:
+        raise StopReport(REASON_EMPTY, "确认性检验窗口内没有可计入收益的区间", sub_reason=SUB_EMPTY_EQUAL, n=0)
+    if sc["half_split"] not in axis:
+        raise StopReport(REASON_INPUT, "half_split 不在截止日以内的交易日轴上")
     split = axis.index(sc["half_split"])
-    if end - jv <= 0:
-        # 补充条文第三节第 2 条：n = 0 时停止，原因为“评价窗口为空”
-        raise StopReport(REASON_EMPTY, "确认性检验窗口内没有可计入收益的区间")
     big_b = int(sc.get("B", REG_B))
     seeds = {int(kk): int(v) for kk, v in sc.get("seeds", REG_SEEDS).items()}
     registered = big_b == REG_B and seeds == REG_SEEDS
@@ -1922,8 +1946,8 @@ def run_scenario(sc: Any) -> dict[str, Any]:
 
 
 def main(argv: list[str]) -> int:
-    """退出码（补充条文第八节）：0 正常结束（含“缺值无法评价”“无合格候选”等登记出口）；1 未捕获的异常；
-    2 参数错误；3 停止报告，具体原因见输出中的 stop_reason。"""
+    """退出码（修订二第三节，冻结接口）：0 正常完成（含“缺值无法评价”“无合格候选”等非计算失败的登记出口）；
+    1 未能形成或写出有效报告的未捕获故障；2 命令行参数错误；3 成功形成结构化停止报告（原因见 stop_reason）。"""
     if len(argv) != 3:
         print("用法：python audit_v20.py 场景.json 输出.json", file=sys.stderr)
         return 2
@@ -1942,7 +1966,13 @@ def main(argv: list[str]) -> int:
         except Exception as exc:
             # 补充条文第五节：未预期异常——保留原始异常与调用栈；不仅凭发生异常就断言为算法错误
             result = {
-                "stop_reason": {"reason": REASON_UNEXPECTED, "detail": repr(exc), "traceback": traceback.format_exc()}
+                "stop_reason": {
+                    "reason": REASON_UNEXPECTED,
+                    "exception_type": type(exc).__name__,
+                    "message": str(exc),
+                    "detail": repr(exc),
+                    "traceback": traceback.format_exc(),
+                }
             }
     code = 3 if "stop_reason" in result else 0
     kind = sc.get("kind") if isinstance(sc, dict) else None
