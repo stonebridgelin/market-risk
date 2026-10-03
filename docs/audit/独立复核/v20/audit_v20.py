@@ -13,8 +13,8 @@
 用法：
     python audit_v20.py 场景.json 输出.json
 
-场景格式与输出字段见同目录 README.md。规则未覆盖、必须停下报告的情形抛出 StopReport，
-输出文件中记为 {"停下报告": 原因}，进程退出码为 3。
+场景格式与输出字段见同目录 README.md。停止报告时输出 stop_reason（结构化原因，规格补充条文第五节），
+退出码按补充条文第八节：0 正常结束，1 未捕获的异常，2 参数错误，3 停止报告。
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ import itertools
 import json
 import math
 import sys
+import traceback
 from collections.abc import Callable, Sequence
 from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Context, Decimal
 from pathlib import Path
@@ -30,7 +31,7 @@ from typing import Any
 
 import numpy as np
 
-TOOL_VERSION = "v20-indep-1"
+TOOL_VERSION = "v20-indep-2"
 
 # ---------------------------------------------------------------- 常量（全部出自登记或补充）
 
@@ -92,8 +93,34 @@ DCTX = Context(prec=28, rounding=ROUND_HALF_EVEN)  # 只用于输出 D 的数值
 CENT = Decimal("0.01")
 
 
+REASON_INPUT = "输入校验失败"
+REASON_MISSING = "缺少必需价格"
+REASON_UNEXPECTED = "未预期异常"
+REASON_NONCONV = "未收敛"
+REASON_EMPTY = "评价窗口为空"
+REASON_NO_T0 = "t0 不存在"
+REASON_SEG_UNKNOWN = "提示段起始状态无法确定"
+REASON_CALC_FAIL = "计算失败"
+
+
 class StopReport(Exception):
-    """登记未覆盖或要求停下报告的情形。"""
+    """停止报告。reason 为结构化的原因值（补充条文第五节、第三节第 2 条），detail 为说明文字。"""
+
+    def __init__(self, reason: str, detail: str, **info: Any) -> None:
+        super().__init__(detail)
+        self.reason = reason
+        self.detail = detail
+        self.info = info
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"reason": self.reason, "detail": self.detail, **self.info}
+
+
+class MissingPrice(StopReport):
+    """缺少必需价格：生成标签或计算所需的收盘价为空（补充条文第五节）。"""
+
+    def __init__(self, detail: str, **info: Any) -> None:
+        super().__init__(REASON_MISSING, detail, **info)
 
 
 # ---------------------------------------------------------------- 基础工具
@@ -105,16 +132,8 @@ def parse_price(v: Any) -> Decimal | None:
         return None
     d = Decimal(str(v))
     if not d.is_finite() or d <= 0:
-        raise StopReport(f"价格不是正的有限数：{v!r}")
+        raise StopReport(REASON_INPUT, f"价格不是正的有限数：{v!r}")
     return d.quantize(CENT, rounding=ROUND_HALF_UP)
-
-
-def seq_sum(xs: Sequence[float]) -> float:
-    """从左到右逐个相加的 float64 求和（本工具所有求和统一用这一顺序）。"""
-    acc = 0.0
-    for x in xs:
-        acc += x
-    return acc
 
 
 def dec_text(d: Decimal | None) -> str | None:
@@ -142,9 +161,18 @@ def parse_params(spec: Any) -> list[tuple[int, Decimal, int]]:
     if spec == "registered":
         return [(k, Decimal(t), h) for k in REG_K for t in REG_THETA for h in REG_H]
     out = []
+    if not isinstance(spec, list) or not spec:
+        raise StopReport(REASON_INPUT, 'params 须为 "registered" 或非空列表')
     for item in spec:
+        if not isinstance(item, list) or len(item) != 3:
+            raise StopReport(REASON_INPUT, f"参数组须为 [K, θ, h]：{item!r}")
         k, t, h = item
-        out.append((int(k), Decimal(str(t)), int(h)))
+        theta = Decimal(str(t))
+        if not (isinstance(k, int) and k >= 1 and isinstance(h, int) and h >= 1 and theta.is_finite()):
+            raise StopReport(REASON_INPUT, f"参数不合法：{item!r}")
+        if not Decimal(0) < theta < Decimal("0.5"):
+            raise StopReport(REASON_INPUT, f"θ_P 不在 (0, 0.5) 内：{item!r}")
+        out.append((k, theta, h))
     return out
 
 
@@ -223,7 +251,7 @@ def pp_valid(a: dict[str, Any]) -> bool:
 def step_pp(prev: str, a: dict[str, Any], factor: Decimal, k: int) -> str:
     """P_a、PR_a：退出 > 重新武装 > 进入；factor = 1 − 门槛。"""
     if prev not in PP_DOMAIN:
-        raise StopReport(f"P/PR 出现未登记的状态：{prev}")
+        raise StopReport(REASON_UNEXPECTED, f"P/PR 出现未登记的状态：{prev}")
     if prev == ACTIVE:
         if pp_valid(a) and a["q"] >= k:
             return UNARMED  # 转为未武装，当日结束
@@ -244,7 +272,7 @@ def step_pp(prev: str, a: dict[str, Any], factor: Decimal, k: int) -> str:
 
 def step_mr(prev: str, m: dict[str, Any]) -> str:
     if prev not in MR_DOMAIN:
-        raise StopReport(f"MR 出现第三种状态：{prev}")  # 登记第一节第 1 小节：遇到即停下报告
+        raise StopReport(REASON_UNEXPECTED, f"MR 出现第三种状态：{prev}")  # 登记第一节第 1 小节：遇到即停下报告
     if prev == ACTIVE:
         if m["complete"] and not m["below"]:
             return ARMED
@@ -288,7 +316,7 @@ def next_s(prev_s: str, lvl: int, c1: int, c2: int, h: int) -> str:
         return NORMAL if c1 >= h else LV1
     if prev_s == LV2:
         return LV1 if c2 >= h else LV2
-    raise StopReport(f"S 出现未登记的状态：{prev_s}")
+    raise StopReport(REASON_UNEXPECTED, f"S 出现未登记的状态：{prev_s}")
 
 
 def counter_items(ch: dict[str, str], v: dict[str, Any], k: int) -> list[bool]:
@@ -315,12 +343,12 @@ def check_state(state: dict[str, Any], h: int) -> None:
     for name in CHANNELS:
         dom = MR_DOMAIN if name == "MR" else PP_DOMAIN
         if state["ch"][name] not in dom:
-            raise StopReport(f"初始状态中 {name} 不在状态域内：{state['ch'][name]}")
+            raise StopReport(REASON_INPUT, f"初始状态中 {name} 不在状态域内：{state['ch'][name]}")
     if state["S"] not in S_DOMAIN:
-        raise StopReport(f"初始 S 不在状态域内：{state['S']}")
+        raise StopReport(REASON_INPUT, f"初始 S 不在状态域内：{state['S']}")
     for c in ("c1", "c2"):
         if not (0 <= state[c] <= h):
-            raise StopReport(f"初始 {c} 超出 0 至 h：{state[c]}")
+            raise StopReport(REASON_INPUT, f"初始 {c} 超出 0 至 h：{state[c]}")
 
 
 def run_machine(
@@ -400,7 +428,7 @@ def find_t0(inp: dict[str, list[dict[str, Any]]], ma: list[dict[str, Any]], end:
 
 def step_ref(prev: str, m: dict[str, Any]) -> tuple[str, int | None]:
     if prev not in S_DOMAIN:
-        raise StopReport(f"S_参照 出现未登记的状态：{prev}")
+        raise StopReport(REASON_UNEXPECTED, f"S_参照 出现未登记的状态：{prev}")
     if not m["complete"]:
         return prev, None  # 均线不完整：保持前一日状态；L_参照 无定义
     lvl = 2 if m["below"] else 0
@@ -504,20 +532,22 @@ def ref_convergence(ma: list[dict[str, Any]], start: int, end: int) -> dict[str,
 
 def interval_returns(
     prices: dict[str, list[Decimal | None]], j0: int, end: int
-) -> tuple[dict[int, float], list[list[Any]]]:
+) -> tuple[dict[int, float | None], list[list[Any]]]:
     """U_j：两资产等权日收益，区间 j 为第 j−1 日收盘 → 第 j 日收盘（补充第 12 条，以末日标记）。
 
-    返回 (U, 缺价清单)。缺价清单列出 [j0, end] 内两资产全部缺价日。
+    返回 (U, 缺价清单)。缺价清单列出 [j0, end] 内两资产全部缺价日；所需价格缺失的区间 U 为 None。
     """
     missing = [[a, d] for d in range(j0, end + 1) for a in ASSETS if prices[a][d] is None]
-    if missing:
-        return {}, missing
-    u: dict[int, float] = {}
+    u: dict[int, float | None] = {}
     for j in range(j0 + 1, end + 1):
-        rs = float(prices["SPX"][j]) / float(prices["SPX"][j - 1]) - 1.0  # type: ignore[arg-type]
-        rq = float(prices["QQQ"][j]) / float(prices["QQQ"][j - 1]) - 1.0  # type: ignore[arg-type]
+        cs0, cs1, cq0, cq1 = prices["SPX"][j - 1], prices["SPX"][j], prices["QQQ"][j - 1], prices["QQQ"][j]
+        if cs0 is None or cs1 is None or cq0 is None or cq1 is None:
+            u[j] = None
+            continue
+        rs = float(cs1) / float(cs0) - 1.0
+        rq = float(cq1) / float(cq0) - 1.0
         u[j] = 0.5 * rs + 0.5 * rq
-    return u, []
+    return u, missing
 
 
 def portfolio_return(e: tuple[float, float], u: float) -> tuple[float, float | None, bool | None]:
@@ -540,7 +570,10 @@ def max_drawdown(ws: Sequence[float]) -> float:
 
 
 def switch_list(targets: list[tuple[int, tuple[float, float]]]) -> list[dict[str, Any]]:
-    """登记第一节第 7 小节：执行日目标与前一执行日不同计一次；首个执行日（初始建仓）不计。"""
+    """登记第一节第 7 小节：执行日目标与前一执行日不同计一次；首个执行日（初始建仓）不计。
+
+    补充条文第六节第 2 条：主字段 delta 为暴露变化的绝对值，方向另以 delta_signed 输出；涉及现金时阶段数为空。
+    """
     out = []
     for (_, prev), (d, cur) in itertools.pairwise(targets):
         if cur != prev:
@@ -551,24 +584,43 @@ def switch_list(targets: list[tuple[int, tuple[float, float]]]) -> list[dict[str
                     "exec_idx": d,
                     "from": EXPO_TEXT[prev][0],
                     "to": EXPO_TEXT[cur][0],
-                    "delta": str(delta),
-                    "abs_delta": str(abs(delta)),
+                    "delta": str(abs(delta)),
+                    "delta_signed": str(delta),
                     "stages": stages,
                 }
             )
     return out
 
 
+def interval_failure(
+    held: dict[int, tuple[float, float]], u: dict[int, float | None], j0: int, end: int
+) -> dict[str, Any] | None:
+    """在价格可得的区间上检查杠杆因子与非有限值（计算失败优先于缺值，补充条文第五节）。"""
+    for j in range(j0 + 1, end + 1):
+        uj = u[j]
+        if uj is None:
+            continue
+        r, _f, ok = portfolio_return(held[j], uj)
+        if ok is False:
+            return {"type": "杠杆因子不为正", "idx": j}
+        if not math.isfinite(r):
+            return {"type": "非有限值", "idx": j}
+    return None
+
+
 def nav_path(
-    held: dict[int, tuple[float, float]], u: dict[int, float], j0: int, end: int
+    held: dict[int, tuple[float, float]], u: dict[int, float | None], j0: int, end: int
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
-    """held[j] 为区间 j 内持有的暴露（第 j−1 日收盘执行后的暴露）。"""
+    """held[j] 为区间 j 内持有的暴露（第 j−1 日收盘执行后的暴露）。调用前已确认窗口内没有缺价。"""
     w = 1.0
     rows: list[dict[str, Any]] = [{"idx": j0, "U": None, "R": None, "lev_factor": None, "lev_ok": None, "W": 1.0}]
     for j in range(j0 + 1, end + 1):
-        r, f, ok = portfolio_return(held[j], u[j])
+        uj = u[j]
+        if uj is None:
+            raise AssertionError(f"区间 {j} 的收益不可得，但窗口内缺价清单为空")
+        r, f, ok = portfolio_return(held[j], uj)
         w = w * (1.0 + r)
-        rows.append({"idx": j, "U": u[j], "R": r, "lev_factor": f, "lev_ok": ok, "W": w})
+        rows.append({"idx": j, "U": uj, "R": r, "lev_factor": f, "lev_ok": ok, "W": w})
         if ok is False:
             return rows, {"type": "杠杆因子不为正", "idx": j}
         if not (math.isfinite(r) and math.isfinite(w)) or w <= 0:
@@ -576,10 +628,9 @@ def nav_path(
     return rows, None
 
 
-def nav_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    ws = [r["W"] for r in rows]
-    logs = [math.log(1.0 + r["R"]) for r in rows[1:]]
-    sum_log = seq_sum(logs)
+def nav_summary(ws: list[float], rs: list[float]) -> dict[str, Any]:
+    """补充条文第一节第 3 条：|math.fsum(log1p R_j) − ln W_末| ≤ 1e-10。"""
+    sum_log = math.fsum(math.log1p(r) for r in rs)
     ln_w = math.log(ws[-1])
     return {
         "W_end": ws[-1],
@@ -590,10 +641,26 @@ def nav_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def simulate_signal(
-    s_of: Callable[[int], str], u: dict[int, float], missing: list[list[Any]], j0: int, end: int
+def nav_object(
+    held: dict[int, tuple[float, float]], u: dict[int, float | None], missing: list[list[Any]], j0: int, end: int
 ) -> dict[str, Any]:
-    """信号模拟：第 j 日收盘执行映射(S_{j−1})。"""
+    """一个对象的净值：缺价时整体“无法计算”，但计算失败（杠杆因子、非有限值）优先报告。"""
+    if missing:
+        fail = interval_failure(held, u, j0, end)
+        return {"failed": fail or {"type": "缺价", "missing": missing}, "nav": None, "summary": None}
+    rows, fail = nav_path(held, u, j0, end)
+    summary = None
+    if fail is None:
+        summary = nav_summary([r["W"] for r in rows], [r["R"] for r in rows[1:]])
+        if not summary["recon_ok"]:
+            fail = {"type": "对账不符"}
+    return {"failed": fail, "nav": rows, "summary": summary}
+
+
+def simulate_signal(
+    s_of: Callable[[int], str], u: dict[int, float | None], missing: list[list[Any]], j0: int, end: int
+) -> dict[str, Any]:
+    """信号模拟：第 j 日收盘执行映射(S_{j−1})。计划目标不依赖净值，缺价时照常输出。"""
     targets = [(j, EXPO[s_of(j - 1)]) for j in range(j0, end + 1)]
     plan = [
         {
@@ -610,34 +677,30 @@ def simulate_signal(
         for j, e in targets
     ]
     sw = switch_list(targets)
-    out: dict[str, Any] = {"plan": plan, "switches": len(sw), "switch_list": sw}
-    if missing:
-        out.update({"failed": {"type": "缺价", "missing": missing}, "nav": None, "summary": None})
-        return out
     held = {j + 1: e for j, e in targets if j + 1 <= end}
-    rows, fail = nav_path(held, u, j0, end)
-    out["nav"] = rows
-    out["failed"] = fail
-    out["summary"] = nav_summary(rows) if fail is None else None
-    if out["summary"] is not None and not out["summary"]["recon_ok"]:
-        out["failed"] = {"type": "对账不符"}
-    return out
+    return {"plan": plan, "switches": len(sw), "switch_list": sw, **nav_object(held, u, missing, j0, end)}
 
 
 def simulate_exec(
     s_of: Callable[[int], str],
     valid_of: Callable[[int], bool],
-    u: dict[int, float],
+    u: dict[int, float | None],
     missing: list[list[Any]],
     j0: int,
     end: int,
 ) -> dict[str, Any]:
-    """执行政策模拟：4% 止损、冷却 10 日、重入与上限 U（登记第一节第 6 小节，规格第八节第 2 条）。"""
-    if missing:
-        return {"failed": {"type": "缺价", "missing": missing}, "days": None, "summary": None}
+    """执行政策模拟：4% 止损、冷却 10 日、重入与上限 U（登记第一节第 6 小节，规格第八节第 2 条）。
+
+    补充条文第四节第 2 条：缺价之前已确定的记录照常保留；之后依赖净值的路径能唯一确定的保留，
+    不能唯一确定的标为“无法确定”。止损判断用时间加权净值 W 与基准；W 因缺价未知时，
+    若本轮（自最近一次建仓起）的区间收益全部可得，则用本轮内的相对净值判断（止损只依赖本轮内的比值）；
+    两者都未知时，自该信号日起路径无法唯一确定。现金期间区间收益为 0，不需要价格。
+    """
     mode = "持仓"
-    base = 1.0
-    w = 1.0
+    w: float | None = 1.0
+    base: float | None = 1.0
+    wr: float | None = 1.0  # 本轮内相对净值
+    br: float | None = 1.0  # 本轮内相对基准
     cap = "无"
     k_idx: int | None = None
     s_idx: int | None = None
@@ -647,16 +710,40 @@ def simulate_exec(
     days: list[dict[str, Any]] = []
     events: list[dict[str, Any]] = []
     fail = None
+    undetermined_from: int | None = None
+    rs: list[float] = []
     for d in range(j0, end + 1):
-        row: dict[str, Any] = {"idx": d}
+        s_d = s_of(d)
+        v_d = valid_of(d)
+        row: dict[str, Any] = {"idx": d, "S": s_d, "all_valid": v_d, "signal_target": EXPO_TEXT[EXPO[s_d]][0]}
+        if undetermined_from is not None:
+            row["determined"] = False
+            days.append(row)
+            continue
+        row["determined"] = True
         if d > j0:
-            r, f, ok = portfolio_return(target[d - 1], u[d])
-            w = w * (1.0 + r)
-            row.update({"U": u[d], "R": r, "lev_factor": f, "lev_ok": ok})
+            e = target[d - 1]
+            ud = u[d]
+            r: float | None
+            if e == CASH:
+                r, f, ok = 0.0, None, None
+            elif ud is None:
+                r, f, ok = None, None, None
+            else:
+                r, f, ok = portfolio_return(e, ud)
+            row.update({"U": ud, "R": r, "lev_factor": f, "lev_ok": ok})
             if ok is False:
                 fail = {"type": "杠杆因子不为正", "idx": d}
-            elif not (math.isfinite(r) and math.isfinite(w)) or w <= 0:
+            elif r is not None and not math.isfinite(r):
                 fail = {"type": "非有限值", "idx": d}
+            if r is None:
+                w = wr = None
+            else:
+                rs.append(r)
+                w = None if w is None else w * (1.0 + r)
+                wr = None if wr is None else wr * (1.0 + r)
+                if w is not None and fail is None and (not math.isfinite(w) or w <= 0):
+                    fail = {"type": "非有限值", "idx": d}
         row["W"] = w
         row["held_exposure"] = EXPO_TEXT[target[d]][0]  # 第 d 日收盘执行后的暴露
         if fail is not None:
@@ -667,17 +754,30 @@ def simulate_exec(
             events.append({"type": "止损执行", "idx": d})
         elif mode == "重入待执行" and d == (k_idx or 0) + 1:
             mode = "持仓"
-            base = w  # 新一轮，基准重置为该日收盘的时间加权净值
+            base = w  # 新一轮，基准重置为该日收盘的时间加权净值（缺价后可能未知）
+            wr, br = 1.0, 1.0
             events.append({"type": "重入执行", "idx": d})
         row["mode"] = mode
-        s_d = s_of(d)
-        v_d = valid_of(d)
-        row["S"] = s_d
-        row["all_valid"] = v_d
         if mode == "持仓":
-            base = max(base, w)
-            row["base"] = base
-            if w <= STOP_RATIO * base:
+            if w is not None and base is not None and wr is not None and br is not None:
+                base = max(base, w)
+                br = max(br, wr)
+                stop = w <= STOP_RATIO * base
+                row["base"] = base
+            elif wr is not None and br is not None:
+                br = max(br, wr)
+                stop = wr <= STOP_RATIO * br
+                row["base"] = None
+                row["round_W"], row["round_base"] = wr, br
+            else:
+                row["base"] = None
+                row["stop_check"] = "无法确定"
+                row["determined"] = False
+                undetermined_from = d
+                events.append({"type": "路径无法确定", "idx": d})
+                days.append(row)
+                continue
+            if stop:
                 events.append({"type": "止损确认", "idx": d})
                 mode = "离场待执行"
                 s_idx = d + 1
@@ -726,40 +826,30 @@ def simulate_exec(
     seq = [(j, target[j]) for j in range(j0, end + 1) if j in target]
     sw = switch_list(seq)
     summary = None
-    if fail is None:
-        ws = [r["W"] for r in days]
-        logs = [math.log(1.0 + r["R"]) for r in days[1:]]
-        sum_log = seq_sum(logs)
-        ln_w = math.log(ws[-1])
-        summary = {
-            "W_end": ws[-1],
-            "lnW_end": ln_w,
-            "sum_log": sum_log,
-            "recon_ok": abs(sum_log - ln_w) <= RECON_EPS,
-            "mdd": max_drawdown(ws),
-            "stops": sum(1 for e in events if e["type"] == "止损确认"),
-            "reentries": sum(1 for e in events if e["type"] == "重入执行"),
-        }
+    if fail is None and not missing:
+        summary = nav_summary([r["W"] for r in days], rs)
+        summary["stops"] = sum(1 for e in events if e["type"] == "止损确认")
+        summary["reentries"] = sum(1 for e in events if e["type"] == "重入执行")
+        if not summary["recon_ok"]:
+            fail = {"type": "对账不符"}
+    if fail is None and missing:
+        fail = {"type": "缺价", "missing": missing}
     return {
         "failed": fail,
         "days": days,
         "events": events,
+        "undetermined_from": undetermined_from,
         "switches": len(sw),
+        "switches_determined_through": seq[-1][0] if seq else None,
         "switch_list": sw,
         "summary": summary,
     }
 
 
-def simulate_hold(u: dict[int, float], missing: list[list[Any]], j0: int, end: int) -> dict[str, Any]:
+def simulate_hold(u: dict[int, float | None], missing: list[list[Any]], j0: int, end: int) -> dict[str, Any]:
     """同一组合一直持有：每日暴露 1.4（规格第四节）。"""
-    if missing:
-        return {"failed": {"type": "缺价", "missing": missing}, "nav": None, "summary": None}
     held = {j: EXPO[NORMAL] for j in range(j0 + 1, end + 1)}
-    rows, fail = nav_path(held, u, j0, end)
-    summary = nav_summary(rows) if fail is None else None
-    if summary is not None and not summary["recon_ok"]:
-        fail = {"type": "对账不符"}
-    return {"failed": fail, "nav": rows, "summary": summary}
+    return nav_object(held, u, missing, j0, end)
 
 
 # ---------------------------------------------------------------- R2 事件（规格第八节第 3 条）
@@ -768,12 +858,12 @@ def simulate_hold(u: dict[int, float], missing: list[list[Any]], j0: int, end: i
 def r2_events(closes: list[Decimal | None], end: int) -> list[dict[str, Any]]:
     present = [i for i in range(end + 1) if closes[i] is not None]
     if not present:
-        raise StopReport("R2：该资产截止日前没有任何收盘价")
+        raise MissingPrice("R2：该资产截止日前没有任何收盘价")
     start = present[0]
     gaps = [i for i in range(start, end + 1) if closes[i] is None]
     if gaps:
         # 补充第 18 条：标签函数的输入须已通过交易日完整性校验；缺价即报错
-        raise StopReport(f"R2：最早收盘价之后存在缺价，标签无法生成：{gaps}")
+        raise MissingPrice("R2：最早收盘价之后存在缺价，标签无法生成", missing_idx=gaps)
     events: list[dict[str, Any]] = []
     mode = "寻峰"
     hi = closes[start]
@@ -863,7 +953,10 @@ def judge_events(
                 row["exec_idx"] = first + 1
                 row["offset_vs_T3"] = first + 1 - t3
         elif pr[p] and pr[p - 1] is None:
-            raise StopReport(f"R2：P={p} 当日为提示、前一日无法确定，且 [P, T3) 内没有确定的新提示开始，登记未覆盖")
+            raise StopReport(
+                REASON_UNEXPECTED,
+                f"R2：P={p} 当日为提示、前一日无法确定，且 [P, T3) 内没有确定的新提示开始，登记未覆盖",
+            )
         elif pr[p]:
             row["category"] = "提示中断"
         else:
@@ -871,7 +964,7 @@ def judge_events(
             if any(x is True for x in later):
                 row["category"] = "迟到"
             elif any(x is None for x in later):
-                raise StopReport(f"R2：P={p} 的 [T3, Tr] 内状态无法确定，无法区分迟到与漏报")
+                raise StopReport(REASON_UNEXPECTED, f"R2：P={p} 的 [T3, Tr] 内状态无法确定，无法区分迟到与漏报")
             else:
                 row["category"] = "漏报"
         rows.append(row)
@@ -912,7 +1005,9 @@ def prompt_ledger(events: list[dict[str, Any]], s_of: Callable[[int], str | None
         seg_end = d
         d += 1
         if prev is None:
-            raise StopReport(f"提示段起始日 {start} 的前一信号日状态无法确定（补充第 11 条（c）/第 14 条）")
+            raise StopReport(
+                REASON_SEG_UNKNOWN, f"提示段起始日 {start} 的前一信号日状态无法确定（补充第 11 条（c）/第 14 条）"
+            )
         if prev and start == f:
             pre_window += 1
             segs.append({"start": start, "end": seg_end, "pre_window": True, "class": None})
@@ -948,16 +1043,20 @@ def prompt_ledger(events: list[dict[str, Any]], s_of: Callable[[int], str | None
 # ---------------------------------------------------------------- 选择程序（登记第五节）
 
 
-def select(records: list[dict[str, Any]], ref_failed: dict[str, Any] | None) -> dict[str, Any]:
-    failed = [r["key"] for r in records if r["failure"] is not None]
-    if failed or ref_failed is not None:
-        return {"exit": "计算失败", "failed_groups": failed, "reference_failed": ref_failed}
-    missing = [r["key"] for r in records if r["nav_missing"] or not r["r2_computable"]]
-    if missing:
-        return {"exit": "缺值无法评价", "groups": missing}
+def select(
+    records: list[dict[str, Any]], ref_failed: dict[str, Any] | None, missing_reasons: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """出口优先级：计算失败 > 缺值无法评价 > 无合格候选 > 选定（补充条文第五节）；各出口分别记录原因。"""
+    failures = [{"object": r["key"], **r["failure"]} for r in records if r["failure"] is not None]
+    if ref_failed is not None:
+        failures.append({"object": "主参照", **ref_failed})
+    if failures:
+        return {"exit": "计算失败", "reasons": failures}
+    if missing_reasons:
+        return {"exit": "缺值无法评价", "reasons": missing_reasons}
     feasible = [r for r in records if r["r1_ok"] and r["r2_ok"]["SPX"] and r["r2_ok"]["QQQ"]]
     if not feasible:
-        return {"exit": "无合格候选", "feasible": []}
+        return {"exit": "无合格候选", "reasons": [{"reason": "没有任何一组同时满足 R1、R2"}], "feasible": []}
     m = max(r["lnW_end"] for r in feasible)
     tie = [r for r in feasible if r["lnW_end"] >= m - TIE_EPS]
     chosen = min(tie, key=lambda r: (r["switches"], r["order"]))
@@ -973,36 +1072,69 @@ def select(records: list[dict[str, Any]], ref_failed: dict[str, Any] | None) -> 
 # ---------------------------------------------------------------- 场景运行
 
 
-def load_series(sc: dict[str, Any]) -> tuple[list[str], dict[str, list[Decimal | None]], int]:
-    axis = [str(x) for x in sc["axis"]]
-    if len(set(axis)) != len(axis):
-        raise StopReport("交易日轴有重复")
-    if "cutoff" in sc and sc["cutoff"] is not None:
-        if sc["cutoff"] not in axis:
-            raise StopReport("截止日不在交易日轴上")
-        end = axis.index(sc["cutoff"])
+def load_series(sc: dict[str, Any]) -> tuple[list[str], dict[str, list[Decimal | None]], int, dict[str, Any]]:
+    """读入交易日轴与价格。
+
+    补充条文第三节第 1 条：先截取截止日以内的日期轴，再检查交易日完整性；截止日之后的日期与价格
+    不进入计算，对它们的检查只另列在 file_checks 中，不改变历史计算结果。
+    补充条文第五节：日期重复或乱序、价格非正或非有限等为“输入校验失败”；预期交易日整行缺失为
+    “缺少必需价格”——该日按两资产缺价处理并列在 missing_rows 中。
+    """
+    raw_axis = sc.get("axis")
+    if not isinstance(raw_axis, list) or not raw_axis or not all(isinstance(x, str) for x in raw_axis):
+        raise StopReport(REASON_INPUT, "axis 须为非空的字符串列表")
+    cutoff = sc.get("cutoff")
+    if cutoff is not None:
+        if cutoff not in raw_axis:
+            raise StopReport(REASON_INPUT, "截止日不在交易日轴上")
+        end = raw_axis.index(cutoff)
     else:
-        end = len(axis) - 1
-    if sc.get("calendar") == "NYSE":
-        check_nyse(axis)
+        end = len(raw_axis) - 1
+    axis = list(raw_axis[: end + 1])
+    if len(set(axis)) != len(axis):
+        raise StopReport(REASON_INPUT, "截止日以内的交易日轴有重复")
+    if any(a >= b for a, b in itertools.pairwise(axis)):
+        raise StopReport(REASON_INPUT, "截止日以内的交易日轴不是严格递增")
+    file_checks: list[str] = []
+    tail = raw_axis[end + 1 :]
+    if tail:
+        file_checks.append(f"截止日之后有 {len(tail)} 行，未参与计算")
+    if not isinstance(sc.get("prices"), dict):
+        raise StopReport(REASON_INPUT, "prices 须为对象")
     prices: dict[str, list[Decimal | None]] = {}
     for a in ASSETS:
-        raw = sc["prices"][a]
-        if len(raw) != len(axis):
-            raise StopReport(f"{a} 价格长度与交易日轴不一致")
-        # 截断到截止日（含）：截止日之后的数据不参与任何计算
+        raw = sc["prices"].get(a)
+        if not isinstance(raw, list) or len(raw) < end + 1:
+            raise StopReport(REASON_INPUT, f"{a} 价格缺少或短于截止日以内的交易日轴")
+        if len(raw) != len(raw_axis):
+            file_checks.append(f"{a} 价格长度 {len(raw)} 与场景交易日轴长度 {len(raw_axis)} 不同（截止日之后部分）")
         prices[a] = [parse_price(x) for x in raw[: end + 1]]
-    return axis[: end + 1], prices, end
+    missing_rows: list[str] = []
+    if sc.get("calendar") == "NYSE":
+        axis, prices, missing_rows = align_nyse(axis, prices)
+    elif sc.get("calendar") is not None:
+        raise StopReport(REASON_INPUT, f"不支持的交易日历：{sc.get('calendar')}")
+    info = {"file_checks": file_checks, "missing_rows": missing_rows}
+    return axis, prices, len(axis) - 1, info
 
 
-def check_nyse(axis: list[str]) -> None:
-    """补充第 18 条：对照明确的交易日轴检测整行缺失。"""
+def align_nyse(
+    axis: list[str], prices: dict[str, list[Decimal | None]]
+) -> tuple[list[str], dict[str, list[Decimal | None]], list[str]]:
+    """补充第 18 条：对照 NYSE 交易日轴检测整行缺失（只看截止日以内的前缀）。"""
     import pandas_market_calendars as mcal
 
     sched = mcal.get_calendar("NYSE").schedule(start_date=axis[0], end_date=axis[-1])
     sessions = [x.strftime("%Y-%m-%d") for x in sched.index]
-    if sessions != axis:
-        raise StopReport("交易日轴与 NYSE 交易日历不一致（整行缺失或多余）")
+    extra = sorted(set(axis) - set(sessions))
+    if extra:
+        raise StopReport(REASON_INPUT, "交易日轴含非 NYSE 交易日", dates=extra[:20], count=len(extra))
+    if sessions == axis:
+        return axis, prices, []
+    pos = {d: i for i, d in enumerate(axis)}
+    missing_rows = [d for d in sessions if d not in pos]
+    new_prices = {a: [prices[a][pos[d]] if d in pos else None for d in sessions] for a in ASSETS}
+    return sessions, new_prices, missing_rows
 
 
 def ser_inputs(
@@ -1061,20 +1193,22 @@ def given_state(spec: dict[str, Any]) -> dict[str, Any]:
 
 def run_signal(sc: dict[str, Any]) -> dict[str, Any]:
     """只计算输入、通道与状态机；可选从指定日起枚举收敛。"""
-    axis, prices, end = load_series(sc)
+    axis, prices, end, checks = load_series(sc)
     params = parse_params(sc["params"])
     thetas = sorted({p[1] for p in params})
     inp = {a: asset_inputs(prices[a], thetas) for a in ASSETS}
     ma = ma_inputs(prices["SPX"])
-    out: dict[str, Any] = {"inputs": ser_inputs(axis, inp, ma), "groups": {}}
+    out: dict[str, Any] = {"input_checks": checks, "inputs": ser_inputs(axis, inp, ma), "groups": {}}
     start_spec = sc.get("start", {"mode": "t0"})
     if start_spec["mode"] == "t0":
         t0 = find_t0(inp, ma, end)
         if t0 is None:
-            raise StopReport("t0 不存在：五个通道的输入从未同时完整")
+            raise StopReport(REASON_NO_T0, "五个通道的输入从未同时完整")
         start, init = t0, initial_t0_state()
     else:
         start, init = int(start_spec["day"]), given_state(start_spec["state"])
+        if not 0 <= start <= end:
+            raise StopReport(REASON_INPUT, f"给定起点超出交易日轴：{start}")
     out["start"] = axis[start]
     enum = sc.get("enumerate")
     for k, theta, h in params:
@@ -1148,7 +1282,16 @@ def ser_sim(axis: list[str], sim: dict[str, Any]) -> dict[str, Any]:
         if isinstance(x, float):
             return float_out(x)
         if (
-            key in ("idx", "exec_idx", "signal_idx", "from_idx", "to_idx")
+            key
+            in (
+                "idx",
+                "exec_idx",
+                "signal_idx",
+                "from_idx",
+                "to_idx",
+                "undetermined_from",
+                "switches_determined_through",
+            )
             and isinstance(x, int)
             and not isinstance(x, bool)
         ):
@@ -1161,7 +1304,7 @@ def ser_sim(axis: list[str], sim: dict[str, Any]) -> dict[str, Any]:
 def compute_object_sims(
     s_of: Callable[[int], str],
     valid_of: Callable[[int], bool],
-    u: dict[int, float],
+    u: dict[int, float | None],
     missing: list[list[Any]],
     j0: int,
     end: int,
@@ -1205,15 +1348,15 @@ def r1_block(sig: dict[str, Any], hold: dict[str, Any], segments: list[list[int]
 
 
 def run_full(sc: dict[str, Any]) -> dict[str, Any]:
-    axis, prices, end = load_series(sc)
+    axis, prices, end, checks = load_series(sc)
     params = parse_params(sc["params"])
     thetas = sorted({p[1] for p in params})
     inp = {a: asset_inputs(prices[a], thetas) for a in ASSETS}
     ma = ma_inputs(prices["SPX"])
-    out: dict[str, Any] = {"inputs": ser_inputs(axis, inp, ma), "E": axis[end]}
+    out: dict[str, Any] = {"input_checks": checks, "inputs": ser_inputs(axis, inp, ma), "E": axis[end]}
     t0 = find_t0(inp, ma, end)
     if t0 is None:
-        out["stop"] = "t0 不存在：五个通道的输入从未同时完整"
+        out["stop_reason"] = {"reason": REASON_NO_T0, "detail": "五个通道的输入从未同时完整"}
         return out
     out["t0"] = axis[t0]
     machines: dict[str, list[dict[str, Any]]] = {}
@@ -1252,13 +1395,22 @@ def run_full(sc: dict[str, Any]) -> dict[str, Any]:
         conv_days.append(refc["conv"])
     out["groups"] = groups
     if nonconv:
-        out["stop"] = f"开发期内不收敛：{nonconv}"
+        out["stop_reason"] = {"reason": REASON_NONCONV, "detail": "开发期内不收敛", "objects": nonconv}
         return out
     kappa_all = max(conv_days)
     j0 = max(t0 + T0_GAP, kappa_all + 1)
-    out.update({"kappa_all": axis[kappa_all], "j0": axis[j0] if j0 <= end else None})
-    if j0 >= end:
-        out["stop"] = "j0 不早于窗口末日，窗口内没有计入收益的区间"
+    # 补充条文第三节第 2 条：可计入收益区间为第 j 日收盘到第 j+1 日收盘，j ≥ j0 且 j+1 ≤ E
+    n_intervals = max(0, end - j0)
+    out.update({"kappa_all": axis[kappa_all], "j0": axis[j0] if j0 <= end else f"窗口外+{j0 - end}", "n": n_intervals})
+    if n_intervals == 0:
+        out["stop_reason"] = {
+            "reason": REASON_EMPTY,
+            "detail": "j0 不早于窗口末日，没有可计入收益的区间",
+            "t0": axis[t0],
+            "kappa_all": axis[kappa_all],
+            "j0_index": j0,
+            "E_index": end,
+        }
         return out
     f = j0 - 1
     out["window_first_signal_day"] = axis[f]
@@ -1268,14 +1420,25 @@ def run_full(sc: dict[str, Any]) -> dict[str, Any]:
     out["hold"] = ser_sim(axis, hold)
     # 事件
     events: dict[str, Any] = {}
-    r2_error: dict[str, str] = {}
+    r2_error: dict[str, dict[str, Any]] = {}
     for a in ASSETS:
         try:
             events[a] = r2_events(prices[a], end)
-        except StopReport as exc:
-            r2_error[a] = str(exc)
+        except MissingPrice as exc:
+            info = exc.as_dict()
+            info["missing_days"] = [axis[i] for i in info.pop("missing_idx", [])]
+            r2_error[a] = info
     out["r2_events"] = {a: [ser_event(axis, ev) for ev in evs] for a, evs in events.items()}
     out["r2_events_error"] = r2_error
+    # 缺值无法评价的原因（与候选无关，按场景记录）
+    missing_reasons: list[dict[str, Any]] = []
+    if missing:
+        missing_reasons.append({"category": REASON_MISSING, "object": "净值（全部对象）", "missing": missing})
+    for a in ASSETS:
+        if a in r2_error:
+            missing_reasons.append({"category": REASON_MISSING, "object": f"R2 {a}", **r2_error[a]})
+        elif not any(ev["P"] > f for ev in events[a]):
+            missing_reasons.append({"category": "R2 无法计算（非左截断事件为 0 个）", "object": f"R2 {a}"})
     segments = [[axis.index(a), axis.index(b)] for a, b in sc.get("r1_segments", [])]
     records = []
     for order, (k, theta, h) in enumerate(params):
@@ -1329,16 +1492,19 @@ def run_full(sc: dict[str, Any]) -> dict[str, Any]:
         return bool(inp["SPX"][d]["has"] and ma[d]["complete"])
 
     ref_sims = compute_object_sims(ref_s, ref_valid, u, missing, j0, end)
+    # 补充条文第六节第 1 条：实际运行的初始状态为“正常”，自 t0 起输出
     out["reference"] = {
-        "days": [
-            {"day": axis[d], "L": ref_runs[NORMAL][d - t0]["L"], "S": ref_s(d)} for d in range(refc["conv"], end + 1)
-        ],
+        "days": [{"day": axis[d], "L": ref_runs[NORMAL][d - t0]["L"], "S": ref_s(d)} for d in range(t0, end + 1)],
         "signal_sim": ser_sim(axis, ref_sims["signal"]),
         "exec_sim": ser_sim(axis, ref_sims["exec"]),
     }
     ref_fail = first_failure(ref_sims["signal"], ref_sims["exec"])
     out["records"] = [ser_sim(axis, r) for r in records]
-    out["selection"] = select(records, ref_fail)
+    sel = ser_sim(axis, select(records, ref_fail, missing_reasons))
+    out["selection"] = sel
+    if sel["exit"] == "计算失败":
+        # 补充条文第一节第 3 条、第五节：计算失败即整体停止
+        out["stop_reason"] = {"reason": REASON_CALC_FAIL, "detail": "见 selection.reasons", "failures": sel["reasons"]}
     return out
 
 
@@ -1377,48 +1543,82 @@ def ser_ledger(axis: list[str], led: dict[str, Any]) -> dict[str, Any]:
 
 def run_exec(sc: dict[str, Any]) -> dict[str, Any]:
     """直接给定逐日 S、五通道是否全部有效与价格（或 U_j），只做模拟。"""
-    axis = [str(x) for x in sc["axis"]]
+    axis = sc["axis"]
     n = len(axis)
+    if not isinstance(axis, list) or len(set(axis)) != n or n < 2:
+        raise StopReport(REASON_INPUT, "axis 须为无重复、至少两日的列表")
     s_list = list(sc["S"])
-    v_list = [bool(x) for x in sc["all_valid"]]
-    j0 = int(sc["j0"])
-    end = int(sc.get("E", n - 1))
-    for s in s_list:
-        if s not in S_DOMAIN:
-            raise StopReport(f"S 不在状态域内：{s}")
+    v_list = sc["all_valid"]
+    if len(s_list) != n or len(v_list) != n or not all(isinstance(x, bool) for x in v_list):
+        raise StopReport(REASON_INPUT, "S 与 all_valid 须与交易日轴等长，all_valid 为布尔值")
+    j0 = sc["j0"]
+    end = sc.get("E", n - 1)
+    if not (isinstance(j0, int) and isinstance(end, int) and 1 <= j0 < end <= n - 1):
+        raise StopReport(REASON_INPUT, f"j0、E 不合法：{j0!r}, {end!r}")
+    for x in s_list:
+        if x not in S_DOMAIN:
+            raise StopReport(REASON_INPUT, f"S 不在状态域内：{x}")
+    u: dict[int, float | None]
     if "U" in sc:
         u = {j: float(sc["U"][j]) for j in range(j0 + 1, end + 1)}
+        if not all(math.isfinite(x) for x in u.values() if x is not None):
+            raise StopReport(REASON_INPUT, "U 含非有限值")
         missing: list[list[Any]] = []
     else:
         prices = {a: [parse_price(x) for x in sc["prices"][a]] for a in ASSETS}
+        if any(len(prices[a]) != n for a in ASSETS):
+            raise StopReport(REASON_INPUT, "价格须与交易日轴等长")
         u, missing = interval_returns(prices, j0, end)
     sims = compute_object_sims(lambda d: s_list[d], lambda d: v_list[d], u, missing, j0, end)
     hold = simulate_hold(u, missing, j0, end)
-    return {
+    out = {
         "signal_sim": ser_sim(axis, sims["signal"]),
         "exec_sim": ser_sim(axis, sims["exec"]),
         "hold": ser_sim(axis, hold),
     }
+    fail = first_failure(sims["signal"], sims["exec"], hold)
+    if fail is not None:
+        out["stop_reason"] = {
+            "reason": REASON_CALC_FAIL,
+            "detail": "见各对象 failed",
+            "failures": [ser_sim(axis, fail)],
+        }
+    return out
 
 
 def run_r2(sc: dict[str, Any]) -> dict[str, Any]:
     """直接给定逐日 S（可为 null 表示无法确定）与价格，计算事件、判定与提示段账。"""
     axis = [str(x) for x in sc["axis"]]
-    end = int(sc["E"])
-    f = int(sc["f"])
+    end = sc["E"]
+    f = sc["f"]
     s_list = sc["S"]
+    for x in s_list:
+        if x is not None and x not in S_DOMAIN:
+            raise StopReport(REASON_INPUT, f"S 不在状态域内：{x}")
 
     def s_of(d: int) -> str | None:
         return s_list[d] if 0 <= d < len(s_list) else None
 
+    if not (isinstance(f, int) and isinstance(end, int) and 1 <= f <= end < len(axis)):
+        raise StopReport(REASON_INPUT, f"f、E 不合法：{f!r}, {end!r}")
     events: dict[str, Any] = {}
-    out: dict[str, Any] = {"events": {}, "judge": {}}
+    out: dict[str, Any] = {"events": {}, "judge": {}, "r2_events_error": {}}
     for a, raw in sc["prices"].items():
         closes = [parse_price(x) for x in raw[: end + 1]]
-        events[a] = r2_events(closes, end)
+        try:
+            events[a] = r2_events(closes, end)
+        except MissingPrice as exc:
+            info = exc.as_dict()
+            info["missing_days"] = [axis[i] for i in info.pop("missing_idx", [])]
+            out["r2_events_error"][a] = info
+            out["judge"][a] = "无法计算"
+            continue
         out["events"][a] = [ser_event(axis, ev) for ev in events[a]]
         out["judge"][a] = ser_judge(axis, judge_events(events[a], s_of, f, len(axis)))
-    out["ledger"] = ser_ledger(axis, prompt_ledger(events, s_of, f, end))
+    if len(events) == len(sc["prices"]):
+        out["ledger"] = ser_ledger(axis, prompt_ledger(events, s_of, f, end))
+    else:
+        out["ledger"] = "无法计算"
     return out
 
 
@@ -1428,8 +1628,9 @@ def run_r2(sc: dict[str, Any]) -> dict[str, Any]:
 def stationary_bootstrap_indices(n: int, b: int, seed: int, count: int) -> list[list[int]]:
     """阶段二执行说明第 4 部分：先抽首位置；之后每个位置先抽 u，u < 1/b 时重抽位置，否则环形续行。
 
-    生成器为 NumPy Generator(PCG64(seed))，全部序列共用一个生成器、依次抽取。
-    逐次调用 rng.integers(0, n) 与 rng.random()（标量调用）；调用形式见 README 疑问 Q9。
+    补充条文第二节：生成器为 NumPy Generator(PCG64(seed))，该行的全部序列连续使用这一个生成器；
+    对 k = 1…B：先 integers(0, n) 取第一个位置；此后每个位置先 random() 得 u，u < 1/b 时 integers(0, n)
+    重抽位置，否则 (i + 1) mod n。本实现用标量调用。
     """
     rng = np.random.Generator(np.random.PCG64(seed))
     p = 1.0 / b
@@ -1450,50 +1651,73 @@ def stationary_bootstrap_indices(n: int, b: int, seed: int, count: int) -> list[
 def run_bootstrap(sc: dict[str, Any]) -> dict[str, Any]:
     items = []
     for it in sc["items"]:
-        seed, b, n, count = int(it["seed"]), int(it["b"]), int(it["n"]), int(it["count"])
+        seed, b, n, count = it["seed"], it["b"], it["n"], it["count"]
+        if not all(isinstance(x, int) and x >= 1 for x in (b, n, count)) or not isinstance(seed, int) or seed < 0:
+            raise StopReport(REASON_INPUT, f"抽样参数不合法：{it!r}")
         items.append({"seed": seed, "b": b, "n": n, "sequences": stationary_bootstrap_indices(n, b, seed, count)})
     return {"items": items}
 
 
-def bootstrap_row(d: np.ndarray, delta: float, b: int, seed: int, big_b: int) -> dict[str, Any]:
+def bootstrap_row(d: list[float], delta: float, b: int, seed: int, big_b: int) -> dict[str, Any]:
+    """一行重抽样。补充条文第一节第 2、4 条与第七节第 4 条：Δ*_k = math.fsum(d[i] for i in 第 k 次索引)；
+    p = (1 + #{k : Δ*_k − Δ ≥ Δ}) ÷ (B + 1)；输出每次的 Δ*_k、尾部比较结果与尾部计数。"""
     n = len(d)
     if n < 2 * b:
         return {"b": b, "seed": seed, "valid": False, "note": "n ÷ b < 2"}
     rng = np.random.Generator(np.random.PCG64(seed))
     p_jump = 1.0 / b
-    stars = np.empty(big_b)
-    for kk in range(big_b):
+    stars: list[float] = []
+    tails: list[bool] = []
+    for _k in range(big_b):
         pos = int(rng.integers(0, n))
-        idx = np.empty(n, dtype=np.int64)
-        idx[0] = pos
-        for i in range(1, n):
+        idx = [pos]
+        for _i in range(1, n):
             if rng.random() < p_jump:
                 pos = int(rng.integers(0, n))
             else:
                 pos = (pos + 1) % n
-            idx[i] = pos
-        stars[kk] = float(np.cumsum(d[idx])[-1])
-    hits = int(np.sum(stars - delta >= delta))
+            idx.append(pos)
+        star = math.fsum(d[i] for i in idx)
+        stars.append(star)
+        tails.append(star - delta >= delta)
+    hits = sum(tails)
     p = (1 + hits) / (big_b + 1)
-    q = np.quantile(stars, [0.025, 0.975])
-    return {"b": b, "seed": seed, "valid": True, "p": p, "q025": float(q[0]), "q975": float(q[1]), "note": ""}
+    q = np.quantile(np.array(stars, dtype=np.float64), [0.025, 0.975])
+    return {
+        "b": b,
+        "seed": seed,
+        "valid": True,
+        "p": p,
+        "tail_count": hits,
+        "q025": float(q[0]),
+        "q975": float(q[1]),
+        "note": "",
+        "delta_star": stars,
+        "tail": tails,
+    }
 
 
 def run_confirm(sc: dict[str, Any]) -> dict[str, Any]:
-    axis, prices, end = load_series(sc)
+    axis, prices, end, checks = load_series(sc)
     k, theta, h = parse_params([sc["params"]])[0]
+    if sc["window_start"] not in axis or sc["half_split"] not in axis:
+        raise StopReport(REASON_INPUT, "window_start 或 half_split 不在截止日以内的交易日轴上")
     jv = axis.index(sc["window_start"])
     split = axis.index(sc["half_split"])
+    if end - jv <= 0:
+        # 补充条文第三节第 2 条：n = 0 时停止，原因为“评价窗口为空”
+        raise StopReport(REASON_EMPTY, "确认性检验窗口内没有可计入收益的区间")
     big_b = int(sc.get("B", REG_B))
     seeds = {int(kk): int(v) for kk, v in sc.get("seeds", REG_SEEDS).items()}
     registered = big_b == REG_B and seeds == REG_SEEDS
     inp = {a: asset_inputs(prices[a], [theta]) for a in ASSETS}
     ma = ma_inputs(prices["SPX"])
-    out: dict[str, Any] = {"registered_settings": registered, "params": group_key(k, theta, h)}
-    invalid: list[str] = []
+    out: dict[str, Any] = {"input_checks": checks, "registered_settings": registered, "params": group_key(k, theta, h)}
+    invalid: list[dict[str, Any]] = []  # 计算无效的原因（结构化）
+    failures: list[dict[str, Any]] = []  # 计算失败（整体停止）
     t0 = find_t0(inp, ma, end)
     if t0 is None:
-        raise StopReport("t0 不存在")
+        raise StopReport(REASON_NO_T0, "五个通道的输入从未同时完整")
     recs = run_machine(inp, ma, k, theta, h, t0, initial_t0_state(), end)
     cc = channel_convergence(inp, ma, k, theta, t0, end)
     convs = [cc[n]["conv"] for n in CHANNELS]
@@ -1502,7 +1726,7 @@ def run_confirm(sc: dict[str, Any]) -> dict[str, Any]:
         sys_conv = system_convergence(recs, max(c for c in convs if c is not None), h)["conv"]
     refc = ref_convergence(ma, t0, end)
     if sys_conv is None or refc["conv"] is None or max(sys_conv, refc["conv"]) > jv - 1:
-        invalid.append("窗口开始前未收敛")
+        raise StopReport(REASON_NONCONV, "确认性检验窗口开始前未收敛")
     f = jv - 1
 
     def s_of(d: int) -> str:
@@ -1516,10 +1740,10 @@ def run_confirm(sc: dict[str, Any]) -> dict[str, Any]:
     ref = simulate_signal(ref_s, u, missing, jv, end)
     hold = simulate_hold(u, missing, jv, end)
     if missing:
-        invalid.append("净值所需价格缺失")
+        invalid.append({"reason": REASON_MISSING, "object": "净值", "missing": [[a, axis[i]] for a, i in missing]})
     for name, sim in (("候选", cand), ("参照", ref), ("一直持有", hold)):
         if sim["failed"] is not None and sim["failed"]["type"] != "缺价":
-            invalid.append(f"{name}计算失败：{sim['failed']['type']}")
+            failures.append({"object": name, **ser_sim(axis, sim["failed"])})
     out["window"] = {"start": axis[jv], "first_signal_day": axis[f], "E": axis[end], "half_split": axis[split]}
     # R2（按验证期截止日生成的事件）
     r2: dict[str, Any] = {}
@@ -1529,44 +1753,44 @@ def run_confirm(sc: dict[str, Any]) -> dict[str, Any]:
             events[a] = r2_events(prices[a], end)
             r2[a] = judge_events(events[a], lambda d: s_of(d) if t0 <= d <= end else None, f, len(axis))
             if not r2[a]["computable"]:
-                invalid.append(f"R2 无法计算（{a} 非左截断事件为 0 个）")
-        except StopReport as exc:
-            invalid.append(f"R2 无法计算（{a}）：{exc}")
+                invalid.append({"reason": "R2 无法计算（非左截断事件为 0 个）", "object": f"R2 {a}"})
+        except MissingPrice as exc:
+            info = exc.as_dict()
+            info["missing_days"] = [axis[i] for i in info.pop("missing_idx", [])]
+            invalid.append({"object": f"R2 {a}", **info})
     out["r2"] = {a: ser_judge(axis, v) for a, v in r2.items()}
-    if cand["summary"] is None or ref["summary"] is None or hold["summary"] is None:
+    if failures:
+        out["stop_reason"] = {"reason": REASON_CALC_FAIL, "detail": "确认性检验中的对象计算失败", "failures": failures}
+    if failures or cand["summary"] is None or ref["summary"] is None or hold["summary"] is None:
         out.update({"valid": False, "invalid_reasons": invalid, "category": "计算无效", "conclusion": "计算无效"})
         return out
     rc = [r["R"] for r in cand["nav"][1:]]
     rr = [r["R"] for r in ref["nav"][1:]]
     js = [r["idx"] for r in cand["nav"][1:]]
-    dj = [math.log(1.0 + a) - math.log(1.0 + b) for a, b in zip(rc, rr, strict=True)]
+    dj = [math.log1p(a) - math.log1p(b) for a, b in zip(rc, rr, strict=True)]
     n = len(dj)
-    delta = seq_sum(dj)
+    delta = math.fsum(dj)
     ln_c, ln_r, ln_h = cand["summary"]["lnW_end"], ref["summary"]["lnW_end"], hold["summary"]["lnW_end"]
-    if n == 0:
-        invalid.append("n = 0")
     if not all(math.isfinite(x) for x in dj):
-        invalid.append("d_j 出现非有限值")
-    for name, sim in (("候选", cand), ("参照", ref), ("一直持有", hold)):
-        if not sim["summary"]["recon_ok"]:
-            invalid.append(f"{name}对账不符")
+        invalid.append({"reason": "d_j 出现非有限值"})
     if abs(delta - (ln_c - ln_r)) > RECON_EPS:
-        invalid.append("|Σ d_j − Δ| > 1e-10")
+        # 补充条文第一节第 3 条：对账不符为计算失败
+        out["stop_reason"] = {"reason": REASON_CALC_FAIL, "detail": "|Δ − (ln W候选 − ln W参照)| > 1e-10"}
+        invalid.append({"reason": "对账不符", "detail": "|Δ − (ln W候选 − ln W参照)| > 1e-10"})
     d_min = n / 252 * math.log(1.01)
     annual = math.exp(252 * delta / n) - 1 if n > 0 else None
-    darr = np.array(dj, dtype=np.float64)
     rows = []
     for b in (MAIN_BLOCK, *SENS_BLOCKS):
-        rows.append(bootstrap_row(darr, delta, b, seeds[b], big_b))
+        rows.append(bootstrap_row(dj, delta, b, seeds[b], big_b))
     if not rows[0]["valid"]:
-        invalid.append("主设定 n ÷ b < 2")
+        invalid.append({"reason": "主设定 n ÷ b < 2"})
     r1 = r1_block(cand, hold, [])
     r1_ok = r1["ok"]
     r2_ok = all(r2.get(a, {}).get("ratio_ok") is True for a in ASSETS)
     # 稳定性警示
     sens_warn = any(r["valid"] and r["p"] >= P_SENS_WARN for r in rows[1:])
-    first_half = seq_sum([x for x, j in zip(dj, js, strict=True) if j < split])
-    second_half = seq_sum([x for x, j in zip(dj, js, strict=True) if j >= split])
+    first_half = math.fsum(x for x, j in zip(dj, js, strict=True) if j < split)
+    second_half = math.fsum(x for x, j in zip(dj, js, strict=True) if j >= split)
     halves_consistent = (first_half > 0 and second_half > 0) or (first_half < 0 and second_half < 0)
     zero_rows = []
     for a in ASSETS:
@@ -1575,7 +1799,7 @@ def run_confirm(sc: dict[str, Any]) -> dict[str, Any]:
                 continue  # 不含左截断事件
             lo, hi = ev["P"] - EVENT_PAD, ev["Tr"] + EVENT_PAD
             dz = [0.0 if lo <= j <= hi else x for x, j in zip(dj, js, strict=True)]
-            dz_sum = seq_sum(dz)
+            dz_sum = math.fsum(dz)
             zero_rows.append(
                 {
                     "asset": a,
@@ -1678,21 +1902,52 @@ def sanitize(x: Any) -> Any:
     return x
 
 
+REQUIRED = {
+    "signal": ("axis", "prices", "params"),
+    "full": ("axis", "prices", "params"),
+    "exec": ("axis", "S", "all_valid", "j0"),
+    "r2": ("axis", "prices", "S", "f", "E"),
+    "bootstrap": ("items",),
+    "confirm": ("axis", "prices", "params", "window_start", "half_split"),
+}
+
+
+def run_scenario(sc: Any) -> dict[str, Any]:
+    if not isinstance(sc, dict) or sc.get("kind") not in RUNNERS:
+        raise StopReport(REASON_INPUT, "场景须为对象，kind 须为已知类别")
+    lack = [f for f in REQUIRED[sc["kind"]] if f not in sc]
+    if lack:
+        raise StopReport(REASON_INPUT, f"场景缺少必需字段：{lack}")
+    return RUNNERS[sc["kind"]](sc)
+
+
 def main(argv: list[str]) -> int:
+    """退出码（补充条文第八节）：0 正常结束（含“缺值无法评价”“无合格候选”等登记出口）；1 未捕获的异常；
+    2 参数错误；3 停止报告，具体原因见输出中的 stop_reason。"""
     if len(argv) != 3:
         print("用法：python audit_v20.py 场景.json 输出.json", file=sys.stderr)
         return 2
-    sc = json.loads(Path(argv[1]).read_text(encoding="utf-8"))
-    kind = sc["kind"]
-    code = 0
+    sc: Any = None
     try:
-        result: dict[str, Any] = RUNNERS[kind](sc)
-    except StopReport as exc:
-        result = {"停下报告": str(exc)}
-        code = 3
-    if "stop" in result:
-        code = 3  # full 场景中途停下报告（不收敛、t0 不存在、窗口为空），已算出的部分照常输出
-    result = sanitize({"tool": TOOL_VERSION, "kind": kind, "name": sc.get("name"), **result})
+        sc = json.loads(Path(argv[1]).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        result: dict[str, Any] = {
+            "stop_reason": {"reason": REASON_INPUT, "detail": f"场景文件无法读取或不是合法 JSON：{exc!r}"}
+        }
+    else:
+        try:
+            result = run_scenario(sc)
+        except StopReport as exc:
+            result = {"stop_reason": exc.as_dict()}
+        except Exception as exc:
+            # 补充条文第五节：未预期异常——保留原始异常与调用栈；不仅凭发生异常就断言为算法错误
+            result = {
+                "stop_reason": {"reason": REASON_UNEXPECTED, "detail": repr(exc), "traceback": traceback.format_exc()}
+            }
+    code = 3 if "stop_reason" in result else 0
+    kind = sc.get("kind") if isinstance(sc, dict) else None
+    name = sc.get("name") if isinstance(sc, dict) else None
+    result = sanitize({"tool": TOOL_VERSION, "kind": kind, "name": name, "exit_code": code, **result})
     Path(argv[2]).write_text(json.dumps(result, ensure_ascii=False, allow_nan=False), encoding="utf-8")
     return code
 
