@@ -1483,8 +1483,10 @@ def run_full(sc: dict[str, Any]) -> dict[str, Any]:
             if a in events:
                 r2[a] = judge_events(events[a], s_opt, f, len(axis))
         g["r2"] = {a: ser_judge(axis, v) for a, v in r2.items()}
-        if len(events) == len(ASSETS):
-            g["ledger"] = ser_ledger(axis, prompt_ledger(events, s_opt, f, end))
+        for a in r2_error:
+            g["r2"][a] = UNAVAILABLE_R2
+        # 修正三（D13）：提示段账按资产各自计算；登记的停止情形在此抛出，不进入选择程序
+        g["ledger"] = asset_ledger(axis, events, list(r2_error), s_opt, f, end)
         failure = first_failure(sims["signal"], sims["exec"], hold)
         records.append(
             {
@@ -1523,6 +1525,32 @@ def run_full(sc: dict[str, Any]) -> dict[str, Any]:
         # 补充条文第一节第 3 条、第五节：计算失败即整体停止
         out["stop_reason"] = {"reason": REASON_CALC_FAIL, "detail": "见 selection.reasons", "failures": sel["reasons"]}
     return out
+
+
+UNAVAILABLE_R2 = "无法计算（R2 事件不可得）"
+
+
+def asset_ledger(
+    axis: list[str],
+    events: dict[str, Any],
+    unavailable: list[str],
+    s_of: Callable[[int], str | None],
+    f: int,
+    end: int,
+) -> dict[str, Any]:
+    """修正三（D13）：提示段账按资产各自计算。
+
+    某资产的 R2 事件不可得，只使该资产的段账记为“无法计算”，不跳过其他资产。提示段的起始判断遇到登记的
+    停止情形（补充第 11 条（c）、第 14 条）时，prompt_ledger 抛出 StopReport（提示段起始状态无法确定），
+    由入口按既有机制停止报告（退出码 3），不进入选择程序（登记第五节第 2 小节、补充条文第五节的出口优先级）。
+    """
+    if events:
+        led = ser_ledger(axis, prompt_ledger(events, s_of, f, end))
+    else:
+        led = {"segments": None, "pre_window_count": None, "by_asset": {}}
+    for a in unavailable:
+        led["by_asset"][a] = UNAVAILABLE_R2
+    return led
 
 
 def ser_event(axis: list[str], ev: dict[str, Any]) -> dict[str, Any]:
@@ -1632,10 +1660,7 @@ def run_r2(sc: dict[str, Any]) -> dict[str, Any]:
             continue
         out["events"][a] = [ser_event(axis, ev) for ev in events[a]]
         out["judge"][a] = ser_judge(axis, judge_events(events[a], s_of, f, len(axis)))
-    if len(events) == len(sc["prices"]):
-        out["ledger"] = ser_ledger(axis, prompt_ledger(events, s_of, f, end))
-    else:
-        out["ledger"] = "无法计算"
+    out["ledger"] = asset_ledger(axis, events, list(out["r2_events_error"]), s_of, f, end)
     return out
 
 
