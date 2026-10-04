@@ -44,7 +44,7 @@ from market_risk.wavewarn_v20.data_v20 import check_trading_axis
 from market_risk.wavewarn_v20.inputs import TrendDay, snapshot_asset_days, snapshot_trend_days
 from market_risk.wavewarn_v20.labels_r2 import REASON_MISSING_PRICE, R2Thresholds
 from market_risk.wavewarn_v20.nav import NavError, NavResult, PartialPolicyResult, PolicyResult
-from market_risk.wavewarn_v20.r2 import R2Rule, R2Undeterminable
+from market_risk.wavewarn_v20.r2 import Prompt, R2Rule, R2Undeterminable, SegmentClass
 from market_risk.wavewarn_v20.research_run import (
     REGISTERED_CANDIDATES,
     Continuity,
@@ -576,3 +576,62 @@ def test_l2_same_risk_different_counters_any_two_runs() -> None:
     assert len({state.risk for state in first_day}) == 2      # 原口径（全部运行 S 相同）不会记录第 0 日
     assert research_run._same_risk_different_counters(days, runs, 3) == (days[0], days[2])   # 第 1 日全同，不记录
     assert research_run._same_risk_different_counters(days, runs, 1) == (days[0],)            # 收敛位置起不再记录
+
+
+# ---------------------------------------------------------------------------
+# 甲补修三（D14 裁决 B）：R2 窗口状态 axis[j₀−2 .. E] 每一天取登记初始快照下已计算的 S（L1）
+# ---------------------------------------------------------------------------
+
+
+def expected_prompt(risk: Risk) -> Prompt:
+    """设计第十节（附录“D14 裁决 B”）：正常 → 非提示，一级、二级 → 提示。"""
+    return Prompt.NO if risk is Risk.NORMAL else Prompt.YES
+
+
+def test_l1_prompt_mapping_covers_f_minus_one(axis: tuple[dt.date, ...], base: WindowResult) -> None:
+    """提示映射：axis[j₀−2]（f−1）及其后每一天的状态都等于该日系统记录的映射值，不出现“无法确定”。"""
+    assert base.window is not None
+    j0 = base.window.j0
+    for candidate in SUBSET:
+        outcome = base.candidates[candidate]
+        assert list(outcome.status) == list(axis[j0 - 2:])
+        assert outcome.status[axis[j0 - 2]] is expected_prompt(outcome.system[0].risk)
+        assert all(outcome.status[item.day] is expected_prompt(item.risk) for item in outcome.system)
+        assert Prompt.UNKNOWN not in outcome.status.values()
+
+
+D14_SEEDS = {"SPX": 16, "QQQ": 17}
+D14_GAP = range(200, 280)                    # QQQ 自 t0 + 1 起缺价 80 日，推迟收敛，使 j₀ = κ_全 + 1
+D14_SUBSET = (Candidate(3, Decimal("0.025"), 1), Candidate(3, Decimal("0.025"), 3))
+
+
+def test_l1_d14_segment_from_f_uses_actual_previous_state(axis: tuple[dt.date, ...]) -> None:
+    """j₀ 由 κ_全 + 1 决定、最晚收敛组 S_f 为提示且段自 f 开始：f−1 = axis[j₀−2] 早于该组系统收敛日（旧映射记为
+    无法确定并停止）；补修三后不再停止，SPX 首段按 S_{f−1} 的实际值分类。构造：种子 SPX 16、QQQ 17，QQQ 第 200—279
+    行缺价（QQQ 事件因缺价不可得，SPX 段账照常计算）；构造参数由搜索确定后写定。"""
+    closes = {asset: random_closes(seed, len(axis)) for asset, seed in D14_SEEDS.items()}
+    for index in D14_GAP:
+        closes["QQQ"][index] = None
+    result = run_window(build(axis, closes), spec(axis), parameters(), D14_SUBSET)
+    assert result.stop is None and result.window is not None
+    window = result.window
+    j0, f = window.j0, axis[window.j0 - 1]
+    assert j0 == window.kappa_all + 1 > window.t0 + 63                          # j₀ 由 κ_全 + 1 决定
+    assert isinstance(result.common.events["QQQ"], Unavailable)
+    previous_states = {}
+    for candidate in D14_SUBSET:
+        outcome = result.candidates[candidate]
+        assert window.convergences[candidate].system_index == window.kappa_all  # 最晚收敛组
+        assert j0 - 2 < window.convergences[candidate].system_index             # f−1 早于收敛日
+        assert outcome.system[1].day == f and outcome.system[1].risk is not Risk.NORMAL   # S_f 为提示
+        assert outcome.status[axis[j0 - 2]] is expected_prompt(outcome.system[0].risk)
+        segment, category = outcome.ledgers["SPX"].classes[0]
+        assert segment.start == f                                               # 段自 f 开始
+        previous = outcome.system[0].risk
+        previous_states[candidate] = previous
+        if previous is Risk.NORMAL:
+            assert not segment.pre_window and category is not SegmentClass.PRE_WINDOW   # 自 f 开始
+        else:
+            assert segment.pre_window and category is SegmentClass.PRE_WINDOW           # 窗口前已启动
+    # 两组分别覆盖 S_{f−1} 为非提示与提示两种情形。
+    assert previous_states[D14_SUBSET[0]] is Risk.NORMAL and previous_states[D14_SUBSET[1]] is not Risk.NORMAL

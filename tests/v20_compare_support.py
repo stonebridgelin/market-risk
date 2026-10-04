@@ -1547,16 +1547,53 @@ def ratio_pair(value: object) -> object:
     return None if value == "无定义" else (None if value is None else list(value))
 
 
-def compare_r2_judgements(record: Recorder, key: str, tool_group: Mapping, results: Mapping) -> None:
+UNAVAILABLE_TEXT = "无法计算（R2 事件不可得）"     # 工具修正三的登记字串（工具 README 1709880 第 279、301 行）
+
+
+def availability_premise(tool: Mapping, events: Mapping) -> dict[str, bool]:
+    """前提 P(a)（《A2 第三轮补充二（修订一）》第一节）：项目 common.events[a] 为
+    Unavailable(labels_r2.r2_events, 缺少必需价格)，工具 r2_events_error[a] 存在，且第 1′ 项（不可得原因与缺价日）
+    双方一致。不凭字串或 None 单独认定。"""
+    errors = tool.get("r2_events_error") or {}
+    premise = {}
+    for asset in ASSETS:
+        mine, error = events.get(asset), errors.get(asset)
+        premise[asset] = (isinstance(mine, research_run.Unavailable) and unavailable_allowed(mine, LABELS_UNAVAILABLE)
+                          and isinstance(error, Mapping) and error.get("reason") == mine.reason_code
+                          and error.get("missing_days") == [day_text(day) for _, day in mine.missing])
+    return premise
+
+
+def compare_r2_judgements(record: Recorder, key: str, tool_group: Mapping, results: Mapping,
+                          premise: Mapping[str, bool] | None = None) -> None:
+    """不可比时按修订一第一节第 1 条有序分支判定（命中即止）；双方均为对象时照既有逐字段比较。"""
     layer = "R2 判定"
     tool_r2 = tool_group.get("r2") or {}
+    premise = premise or {}
     for asset in ASSETS:
         mine = results[asset]
         where = f"{key} {asset}"
-        left = tool_r2.get(asset)
-        if mine is None or left is None:
-            record.exact(layer, "R2 无法计算（双方均无判定）", where, left is None, mine is None)
+        raw = tool_r2.get(asset, MISSING)
+        tool_object, p = isinstance(raw, Mapping), premise.get(asset, False)
+        if p and (tool_object or mine is not None):                                                     # ①
+            record.add(layer, "P 成立而出现判定对象", "不一致", where, "对象" if tool_object else raw,
+                       "对象" if mine is not None else None)
             continue
+        if p and (raw is MISSING or raw == UNAVAILABLE_TEXT) and mine is None:                          # ②
+            record.exact(layer, "R2 无法计算（双方均无判定）", where, True, True)
+            continue
+        if not p and (raw == UNAVAILABLE_TEXT or mine is None):                                         # ③
+            record.add(layer, "P 不成立而出现不可得表示", "不一致", where,
+                       None if raw is MISSING else ("对象" if tool_object else raw),
+                       "对象" if mine is not None else None)
+            continue
+        if isinstance(raw, str):                                                                         # ⑤
+            record.add(layer, "R2 判定（映射表外字串）", "未比较", where, raw, None, "未比较（映射表外）")
+            continue
+        if not tool_object:                                       # 工具键缺失而项目有判定、且 P 不成立：沿用第二轮
+            record.exact(layer, "R2 无法计算（双方均无判定）", where, True, mine is None)
+            continue
+        left = raw                                                                                       # ④
         record.exact(layer, "事件数", where, len(left["events"]), len(mine.judgements))
         for event, judgement in zip(left["events"], mine.judgements, strict=False):
             at = f"{where} {event['P']}"
@@ -1578,29 +1615,83 @@ def compare_r2_judgements(record: Recorder, key: str, tool_group: Mapping, resul
                      None if mine.excluding_insufficient is None else list(mine.excluding_insufficient))
 
 
-def compare_ledgers(record: Recorder, key: str, tool_group: Mapping, ledgers: Mapping) -> None:
+LEDGER_STRUCTURE_ITEM = "段账结构（双方均无段）"
+KEY_MISSING_TEXT = "缺键"                     # 结构核验记录值：键不存在（与显式 null 区分）
+
+
+def compare_ledgers(record: Recorder, key: str, tool_group: Mapping, ledgers: Mapping,
+                    premise: Mapping[str, bool] | None = None, source_label: str | None = None) -> None:
+    """不可比时按修订一第一节第 2 条有序分支判定（命中即止）；可得资产按既有换算逐项比较。
+    ledger 键整体缺失（旧工具形态）只允许在 _2 来源（或未设第三轮来源）时照第二轮记录（⑥）。"""
     layer = "提示段账"
-    left = tool_group.get("ledger")
-    for asset in ASSETS:
-        mine = ledgers[asset]
-        where = f"{key} {asset}"
-        if left is None or mine is None:
-            if left is None and mine is not None:
+    premise = premise or {}
+    if "ledger" not in tool_group:                                                                       # ⑥
+        for asset in ASSETS:
+            mine, where = ledgers[asset], f"{key} {asset}"
+            if source_label == SOURCE_THIRD:
+                record.add(layer, "ledger 键缺失（_1 来源）", "不一致", where, None,
+                           "有" if mine is not None else None)
+            elif mine is not None:
                 record.add(layer, "段账", "未比较", where, None, "有",
                            "工具在任一资产 R2 事件不可得时不输出 ledger")
             else:
-                record.exact(layer, "段账（双方均无）", where, left is None, mine is None)
+                record.exact(layer, "段账（双方均无）", where, True, True)
+        return
+    left = tool_group["ledger"] if isinstance(tool_group["ledger"], Mapping) else {}
+    by_asset = left.get("by_asset") or {}
+    unavailable = {asset for asset in ASSETS if premise.get(asset, False)}
+    if unavailable == set(ASSETS):                                                                       # ⑤
+        # 补充三第一节第 1 条：三项均要求“键存在且取值符合”，缺键不当作显式 null；记录值缺键写“缺键”。
+        shown = lambda mapping, name: mapping[name] if name in mapping else KEY_MISSING_TEXT   # noqa: E731
+        for name, ok, value in (
+                (f"by_asset 均为“{UNAVAILABLE_TEXT}”",
+                 all(asset in by_asset and by_asset[asset] == UNAVAILABLE_TEXT for asset in ASSETS),
+                 [shown(by_asset, asset) for asset in ASSETS]),
+                ("segments 为 null", "segments" in left and left["segments"] is None, shown(left, "segments")),
+                ("pre_window_count 为 null", "pre_window_count" in left and left["pre_window_count"] is None,
+                 shown(left, "pre_window_count"))):
+            record.check(layer, LEDGER_STRUCTURE_ITEM, ok, f"{key} {name}", value, None)
+    for asset in ASSETS:
+        mine = ledgers[asset]
+        where = f"{key} {asset}"
+        raw = by_asset.get(asset, MISSING)
+        tool_object, p = isinstance(raw, Mapping), asset in unavailable
+        if p and (tool_object or mine is not None):                                                      # ①
+            record.add(layer, "P 成立而出现段账对象", "不一致", where, "对象" if tool_object else raw,
+                       "对象" if mine is not None else None)
             continue
-        segments = left["segments"]
+        if p and raw == UNAVAILABLE_TEXT and mine is None:                                               # ②
+            record.exact(layer, "段账（双方均无）", where, True, True)
+            continue
+        if not p and (raw == UNAVAILABLE_TEXT or mine is None):                                          # ③
+            record.add(layer, "P 不成立而出现不可得表示", "不一致", where,
+                       None if raw is MISSING else ("对象" if tool_object else raw),
+                       "对象" if mine is not None else None)
+            continue
+        if isinstance(raw, str):                                                                          # ⑦
+            record.add(layer, "by_asset（映射表外字串）", "未比较", where, raw, None, "未比较（映射表外）")
+            continue
+        if not tool_object or not isinstance(left.get("segments"), list):        # 其余形态：不在任何映射分支内
+            record.add(layer, "段账形态（映射表外）", "不一致", where, None if raw is MISSING else raw,
+                       "对象" if mine is not None else None)
+            continue
+        segments = left["segments"]                                                                       # ④
         record.exact(layer, "段数", where, len(segments), len(mine.classes))
         for segment, (span, category) in zip(segments, mine.classes, strict=False):
             at = f"{where} {segment['start']}"
             record.exact(layer, "segments.start、end、pre_window", at,
                          [segment["start"], segment["end"], segment["pre_window"]],
                          [day_text(span.start), day_text(span.end), span.pre_window])
-            # 工具对窗口前已启动的段不分资产归类（class 为 null）；项目记为“窗口前已启动”。
-            tool_class = research_pre_window_class() if segment["class"] is None else segment["class"][asset]
-            record.exact(layer, "segments.class", at, tool_class, category.value)
+            classes = segment["class"]
+            if classes is None:
+                # class 为 null 只在 pre_window 为真且项目该段为“窗口前已启动”时记一致（修订一第一节第 2 条④）。
+                record.check(layer, "segments.class（null ↔ 窗口前已启动）",
+                             segment["pre_window"] is True and category.value == research_pre_window_class(), at,
+                             None, category.value)
+                continue
+            record.check(layer, "segments.class 不含不可得资产的键", not set(classes) & unavailable, at,
+                         sorted(classes), sorted(unavailable))
+            record.exact(layer, "segments.class", at, classes.get(asset), category.value)
         counts = {category.value: count for category, count in mine.counts.items()}
         pre = counts.pop(research_pre_window_class())
         record.exact(layer, "by_asset.counts", where, dict(left["by_asset"][asset]["counts"]), counts)
@@ -1797,10 +1888,25 @@ def d13_evidence(tool: Mapping, result: research_run.WindowResult) -> dict:
                      "工具 stop_reason": tool.get("stop_reason")}}
 
 
+TOOL_UNDETERMINABLE = "提示段起始状态无法确定"         # 工具结构化 stop_reason 的原因字段（退出码 3）
+
+
 def compare_research(record: Recorder, tool: Mapping, result: research_run.WindowResult,
                      chosen: research_run.DevelopmentSelection | None, axis: Sequence[dt.date],
-                     cutoff_index: int) -> None:
-    """映射表第 1 至 11 项。组合层停止时只比停止原因（第 7 项），不继续其他层。"""
+                     cutoff_index: int, source_label: str | None = None) -> None:
+    """映射表第 1 至 11 项。组合层停止时只比停止原因（第 7 项），不继续其他层。
+    source_label 为第三轮工具输出来源（_1 / _2，未设第三轮来源时为 None）：第三轮另按修订一第一节第 3 条，
+    工具 stop_reason 的原因为“提示段起始状态无法确定”或项目“分类无法确定”任一侧出现即记不一致。"""
+    if source_label is not None:
+        tool_reason = (tool.get("stop_reason") or {}).get("reason") if isinstance(tool.get("stop_reason"),
+                                                                                  Mapping) else None
+        project_undeterminable = result.stop is not None and result.stop.exit is research_run.Exit.UNDETERMINABLE
+        if tool_reason == TOOL_UNDETERMINABLE or project_undeterminable:
+            record.add("停止原因（组合层）", "第三轮：提示段起始状态无法确定 / 分类无法确定（D14 B 下不应出现）",
+                       "不一致", "场景", tool_reason, None if result.stop is None else result.stop.exit.value)
+        if result.stop is None and "stop_reason" in tool:
+            record.add("停止原因（组合层）", "第三轮：工具 stop_reason 而项目未停止", "不一致", "场景",
+                       tool.get("stop_reason"), None)
     if result.stop is not None:
         stop = tool.get("stop_reason") or {}
         # 三要素分别映射（《A2 修订二》第三节第 7 项）：出口、原因码、下标。只换算映射表内的出口与原因码，
@@ -1830,11 +1936,12 @@ def compare_research(record: Recorder, tool: Mapping, result: research_run.Windo
     common, reference, diagnostics = result.common, result.reference, result.diagnostics
     assert common is not None and reference is not None and diagnostics is not None
     compare_r2_events(record, tool, common.events)
+    premise = availability_premise(tool, common.events)
     for candidate, outcome in result.candidates.items():
         key = group_key(candidate)
         group = tool["groups"][key]
-        compare_r2_judgements(record, key, group, outcome.r2)
-        compare_ledgers(record, key, group, outcome.ledgers)
+        compare_r2_judgements(record, key, group, outcome.r2, premise)
+        compare_ledgers(record, key, group, outcome.ledgers, premise, source_label)
         compare_r1(record, key, group, outcome.r1)
         compare_leverage(record, key, group["signal_sim"].get("nav"), diagnostics.leverage[repr(candidate)])
     compare_records_and_selection(record, tool, result, chosen)
@@ -1844,3 +1951,99 @@ def compare_research(record: Recorder, tool: Mapping, result: research_run.Windo
     compare_leverage(record, "主参照", tool["reference"]["signal_sim"].get("nav"), diagnostics.leverage["reference"])
     compare_drawdowns(record, tool, diagnostics, cutoff_index)
     compare_convergence_diag(record, tool, diagnostics, axis)
+
+
+# ---------------------------------------------------------------------------
+# 第三轮（A3）：混合来源与工具绑定（《A2 第三轮补充一》第二节）。
+# 只做来源选择与绑定，不改任何映射、容差、字段组或状态判定。
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ToolBinding:
+    """生成某份工具输出的工具：工作树、提交与 audit_v20.py 的 SHA-256。"""
+
+    root: str
+    commit: str
+    audit_sha256: str
+
+
+OLD_TOOL = ToolBinding(r"C:\Users\stone\v20_tool_a161387", "a161387fb13954eaa117ba3970e425bb98d244d5",
+                       "40abfb78281a4af443618ed384415ae001169720f3d6b256a80add9af27a74c3")
+NEW_TOOL = ToolBinding(r"C:\Users\stone\v20_tool_1709880", "170988007994134577296e9931bba4cd1786cd36",
+                       "8ff8081828c94134bc0d3e000ea77f3442564241438c8d444c601003bb19ca3d")
+SOURCE_SECOND, SOURCE_THIRD = "_2", "_1"                 # 工具输出来源：第二次运行目录 / 第三轮目录
+
+
+class ToolSourceError(AssertionError):
+    """混合来源不满足：清单缺失、哈希不符、或某场景在两处都有 / 都无输出。不回退、不猜测。"""
+
+
+@dataclass(frozen=True)
+class ToolSource:
+    """某场景工具输出的来源：来源标签、相对来源目录的路径、应有的 SHA-256 与生成工具。"""
+
+    label: str
+    relative: str
+    sha256: str
+    binding: ToolBinding
+
+
+def affected_names(listing_text: str | None) -> tuple[str, ...]:
+    """受影响场景清单（_1\\导出\\受影响场景清单.md）表格第一列的场景名；清单缺失即失败。"""
+    if listing_text is None:
+        raise ToolSourceError("受影响场景清单缺失")
+    names = []
+    for line in listing_text.splitlines():
+        parts = [part.strip() for part in line.strip().strip("|").split("|")]
+        if line.startswith("| ") and len(parts) == 3 and parts[2].startswith("`") and parts[0] != "场景":
+            names.append(parts[0])
+    if not names or len(set(names)) != len(names):
+        raise ToolSourceError("受影响场景清单为空或有重复")
+    return tuple(names)
+
+
+def rerun_hashes(rerun: Mapping | None) -> dict[str, str]:
+    """工具重跑记录（_1\\检查记录\\工具重跑记录.json）：场景名 → 新工具输出 SHA-256；须由新工具生成且退出码 0 或 3。"""
+    if rerun is None:
+        raise ToolSourceError("工具重跑记录缺失")
+    if (rerun.get("tool_commit"), rerun.get("audit_sha256")) != (NEW_TOOL.commit, NEW_TOOL.audit_sha256):
+        raise ToolSourceError("工具重跑记录的工具提交或 audit_v20.py 哈希与新工具绑定不符")
+    result = {}
+    for run in rerun.get("runs") or ():
+        if run.get("exit_code") not in (0, 3) or not run.get("output_sha256") or run["name"] in result:
+            raise ToolSourceError(f"工具重跑记录中 {run.get('name')} 的退出码、哈希或唯一性不符")
+        result[run["name"]] = run["output_sha256"]
+    return result
+
+
+def choose_tool_source(name: str, affected: Sequence[str], rerun: Mapping[str, str], third_files: set[str],
+                       second_listing: Mapping[str, tuple[int, str]]) -> ToolSource:
+    """按《A2 第三轮补充一》第二节第 2 条选择工具输出来源：受影响场景 → _1（按重跑记录核对，绑定新工具）；
+    其余 → _2（按 _2 清单核对，绑定旧工具）。受影响清单与重跑记录的场景集合须相同；受影响场景须在 _1 有输出，
+    其余场景须在 _1 无输出且在 _2 清单内（“两处都有 / 都无”即失败）。"""
+    if set(affected) != set(rerun):
+        raise ToolSourceError("受影响场景清单与工具重跑记录的场景集合不同")
+    relative = f"工具输出/{name}.json"
+    if name in affected:
+        if name not in third_files:
+            raise ToolSourceError(f"{name} 是受影响场景，但 _1 没有工具输出（两处都无）")
+        return ToolSource(SOURCE_THIRD, relative, rerun[name], NEW_TOOL)
+    if name in third_files:
+        raise ToolSourceError(f"{name} 不是受影响场景，但 _1 有工具输出（两处都有）")
+    if relative not in second_listing:
+        raise ToolSourceError(f"{name} 不在 _2 清单中（两处都无）")
+    return ToolSource(SOURCE_SECOND, relative, second_listing[relative][1], OLD_TOOL)
+
+
+def checked_tool_bytes(source: ToolSource, data: bytes) -> bytes:
+    """核对工具输出字节的 SHA-256 与所选来源应有的哈希；不符即失败。"""
+    if sha256(data) != source.sha256:
+        raise ToolSourceError(f"{source.relative}（来源 {source.label}）的 SHA-256 与清单或重跑记录不符")
+    return data
+
+
+def tool_source_fields(source: ToolSource) -> dict:
+    """逐场景记录新增的四个字段（第二节第 4 条）。"""
+    return {"工具输出来源": source.label, "工具输出 SHA-256": source.sha256, "生成工具提交": source.binding.commit,
+            "生成工具 audit_v20.py SHA-256": source.binding.audit_sha256}

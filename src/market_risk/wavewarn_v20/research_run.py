@@ -573,14 +573,15 @@ def _label_rows(snapshot: Snapshot, asset: str, start: dt.date) -> tuple[tuple[d
     return rows
 
 
-def _status(system: Sequence[SystemDay], first_index: int, system_index: int) -> dict[dt.date, Prompt]:
-    """提示映射（设计第十节）：行号早于 system_index 为无法确定；否则正常 → 非提示，一级、二级 → 提示。"""
+def _status(system: Sequence[SystemDay], days: Sequence[dt.date]) -> dict[dt.date, Prompt]:
+    """提示映射（设计第十节，附录“D14 裁决 B”）：R2 窗口状态覆盖 days = axis[j₀−2 .. E]（含 f−1 = axis[j₀−2]），
+    每一天都取登记初始快照下已计算的 S：正常 → 非提示，一级、二级 → 提示；不按候选系统收敛日置无法确定。
+    该日系统记录不存在时不填任何确定值，直接 ResearchRunError（系统序列自 t0+1 起连续，正常不会出现）。"""
+    records = {item.day: item for item in system}
     result: dict[dt.date, Prompt] = {}
-    for offset, item in enumerate(system):
-        if first_index + offset < system_index:
-            result[item.day] = Prompt.UNKNOWN
-        else:
-            result[item.day] = Prompt.NO if item.risk is Risk.NORMAL else Prompt.YES
+    for day in days:
+        _require(day in records, f"{day} 没有系统记录，R2 提示状态无法取得")
+        result[day] = Prompt.NO if records[day].risk is Risk.NORMAL else Prompt.YES
     return result
 
 
@@ -668,7 +669,7 @@ def _compute(snapshot: Snapshot, spec: WindowSpec, parameters: RunParameters, re
         _check_signal_slice(signals, axis, j0, days, progress.object)
         outcome = _object_outcome(days, signals, closes, prefix, parameters)
         progress.stage = "R2"
-        status = _status(system_full, j0 - 2, convergences[candidate].system_index)
+        status = _status(system_full, axis[j0 - 2:])
         window = Window(axis, axis[j0 - 1], axis[e_index], MappingProxyType(status))
         results: dict[str, R2Result | None] = {}
         ledgers: dict[str, SegmentLedger | None] = {}

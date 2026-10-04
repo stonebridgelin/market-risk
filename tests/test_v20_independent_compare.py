@@ -23,10 +23,11 @@ from pathlib import Path
 import pytest
 import v20_compare_support as support
 
-TOOL_ROOT = Path(r"C:\Users\stone\v20_tool_a161387")
-TOOL_COMMIT = "a161387fb13954eaa117ba3970e425bb98d244d5"          # 被测代码 2276f1bc79dc1b37d3304da79728f7be07c29539
-AUDIT = TOOL_ROOT / "docs" / "audit" / "独立复核" / "v20" / "audit_v20.py"
-AUDIT_SHA256 = "40abfb78281a4af443618ed384415ae001169720f3d6b256a80add9af27a74c3"
+TOOL_ROOT = Path(support.OLD_TOOL.root)
+TOOL_COMMIT = support.OLD_TOOL.commit                             # 被测代码 2276f1bc79dc1b37d3304da79728f7be07c29539
+AUDIT_RELATIVE = Path("docs") / "audit" / "独立复核" / "v20" / "audit_v20.py"
+AUDIT = TOOL_ROOT / AUDIT_RELATIVE
+AUDIT_SHA256 = support.OLD_TOOL.audit_sha256
 ORIGINAL_MANIFEST = Path(r"C:\Users\stone\Downloads\v20_独立工具导出\manifest.json")
 ORIGINAL_MANIFEST_SHA256 = "93ccc01cd1681d953b099e7fad8e2b47a1a882e666440a60c31564c86b520119"
 ADDED_MANIFEST = Path(r"C:\Users\stone\Downloads\v20_构造验收_2276f1b\manifest_新增.json")
@@ -36,6 +37,9 @@ CONSTRUCT_ROOT = Path(r"D:\temp_claude\v20\构造输入")     # 仓库外的专�
 OUT_ENV, ONLY_ENV, FROM_ENV = "V20_COMPARE_OUT", "V20_COMPARE_ONLY", "V20_COMPARE_FROM"
 # 第二轮（A2）：重比较时再设 V20_COMPARE_A2=1，接入研究组合层（《构造比对第二轮（A2）》）。
 A2_ENV = "V20_COMPARE_A2"
+# 第三轮（A3）：再设 V20_COMPARE_TOOL_FROM=<第三轮目录>，按场景选择工具输出来源（《A2 第三轮补充一》第二节）；
+# 未设置时行为与第二轮完全相同。全程只读已保存输出，不启动工具子进程。
+TOOL_FROM_ENV = "V20_COMPARE_TOOL_FROM"
 RESEARCH_RUN = Path(support.research_run.__file__)
 TRIAL = ("path_000", "path_122", "path_154", "收敛反例", "止损与重入")
 HERE = Path(__file__).resolve().parent
@@ -107,27 +111,68 @@ def saved_bytes(source: Path, relative: str) -> bytes:
     return data
 
 
+def third_source() -> Path | None:
+    value = os.environ.get(TOOL_FROM_ENV)
+    return Path(value) if value else None
+
+
+@functools.lru_cache(maxsize=1)
+def third_inputs(third: Path) -> tuple[tuple[str, ...], dict[str, str], frozenset[str]]:
+    """第三轮目录的受影响场景清单、工具重跑记录（场景 → 哈希）与 工具输出\\ 下的场景名；任一清单缺失即失败。"""
+    listing = third / "导出" / "受影响场景清单.md"
+    rerun = third / "检查记录" / "工具重跑记录.json"
+    affected = support.affected_names(support.get_bytes(listing).decode("utf-8") if listing.is_file() else None)
+    hashes = support.rerun_hashes(support.load_json(rerun) if rerun.is_file() else None)
+    folder = third / "工具输出"
+    files = frozenset(path.stem for path in folder.glob("*.json")) if folder.is_dir() else frozenset()
+    return affected, hashes, files
+
+
+def tool_source(source: Path, third: Path, name: str) -> support.ToolSource:
+    """第三轮的工具输出来源：受影响场景 → _1（绑定新工具），其余 → _2（绑定旧工具）。"""
+    affected, hashes, files = third_inputs(third)
+    return support.choose_tool_source(name, affected, hashes, set(files), saved_listing(source))
+
+
 def saved_relatives(kind: str, name: str) -> list[str]:
     files = [f"工具输出/{name}.json", f"项目字段/{name}.json"]
     return files if kind == "bootstrap" else [*files, f"构造输入/{name}/入口与适配结果.json"]
 
 
-def run_parameters(kind: str, name: str, scenario: Path, tool_out: Path, source: Path | None = None) -> dict:
+def run_parameters(kind: str, name: str, scenario: Path, tool_out: Path, source: Path | None = None,
+                   chosen: support.ToolSource | None = None) -> dict:
     """试跑结果复用的依据（补充三条第三条）：场景、工具、接线源码、配置模板与运行参数的哈希与原文。
     V20_COMPARE_ONLY 只决定运行哪些场景，不影响单个场景的计算，不列入复用依据（另记入运行记录）。
-    重比较时另绑定所读取的第二次运行原始输出及其清单的哈希（乙补修第三节第 3 条），且不运行工具。"""
+    重比较时另绑定所读取的第二次运行原始输出及其清单的哈希（乙补修第三节第 3 条），且不运行工具。
+    第三轮（chosen 不为 None）：工具绑定写该场景工具输出实际的生成工具；来自 _1 的工具输出不列入 _2 的
+    source_files，另记来源、哈希与第三轮两份清单的哈希（《A2 第三轮补充一》第二节第 1、4 条）。"""
     if source is not None:
         listing = support.get_bytes(source / "导出" / "清单.md")
-        return {"kind": kind, "scenario": str(scenario), "scenario_sha256": support.sha256(support.get_bytes(scenario)),
-                "audit_sha256": support.sha256(support.get_bytes(AUDIT)), "tool_commit": TOOL_COMMIT,
-                "wiring": {path.name: support.sha256(support.get_bytes(path)) for path in WIRING_FILES},
-                "mode": "重比较（不运行工具子进程与项目算法）", "recompare_from": str(source),
-                "source_listing_sha256": support.sha256(listing),
-                "source_files": {relative: saved_listing(source)[relative][1]
-                                 for relative in saved_relatives(kind, name)},
-                "python": sys.version, "env": {OUT_ENV: os.environ.get(OUT_ENV), FROM_ENV: str(source),
-                                               A2_ENV: os.environ.get(A2_ENV)},
-                "research_run_sha256": support.sha256(support.get_bytes(RESEARCH_RUN))}
+        relatives = saved_relatives(kind, name)
+        if chosen is not None and chosen.label == support.SOURCE_THIRD:
+            relatives = [relative for relative in relatives if relative != chosen.relative]
+        parameters = {"kind": kind, "scenario": str(scenario),
+                      "scenario_sha256": support.sha256(support.get_bytes(scenario)),
+                      "audit_sha256": support.sha256(support.get_bytes(AUDIT)), "tool_commit": TOOL_COMMIT,
+                      "wiring": {path.name: support.sha256(support.get_bytes(path)) for path in WIRING_FILES},
+                      "mode": "重比较（不运行工具子进程与项目算法）", "recompare_from": str(source),
+                      "source_listing_sha256": support.sha256(listing),
+                      "source_files": {relative: saved_listing(source)[relative][1] for relative in relatives},
+                      "python": sys.version, "env": {OUT_ENV: os.environ.get(OUT_ENV), FROM_ENV: str(source),
+                                                     A2_ENV: os.environ.get(A2_ENV)},
+                      "research_run_sha256": support.sha256(support.get_bytes(RESEARCH_RUN))}
+        if chosen is not None:
+            third = third_source()
+            audit = Path(chosen.binding.root) / AUDIT_RELATIVE
+            parameters.update({"audit_sha256": support.sha256(support.get_bytes(audit)),
+                               "tool_commit": chosen.binding.commit, "tool_root": chosen.binding.root,
+                               "tool_from": str(third),
+                               "tool_from_files": {relative: support.sha256(support.get_bytes(third / relative))
+                                                   for relative in ("导出/受影响场景清单.md",
+                                                                    "检查记录/工具重跑记录.json")},
+                               **support.tool_source_fields(chosen)})
+            parameters["env"][TOOL_FROM_ENV] = str(third)
+        return parameters
     return {"kind": kind, "scenario": str(scenario), "scenario_sha256": support.sha256(support.get_bytes(scenario)),
             "audit_sha256": support.sha256(support.get_bytes(AUDIT)), "tool_commit": TOOL_COMMIT,
             "wiring": {path.name: support.sha256(support.get_bytes(path)) for path in WIRING_FILES},
@@ -242,14 +287,25 @@ def recompare_case(out: Path, source: Path, kind: str, name: str, scenario: Path
     """重比较一个场景（乙补修第三节）：只读取第二次运行保存且哈希与其清单一致的工具输出、项目字段与入口记录，
     只重新执行字段比对。不运行工具子进程，不运行项目算法，不复制原始输出（只在记录中绑定其哈希）。"""
     record_path = out / "逐场景比对" / f"{name}.json"
-    parameters = run_parameters(kind, name, scenario, out / "工具输出" / f"{name}.json", source)
+    third = third_source()
+    chosen = tool_source(source, third, name) if third is not None else None
+    if chosen is not None:
+        audit = Path(chosen.binding.root) / AUDIT_RELATIVE
+        assert support.sha256(support.get_bytes(audit)) == chosen.binding.audit_sha256, (
+            f"{name} 生成工具 {chosen.binding.commit[:7]} 的 audit_v20.py 哈希不符")
+    parameters = run_parameters(kind, name, scenario, out / "工具输出" / f"{name}.json", source, chosen)
     if record_path.is_file():
         previous = support.load_json(record_path)
         if previous.get("parameters") == parameters:
             assert previous["counts"].get("不一致", 0) == 0, f"{name} 先前的比对有不一致"
             return                                                     # 参数与哈希逐项相同
     started = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-    tool_bytes = saved_bytes(source, f"工具输出/{name}.json")
+    if chosen is None:
+        tool_bytes = saved_bytes(source, f"工具输出/{name}.json")
+    elif chosen.label == support.SOURCE_THIRD:
+        tool_bytes = support.checked_tool_bytes(chosen, support.get_bytes(third / chosen.relative))
+    else:
+        tool_bytes = support.checked_tool_bytes(chosen, saved_bytes(source, chosen.relative))
     tool = support.parse_json(tool_bytes)
     project_fields = support.parse_json(saved_bytes(source, f"项目字段/{name}.json"))
     data = support.load_json(scenario)
@@ -281,7 +337,7 @@ def recompare_case(out: Path, source: Path, kind: str, name: str, scenario: Path
             support.compare_full(record, tool, project_fields)
             if os.environ.get(A2_ENV):
                 extra["第二轮"] = research_round(record, out, name, data, cutoff_text, entry_info, tool,
-                                                 project_fields)
+                                                 project_fields, None if chosen is None else chosen.label)
         else:
             note = "未比较（输入层停止）" if kind == "full" else "只做输入层比对"
             record.add("算法层", "全部", "未比较", name, note=note)
@@ -295,6 +351,8 @@ def recompare_case(out: Path, source: Path, kind: str, name: str, scenario: Path
               "by_layer": {layer: items for layer, items in record.summary().items()}, "details": record.details,
               "alignment": project_fields.get("alignment") if isinstance(project_fields, dict) else None,
               "evidence": extra}
+    if chosen is not None:
+        result.update(support.tool_source_fields(chosen))           # 第三轮：工具输出来源与生成工具
     support.put_bytes(record_path, support.dump_json(result))
     support.assert_self_consistent(research.get("自洽检查") or {}, name)
     stop = research.get("stop") or {}
@@ -304,7 +362,7 @@ def recompare_case(out: Path, source: Path, kind: str, name: str, scenario: Path
 
 
 def research_round(record: support.Recorder, out: Path, name: str, data: dict, cutoff_text: str, entry_info: dict,
-                   tool: dict, project_fields: dict) -> dict:
+                   tool: dict, project_fields: dict, source_label: str | None = None) -> dict:
     """第二轮：沿用构造入口得到快照（写入本轮输出目录，构造文件哈希须与第二次运行相同），开发期 27 组、诊断开启
     运行一次组合层；先做自洽检查，自洽无“不同”才比对新增层（《A2 修订二》第二节；《A2 补充二》第四节）。
     构造历史起点按裁决 2 收紧版；修正起点的场景另以原起点运行一次，只用于披露两套起点的差异。"""
@@ -326,7 +384,7 @@ def research_round(record: support.Recorder, out: Path, name: str, data: dict, c
     checks = support.self_consistency(result, project_fields, axis)
     compared = not any(support.self_state(check) == support.SELF_DIFFERENT for check in checks.values())
     if compared:
-        support.compare_research(record, tool, result, chosen, axis, len(axis) - 1)
+        support.compare_research(record, tool, result, chosen, axis, len(axis) - 1, source_label)
     disclosure = None
     if histories != configured:
         original, original_choice = support.run_research(adaptation.snapshot, configured)
@@ -522,13 +580,15 @@ def test_wiring_a2_r2_category_conversion() -> None:
     tool = {"r2": {"SPX": {"events": [tool_event], "counts": {c.value: counts[c] for c in EventClass},
                            "denominator": 1, "passed": 0, "new_only": 0, "computable": True, "ratio_ok": False,
                            "excluding_insufficient": [0, 1]}}}
+    # 补充二（修订一）第一节：“双方均无判定”须前提 P 成立；本例 QQQ 为双方事件均不可得（P 成立）。只补输入，断言不变。
+    premise = {"SPX": False, "QQQ": True}
     record = support.Recorder()
-    support.compare_r2_judgements(record, "构造组", tool, {"SPX": mine, "QQQ": None})
+    support.compare_r2_judgements(record, "构造组", tool, {"SPX": mine, "QQQ": None}, premise)
     assert record.total("不一致") == 0                                           # QQQ：双方均无判定，记一致
     assert record.summary()["R2 判定"]["events.category"] == {"一致": 1}
     tool_event["category"] = "漏报"
     record = support.Recorder()
-    support.compare_r2_judgements(record, "构造组", tool, {"SPX": mine, "QQQ": None})
+    support.compare_r2_judgements(record, "构造组", tool, {"SPX": mine, "QQQ": None}, premise)
     assert record.summary()["R2 判定"]["events.category"] == {"不一致": 1}
 
 
@@ -785,3 +845,239 @@ def test_wiring_a3_d13_five_conditions() -> None:
         record = support.Recorder()
         support.compare_research(record, changed_tool, changed_result, None, [], 0)
         assert record.total(support.D13_STATUS) == 0 and record.total("不一致") >= 1
+
+
+# ---------------------------------------------------------------------------
+# 第三轮（A3）混合来源的自检（《A2 第三轮补充一》第二节第 5 条；内存构造，不读文件）
+# ---------------------------------------------------------------------------
+
+
+def test_wiring_a3r_mixed_tool_source() -> None:
+    """受影响场景选 _1（绑定新工具）、其余选 _2（绑定旧工具）；哈希不符、清单缺失、两处都有或都无即失败。"""
+    new_bytes, old_bytes = b'{"name": "path_170"}', b'{"name": "path_000"}'
+    listing = ("# 受影响场景清单\n\n| 场景 | r2_events_error 非空的资产 | _2 工具输出 SHA-256 |\n| --- | --- | --- |\n"
+               "| path_170 | QQQ | `" + "0" * 64 + "` |\n")
+    rerun = {"tool_commit": support.NEW_TOOL.commit, "audit_sha256": support.NEW_TOOL.audit_sha256,
+             "runs": [{"name": "path_170", "exit_code": 0, "output_sha256": support.sha256(new_bytes)}]}
+    second = {"工具输出/path_000.json": (len(old_bytes), support.sha256(old_bytes)),
+              "工具输出/path_170.json": (1, "1" * 64)}
+    affected, hashes = support.affected_names(listing), support.rerun_hashes(rerun)
+    assert affected == ("path_170",)
+    third = support.choose_tool_source("path_170", affected, hashes, {"path_170"}, second)
+    assert (third.label, third.binding) == (support.SOURCE_THIRD, support.NEW_TOOL)
+    assert support.checked_tool_bytes(third, new_bytes) == new_bytes
+    old = support.choose_tool_source("path_000", affected, hashes, {"path_170"}, second)
+    assert (old.label, old.binding) == (support.SOURCE_SECOND, support.OLD_TOOL)
+    assert support.tool_source_fields(old) == {"工具输出来源": "_2", "工具输出 SHA-256": support.sha256(old_bytes),
+                                               "生成工具提交": support.OLD_TOOL.commit,
+                                               "生成工具 audit_v20.py SHA-256": support.OLD_TOOL.audit_sha256}
+    failures = [
+        lambda: support.checked_tool_bytes(third, old_bytes),                                       # 哈希不符
+        lambda: support.affected_names(None),                                                       # 清单缺失
+        lambda: support.rerun_hashes(None),                                                         # 重跑记录缺失
+        lambda: support.rerun_hashes({**rerun, "audit_sha256": support.OLD_TOOL.audit_sha256}),     # 绑定不符
+        lambda: support.choose_tool_source("path_000", affected, hashes, {"path_170", "path_000"}, second),  # 两处都有
+        lambda: support.choose_tool_source("path_170", affected, hashes, set(), second),             # 受影响但 _1 无
+        lambda: support.choose_tool_source("path_999", affected, hashes, {"path_170"}, second),      # 两处都无
+        lambda: support.choose_tool_source("path_170", affected, {}, {"path_170"}, second),          # 两份清单不一致
+    ]
+    for failure in failures:
+        with pytest.raises(support.ToolSourceError):
+            failure()
+
+
+# ---------------------------------------------------------------------------
+# 第三轮（A3）不可得资产的表示换算自检（《A2 第三轮补充二（修订一）》第一节第 5 条；内存构造，不读文件）
+# ---------------------------------------------------------------------------
+
+UNAVAILABLE = support.UNAVAILABLE_TEXT
+
+
+def unavailable_qqq() -> object:
+    rr = support.research_run
+    return rr.Unavailable((("QQQ", dt.date.fromisoformat(DAYS[1])),), "缺少必需价格", "MissingPriceError",
+                          "labels_r2.r2_events")
+
+
+def test_wiring_a3r_premise_requires_matching_reason() -> None:
+    """前提 P(a)：项目 labels_r2 缺价不可得、工具 r2_events_error 有该资产，且原因与缺价日一致；
+    不凭字串或 None 认定。"""
+    events = {"SPX": (), "QQQ": unavailable_qqq()}
+    tool = {"r2_events_error": {"QQQ": {"reason": "缺少必需价格", "missing_days": [DAYS[1]]}}}
+    assert support.availability_premise(tool, events) == {"SPX": False, "QQQ": True}
+    assert support.availability_premise({"r2_events_error": {"QQQ": {"reason": "缺少必需价格",
+                                                                       "missing_days": [DAYS[2]]}}},
+                                        events)["QQQ"] is False                  # 缺价日不一致
+    assert support.availability_premise({}, events)["QQQ"] is False              # 工具无 r2_events_error
+
+
+def test_wiring_a3r_unavailable_text_with_premise() -> None:
+    """(a) P 成立 + 字串 ↔ None：R2 记“R2 无法计算（双方均无判定）”，段账记“段账（双方均无）”；两资产都不可得时
+    段账结构三项各记一致。"""
+    premise = {"SPX": True, "QQQ": True}
+    group = {"r2": {"SPX": UNAVAILABLE, "QQQ": UNAVAILABLE},
+             "ledger": {"segments": None, "pre_window_count": None,
+                        "by_asset": {"SPX": UNAVAILABLE, "QQQ": UNAVAILABLE}}}
+    record = support.Recorder()
+    support.compare_r2_judgements(record, "构造组", group, {"SPX": None, "QQQ": None}, premise)
+    support.compare_ledgers(record, "构造组", group, {"SPX": None, "QQQ": None}, premise, support.SOURCE_THIRD)
+    summary = record.summary()
+    assert record.total("不一致") == 0
+    assert summary["R2 判定"]["R2 无法计算（双方均无判定）"] == {"一致": 2}
+    assert summary["提示段账"]["段账（双方均无）"] == {"一致": 2}
+    assert summary["提示段账"][support.LEDGER_STRUCTURE_ITEM] == {"一致": 3}
+
+
+def test_wiring_a3r_premise_with_object_is_inconsistent() -> None:
+    """(b) P 成立而任一侧出现判定或段账对象：不一致。"""
+    premise = {"SPX": False, "QQQ": True}
+    record = support.Recorder()
+    support.compare_r2_judgements(record, "构造组", {"r2": {"QQQ": {"events": []}}}, {"SPX": object(), "QQQ": None},
+                                  premise)
+    assert record.summary()["R2 判定"]["P 成立而出现判定对象"] == {"不一致": 1}
+    record = support.Recorder()
+    support.compare_r2_judgements(record, "构造组", {"r2": {"QQQ": UNAVAILABLE}}, {"SPX": object(), "QQQ": object()},
+                                  premise)
+    assert record.summary()["R2 判定"]["P 成立而出现判定对象"] == {"不一致": 1}
+
+
+def test_wiring_a3r_unavailable_text_without_premise_is_inconsistent() -> None:
+    """(c) P 不成立而工具出现字串或项目为 None：不一致；_1 来源缺 ledger 键也不一致（⑥）。"""
+    premise = {"SPX": False, "QQQ": False}
+    record = support.Recorder()
+    support.compare_r2_judgements(record, "构造组", {"r2": {"SPX": UNAVAILABLE}}, {"SPX": object(), "QQQ": None},
+                                  premise)
+    assert record.summary()["R2 判定"]["P 不成立而出现不可得表示"] == {"不一致": 2}
+    record = support.Recorder()
+    support.compare_ledgers(record, "构造组", {"r2": {}}, {"SPX": None, "QQQ": None}, premise, support.SOURCE_THIRD)
+    assert record.summary()["提示段账"]["ledger 键缺失（_1 来源）"] == {"不一致": 2}
+
+
+def available_ledger(pre_window: bool, category: object) -> object:
+    from market_risk.wavewarn_v20.r2 import Segment, SegmentClass, SegmentLedger
+
+    segment = Segment(dt.date.fromisoformat(DAYS[0]), dt.date.fromisoformat(DAYS[1]), pre_window)
+    counts = {item: int(item is category) for item in SegmentClass}
+    return SegmentLedger(((segment, category),), counts, None)
+
+
+def test_wiring_a3r_null_class_requires_pre_window() -> None:
+    """(d) 可得资产 SPX：class 为 null 而 pre_window 为假 → 不一致；pre_window 为真且项目为“窗口前已启动” → 一致；
+    class 中出现不可得资产的键 → 不一致。"""
+    from market_risk.wavewarn_v20.r2 import SegmentClass
+
+    premise = {"SPX": False, "QQQ": True}
+
+    def ledger_group(pre_window: bool, classes: object, category: object) -> dict:
+        counts = {item.value: int(item is category) for item in SegmentClass if item is not SegmentClass.PRE_WINDOW}
+        return {"ledger": {"segments": [{"start": DAYS[0], "end": DAYS[1], "pre_window": pre_window, "class": classes}],
+                           "pre_window_count": int(category is SegmentClass.PRE_WINDOW),
+                           "by_asset": {"SPX": {"counts": counts, "false_alarm_ratio": "无定义"}, "QQQ": UNAVAILABLE}}}
+
+    early = SegmentClass.EARLY
+    record = support.Recorder()
+    support.compare_ledgers(record, "构造组", ledger_group(False, None, early),
+                            {"SPX": available_ledger(False, early), "QQQ": None}, premise, support.SOURCE_THIRD)
+    assert record.summary()["提示段账"]["segments.class（null ↔ 窗口前已启动）"] == {"不一致": 1}
+    pre = SegmentClass.PRE_WINDOW
+    record = support.Recorder()
+    support.compare_ledgers(record, "构造组", ledger_group(True, None, pre),
+                            {"SPX": available_ledger(True, pre), "QQQ": None}, premise, support.SOURCE_THIRD)
+    assert record.total("不一致") == 0
+    assert record.summary()["提示段账"]["segments.class（null ↔ 窗口前已启动）"] == {"一致": 1}
+    record = support.Recorder()
+    support.compare_ledgers(record, "构造组", ledger_group(False, {"SPX": early.value, "QQQ": early.value}, early),
+                            {"SPX": available_ledger(False, early), "QQQ": None}, premise, support.SOURCE_THIRD)
+    assert record.summary()["提示段账"]["segments.class 不含不可得资产的键"] == {"不一致": 1}
+
+
+def test_wiring_a3r_both_unavailable_requires_null_segments() -> None:
+    """(e) 两资产都不可得而 segments 非 null：段账结构不一致。"""
+    premise = {"SPX": True, "QQQ": True}
+    group = {"ledger": {"segments": [], "pre_window_count": None, "by_asset": {"SPX": UNAVAILABLE, "QQQ": UNAVAILABLE}}}
+    record = support.Recorder()
+    support.compare_ledgers(record, "构造组", group, {"SPX": None, "QQQ": None}, premise, support.SOURCE_THIRD)
+    assert record.summary()["提示段账"][support.LEDGER_STRUCTURE_ITEM] == {"一致": 2, "不一致": 1}
+
+
+# ---------------------------------------------------------------------------
+# 补充三（段账结构核验修正）：段账①③的直接自检与结构核验的缺失键（《A2 第三轮补充三》第一节第 2 条；内存构造）。
+#
+# 第三轮表示换算分支的自检覆盖表（R2 判定：compare_r2_judgements；段账：compare_ledgers）：
+# | 分支 | 覆盖用例 |
+# | R2 ① P 成立而出现判定对象 | test_wiring_a3r_premise_with_object_is_inconsistent |
+# | R2 ② P 成立、键缺失或字串 ↔ None | test_wiring_a3r_unavailable_text_with_premise（字串）；
+# |                               | test_wiring_a2_r2_category_conversion（键缺失） |
+# | R2 ③ P 不成立而出现字串或 None | test_wiring_a3r_unavailable_text_without_premise_is_inconsistent |
+# | R2 ④ 双方均为对象 | test_wiring_a2_r2_category_conversion |
+# | R2 ⑤ 映射表外字串 | 未覆盖 |
+# | 段账 ① P 成立而出现段账对象 | test_wiring_a3r_ledger_premise_with_object_is_inconsistent |
+# | 段账 ② P 成立、字串 ↔ None | test_wiring_a3r_unavailable_text_with_premise |
+# | 段账 ③ P 不成立而出现字串或 None | test_wiring_a3r_ledger_without_premise_is_inconsistent |
+# | 段账 ④ 双方均为对象（class null、不可得资产键） | test_wiring_a3r_null_class_requires_pre_window |
+# | 段账 ⑤ 两资产都不可得的结构核验 | test_wiring_a3r_unavailable_text_with_premise（一致）；
+# |                               | test_wiring_a3r_both_unavailable_requires_null_segments（segments 非 null）；
+# |                               | test_wiring_a3r_ledger_structure_requires_keys（缺键） |
+# | 段账 ⑥ ledger 键缺失 | _1 来源：test_wiring_a3r_unavailable_text_without_premise_is_inconsistent；
+# |                     | _2 来源或未设第三轮来源：未覆盖 |
+# | 段账 ⑦ 映射表外字串 | 未覆盖 |
+# ---------------------------------------------------------------------------
+
+
+def ledger_with_qqq(qqq: object) -> dict:
+    """SPX 可得（P 不成立、项目有段账对象）的最小段账：只用于 QQQ 一侧的分支判定，SPX 一侧的比较不在断言范围内。"""
+    from market_risk.wavewarn_v20.r2 import SegmentClass
+
+    counts = {item.value: 0 for item in SegmentClass if item is not SegmentClass.PRE_WINDOW}
+    return {"ledger": {"segments": [], "pre_window_count": 0,
+                       "by_asset": {"SPX": {"counts": counts, "false_alarm_ratio": "无定义"}, "QQQ": qqq}}}
+
+
+def test_wiring_a3r_ledger_premise_with_object_is_inconsistent() -> None:
+    """段账①：P(QQQ) 成立而工具 by_asset["QQQ"] 为对象，或项目 ledgers["QQQ"] 不为 None → 各记不一致 1。"""
+    from market_risk.wavewarn_v20.r2 import SegmentClass
+
+    premise = {"SPX": False, "QQQ": True}
+    item = "P 成立而出现段账对象"
+    spx = available_ledger(False, SegmentClass.EARLY)
+    record = support.Recorder()
+    support.compare_ledgers(record, "构造组", ledger_with_qqq({"counts": {}, "false_alarm_ratio": "无定义"}),
+                            {"SPX": spx, "QQQ": None}, premise, support.SOURCE_THIRD)
+    assert record.summary()["提示段账"][item] == {"不一致": 1}
+    record = support.Recorder()
+    support.compare_ledgers(record, "构造组", ledger_with_qqq(UNAVAILABLE), {"SPX": spx, "QQQ": spx}, premise,
+                            support.SOURCE_THIRD)
+    assert record.summary()["提示段账"][item] == {"不一致": 1}
+
+
+def test_wiring_a3r_ledger_without_premise_is_inconsistent() -> None:
+    """段账③：P 不成立而工具 by_asset["QQQ"] 为字串，或项目 ledgers["QQQ"] 为 None（工具为对象）→ 各记不一致 1。"""
+    from market_risk.wavewarn_v20.r2 import SegmentClass
+
+    premise = {"SPX": False, "QQQ": False}
+    item = "P 不成立而出现不可得表示"
+    spx = available_ledger(False, SegmentClass.EARLY)
+    record = support.Recorder()
+    support.compare_ledgers(record, "构造组", ledger_with_qqq(UNAVAILABLE), {"SPX": spx, "QQQ": spx}, premise,
+                            support.SOURCE_THIRD)
+    assert record.summary()["提示段账"][item] == {"不一致": 1}
+    record = support.Recorder()
+    support.compare_ledgers(record, "构造组", ledger_with_qqq({"counts": {}, "false_alarm_ratio": "无定义"}),
+                            {"SPX": spx, "QQQ": None}, premise, support.SOURCE_THIRD)
+    assert record.summary()["提示段账"][item] == {"不一致": 1}
+
+
+def test_wiring_a3r_ledger_structure_requires_keys() -> None:
+    """段账⑤：两资产都不可得时，segments、pre_window_count 须键存在且为 null，by_asset 两键须存在且为登记字串；
+    缺任一键 → 段账结构不一致 1；三键齐全 → 一致 3（回归）。"""
+    premise = {"SPX": True, "QQQ": True}
+    full = {"segments": None, "pre_window_count": None, "by_asset": {"SPX": UNAVAILABLE, "QQQ": UNAVAILABLE}}
+    cases = [({key: value for key, value in full.items() if key != "segments"}, {"一致": 2, "不一致": 1}),
+             ({key: value for key, value in full.items() if key != "pre_window_count"}, {"一致": 2, "不一致": 1}),
+             ({**full, "by_asset": {"SPX": UNAVAILABLE}}, {"一致": 2, "不一致": 1}),
+             (full, {"一致": 3})]
+    for ledger, expected in cases:
+        record = support.Recorder()
+        support.compare_ledgers(record, "构造组", {"ledger": ledger}, {"SPX": None, "QQQ": None}, premise,
+                                support.SOURCE_THIRD)
+        assert record.summary()["提示段账"][support.LEDGER_STRUCTURE_ITEM] == expected
