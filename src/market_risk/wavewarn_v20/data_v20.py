@@ -15,6 +15,12 @@
   （补充裁决第一部分第 3 条）。文件级元数据的首末日期与逐行解析使用同一套日期规则。
 - 没有任何启用第二来源补齐的开关或参数；允许清单以外的来源标识进入即报错。
 这里得到的是历史研究的读取结果，与留痕类型之间没有任何转换路径。
+
+八列口径（负责人裁决 D16（2026-10-04），取代补充裁决第二节第 2 小节表头口径）：
+- 表头恰为 date,value,open,high,low,close,volume,source（HEADER）。
+- 截止日以内每个数据记录恰为 8 个字段：价格取下标 1（value），来源取下标 7（source），先来源后价格；
+  下标 2—6（open、high、low、close、volume）不作数值解析、业务取值或一致性校验，其字节只随整行解码与分字段处理。
+- value 为空即缺价，不以 close 回填；截止日之后的行不检查字段数；文件级元数据核对不检查逐行字段数。
 """
 
 from __future__ import annotations
@@ -33,7 +39,7 @@ from market_risk.precision import published_price
 from market_risk.wavewarn_v20.dataset_v20 import AssetSeries, DecisionEntry, FileMetadata, RegisteredFile
 from market_risk.wavewarn_v20.snapshot import Snapshot, make_snapshot
 
-HEADER = b"date,value,source"
+HEADER = b"date,value,open,high,low,close,volume,source"          # 负责人裁决 D16（2026-10-04）
 ALLOWED_SOURCES = frozenset({"yahoo", "correct:yahoo"})
 DATE_PATTERN = re.compile(rb"[0-9]{4}-[0-9]{2}-[0-9]{2}")          # 只匹配 ASCII 数字；以 fullmatch 使用
 PRICE_PATTERN = re.compile(r"[0-9]+(?:\.[0-9]+)?")                 # 不接受正负号、科学计数法、空白
@@ -111,7 +117,9 @@ def _date_field(line: bytes) -> dt.date:
 
 
 def file_metadata(raw: bytes) -> FileMetadata:
-    """文件级元数据：两种哈希、两种行数与首末日期。只解析表头与首末数据行的日期字段。"""
+    """文件级元数据：两种哈希、两种行数与首末日期。只解析表头与首末数据行的日期字段。
+
+    表头为八列 HEADER（负责人裁决 D16）；不检查逐行字段数，不解析价格、来源与下标 2—6。"""
     lines = physical_lines(raw)
     _check_header(lines)
     data = [line for line in lines[1:] if not is_blank(line)]
@@ -174,6 +182,9 @@ def parse_rows(raw: bytes, cutoff: dt.date) -> tuple[tuple[dt.date, Decimal, str
     遇到空行只记下“有待定的空行”，不向后扫描；遇到非空行先只取日期字段：
     日期晚于截止日即停止（待定的空行不作判断）；不晚于截止日而此前有待定的空行，报错；
     处理完日期等于截止日的那条记录后立即停止，不再处理其后的任何行。到达文件末尾时，待定的空行不作判断。
+
+    八列口径（负责人裁决 D16（2026-10-04），取代补充裁决第二节第 2 小节表头口径）：截止日以内每行恰 8 个字段；
+    来源取下标 7、价格取下标 1，先来源后价格；下标 2—6 不解析、不校验；value 为空不以 close 回填。
     """
     lines = physical_lines(raw)
     _check_header(lines)
@@ -194,9 +205,9 @@ def parse_rows(raw: bytes, cutoff: dt.date) -> tuple[tuple[dt.date, Decimal, str
             fields = line.decode("utf-8").split(",")
         except UnicodeDecodeError as error:
             raise DataInputError(f"{day} 这一行不是 UTF-8 文本") from error
-        if len(fields) != 3:
-            raise DataInputError(f"{day} 这一行不是三个字段")
-        source = parse_source(fields[2])
+        if len(fields) != 8:
+            raise DataInputError(f"{day} 这一行不是八个字段")
+        source = parse_source(fields[7])
         rows.append((day, parse_price(fields[1]), source))
         if day == cutoff:
             break

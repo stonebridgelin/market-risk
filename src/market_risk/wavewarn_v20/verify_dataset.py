@@ -8,6 +8,12 @@
 记录的覆盖范围：记录的是自钩子安装时点起，本进程经 Python 接口的文件打开。
 安装之前发生的解释器启动、runpy 执行、market_risk 与 wavewarn_v20 包初始化、本模块自身及其标准库导入，都不在范围内；
 uv 进程自身与原生代码的直接读取也不在范围内。本命令不启动子进程。
+
+入口异常的结构化报告（负责人裁决 D16（2026-10-04））：每份文件先读入字节（读取不在捕获范围内），再在只捕获
+data_v20.DataEntryError 的范围内计算元数据并比较登记值；捕获时把异常类名、reason 与原始消息写入该文件的
+entry_error，五项比较记“未执行”，然后继续核对另一份文件；打开记录照常输出。任一文件入口异常、登记值不符或打开检查
+不通过即失败，退出码为 1。结构化报告的保证范围为“配置加载成功、两份文件字节读取成功、且未出现本次不捕获的异常”；
+配置加载异常、读文件的 OSError 与其他任何异常都不捕获，不保证生成报告。
 """
 
 from __future__ import annotations
@@ -104,6 +110,19 @@ def comparison(asset: str, path: Path, metadata: object, registered: object, dif
             "differences": list(differences)}
 
 
+def entry_error_result(asset: str, path: Path, registered: object, error: Exception) -> dict:
+    """一份行情文件在元数据处理中出现 DataEntryError 时的结果（负责人裁决 D16）：五项比较记“未执行”，
+    entry_error 写入异常类名、reason 与原始消息。differences 为空不表示通过（passed 另要求 entry_error 为 None）。"""
+    fields = ("raw_sha256", "normalized_sha256", "data_rows", "first_date", "last_date")
+    return {"asset": asset, "path": str(path),
+            "items": [{"name": name, "file": None, "registered": str(getattr(registered, name)),
+                       "equal": None, "status": "未执行"} for name in fields],
+            "total_rows": None,
+            "differences": [],
+            "entry_error": {"exception_type": type(error).__name__, "reason": error.reason,    # type: ignore[attr-defined]
+                            "message": str(error)}}
+
+
 def main(argv: list[str] | None = None) -> None:
     """入口：先安装记录钩子，再导入业务模块并核对。全部相符且打开记录符合要求时退出码为 0，否则为 1。"""
     records: list[tuple[str, str, object]] = []
@@ -128,13 +147,22 @@ def main(argv: list[str] | None = None) -> None:
     for asset in config_v20.ASSETS:
         path = paths.market_daily_file(asset)
         market_files.append(path)
-        metadata = data_v20.file_metadata(data_v20.read_file_bytes(path))
-        differences = data_v20.registered_differences(metadata, config.registered[asset])
-        results.append(comparison(asset, path, metadata, config.registered[asset], differences))
+        raw = data_v20.read_file_bytes(path)                       # 读文件的 OSError 不捕获
+        try:
+            metadata = data_v20.file_metadata(raw)
+            differences = data_v20.registered_differences(metadata, config.registered[asset])
+        except data_v20.DataEntryError as error:                   # 只捕获这一类（负责人裁决 D16），继续核对下一份
+            results.append(entry_error_result(asset, path, config.registered[asset], error))
+            continue
+        result = comparison(asset, path, metadata, config.registered[asset], differences)
+        result["entry_error"] = None
+        for item in result["items"]:
+            item["status"] = "已比较"
+        results.append(result)
     snapshot = list(records)
     opens = classify_opens(snapshot, root, market_files,
                            [root.joinpath(*config_v20.DATASET_FILE), root.joinpath(*config_v20.DECISIONS_FILE)])
-    passed = all(not item["differences"] for item in results) and not opens["problems"]
+    passed = all(not item["differences"] and item["entry_error"] is None for item in results) and not opens["problems"]
     report = {"root": str(root), "files": results, "open_check": opens,
               "open_records": [{"path": path, "mode": mode, "flags": flags, "read_only": read_only(mode, flags),
                                 "conclusion": read_only_conclusion(mode, flags)} for path, mode, flags in snapshot],

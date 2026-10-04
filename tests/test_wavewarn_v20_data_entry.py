@@ -44,8 +44,17 @@ def rows(count: int, start: int = 0, price: str = "100.00", source: str = "yahoo
     return [(day, price, source) for day in DAYS[start:start + count]]
 
 
-def content(items: list[Row], newline: str = "\n", header: str = "date,value,source") -> bytes:
-    lines = [header, *(f"{day},{price},{source}" for day, price, source in items)]
+# 负责人裁决 D16（2026-10-04）：八列表头，在本测试文件中独立写出，不引用 data_v20.HEADER。
+HEADER_TEXT = "date,value,open,high,low,close,volume,source"
+
+
+def line8(day: object, price: str, source: str) -> str:
+    """八列数据行：下标 1 为价格、下标 7 为来源，下标 2—6 为固定占位（非数值）；价格为空时只置空第 2 字段。"""
+    return f"{day},{price},IGN_OPEN,IGN_HIGH,IGN_LOW,IGN_CLOSE,IGN_VOLUME,{source}"
+
+
+def content(items: list[Row], newline: str = "\n", header: str = HEADER_TEXT) -> bytes:
+    lines = [header, *(line8(day, price, source) for day, price, source in items)]
     return (newline.join(lines) + newline).encode("utf-8")
 
 
@@ -399,7 +408,7 @@ def lines_file(lines: list[str], newline: str = "\n", end: bool = True) -> bytes
 
 
 def record(index: int, price: str = "100.00") -> str:
-    return f"{DAYS[index]},{price},yahoo"
+    return line8(DAYS[index], price, "yahoo")
 
 
 def ruled_registered(asset: str, raw: bytes) -> RegisteredFile:
@@ -422,7 +431,7 @@ def read_lines(tmp_path: Path, lines: list[str], newline: str = "\n", end: bool 
     return read_until(put(tmp_path, "series.csv", raw), "SPX", CUTOFF, ruled_registered("SPX", raw), ())
 
 
-HEADER_LINE = "date,value,source"
+HEADER_LINE = HEADER_TEXT
 BEFORE_CUTOFF = [HEADER_LINE, *(record(index) for index in range(31))]          # 截止日记录为最后一行
 
 
@@ -500,10 +509,10 @@ def test_vertical_tab_form_feed_and_double_cr_lines_are_not_blank(tmp_path: Path
 
 
 @pytest.mark.parametrize(("line", "message"), [
-    (f"{DAYS[12]},100.00\x0b,yahoo", "价格含空白或不可打印字符"),          # Decimal 本会去掉首尾空白
-    (f"{DAYS[12]},100.00 ,yahoo", "价格含空白或不可打印字符"),
-    (f"{DAYS[12]}\x0c,100.00,yahoo", "日期字段不是 ISO 日期"),
-    (f"{DAYS[12]},100.00,yahoo\x0b", "来源标识不在允许清单内"),
+    (line8(DAYS[12], "100.00\x0b", "yahoo"), "价格含空白或不可打印字符"),          # Decimal 本会去掉首尾空白
+    (line8(DAYS[12], "100.00 ", "yahoo"), "价格含空白或不可打印字符"),
+    (line8(f"{DAYS[12]}\x0c", "100.00", "yahoo"), "日期字段不是 ISO 日期"),
+    (line8(DAYS[12], "100.00", "yahoo\x0b"), "来源标识不在允许清单内"),
 ])
 def test_fields_with_odd_characters_are_rejected(tmp_path: Path, line: str, message: str) -> None:
     lines = [*BEFORE_CUTOFF[:13], line, *BEFORE_CUTOFF[14:]]
@@ -522,13 +531,13 @@ BAD_DATES = ["20010119",            # date.fromisoformat 本会接受的紧凑�
 @pytest.mark.parametrize("bad", BAD_DATES)
 def test_dates_must_be_existing_ascii_yyyy_mm_dd(tmp_path: Path, bad: str) -> None:
     """日期词法规则（补充裁决第一部分第 3 条）：逐行解析与文件级元数据的首末日期使用同一套规则。"""
-    middle = [*BEFORE_CUTOFF[:13], f"{bad},100.00,yahoo", *BEFORE_CUTOFF[14:]]
+    middle = [*BEFORE_CUTOFF[:13], line8(bad, "100.00", "yahoo"), *BEFORE_CUTOFF[14:]]
     with pytest.raises(DataEntryError, match="日期字段不是 ISO 日期"):
         read_lines(tmp_path, middle)
-    first = [HEADER_LINE, f"{bad},100.00,yahoo", *BEFORE_CUTOFF[2:]]               # 元数据取首日
+    first = [HEADER_LINE, line8(bad, "100.00", "yahoo"), *BEFORE_CUTOFF[2:]]       # 元数据取首日
     with pytest.raises(DataEntryError, match="日期字段不是 ISO 日期"):
         file_metadata(lines_file(first))
-    last = [*BEFORE_CUTOFF, f"{bad},100.00,yahoo"]                                  # 元数据取末日
+    last = [*BEFORE_CUTOFF, line8(bad, "100.00", "yahoo")]                          # 元数据取末日
     with pytest.raises(DataEntryError, match="日期字段不是 ISO 日期"):
         file_metadata(lines_file(last))
 
@@ -608,3 +617,82 @@ def test_missing_rows_and_empty_prices_share_the_missing_price_reason(tmp_path: 
         read(tmp_path, [*full[:8], (DAYS[8], "100.00", "tiingo"), *full[9:]])
     for caught in (extra_day, bad_source):
         assert type(caught.value) is data_v20.DataInputError and caught.value.reason == "输入校验失败"
+
+
+# ---------------------------------------------------------------------------
+# 负责人裁决 D16（2026-10-04）：八列口径
+# ---------------------------------------------------------------------------
+
+
+def replaced(index: int, line: str) -> list[str]:
+    """BEFORE_CUTOFF 中第 index 条记录（截止日以内）换成给定的物理行。"""
+    return [*BEFORE_CUTOFF[:index + 1], line, *BEFORE_CUTOFF[index + 2:]]
+
+
+def test_d16_three_column_header_is_rejected(tmp_path: Path) -> None:
+    lines = ["date,value,source", *BEFORE_CUTOFF[1:]]
+    raw = lines_file(lines)
+    with pytest.raises(data_v20.DataInputError, match="第一行必须恰为表头"):
+        file_metadata(raw)
+    with pytest.raises(data_v20.DataInputError, match="第一行必须恰为表头"):
+        read_lines(tmp_path, lines)
+
+
+def test_d16_seven_fields_within_the_cutoff_are_rejected(tmp_path: Path) -> None:
+    line = f"{DAYS[12]},100.00,IGN_OPEN,IGN_HIGH,IGN_LOW,IGN_CLOSE,yahoo"
+    with pytest.raises(data_v20.DataInputError, match="不是八个字段"):
+        read_lines(tmp_path, replaced(12, line))
+
+
+def test_d16_nine_fields_within_the_cutoff_are_rejected(tmp_path: Path) -> None:
+    line = f"{DAYS[12]},100.00,IGN_OPEN,IGN_HIGH,IGN_LOW,IGN_CLOSE,IGN_VOLUME,EXTRA,yahoo"
+    with pytest.raises(data_v20.DataInputError, match="不是八个字段"):
+        read_lines(tmp_path, replaced(12, line))
+
+
+def test_d16_trailing_comma_within_the_cutoff_is_rejected(tmp_path: Path) -> None:
+    line = line8(DAYS[12], "100.00", "yahoo") + ","
+    with pytest.raises(data_v20.DataInputError, match="不是八个字段"):
+        read_lines(tmp_path, replaced(12, line))
+
+
+def test_d16_empty_fields_two_to_six_are_accepted(tmp_path: Path) -> None:
+    series = read_lines(tmp_path, replaced(12, f"{DAYS[12]},123.45,,,,,,yahoo"))
+    assert series.closes[DAYS[12]] == Decimal("123.45")
+    assert list(series.closes) == DAYS[:31]
+
+
+def test_d16_close_field_is_not_parsed_or_compared(tmp_path: Path) -> None:
+    line = f"{DAYS[12]},100.00,IGN_OPEN,IGN_HIGH,IGN_LOW,999.99,IGN_VOLUME,yahoo"
+    assert read_lines(tmp_path, replaced(12, line)).closes[DAYS[12]] == Decimal("100.00")
+
+
+def test_d16_empty_value_is_not_filled_from_close(tmp_path: Path) -> None:
+    line = f"{DAYS[12]},,IGN_OPEN,IGN_HIGH,IGN_LOW,100.00,IGN_VOLUME,yahoo"
+    with pytest.raises(data_v20.MissingPriceEntryError):
+        read_lines(tmp_path, replaced(12, line))
+
+
+def test_d16_field_count_is_not_checked_after_the_cutoff(tmp_path: Path) -> None:
+    series = read_lines(tmp_path, [*BEFORE_CUTOFF, f"{DAYS[31]},88.88,yahoo"])
+    assert series.cutoff == CUTOFF and list(series.closes) == DAYS[:31]
+
+
+def test_d16_metadata_does_not_check_field_counts() -> None:
+    metadata = file_metadata(lines_file(replaced(12, f"{DAYS[12]},100.00,yahoo")))
+    assert metadata.data_rows == 31 and metadata.first_date == DAYS[0] and metadata.last_date == CUTOFF
+
+
+def test_d16_header_with_a_byte_order_mark_is_rejected(tmp_path: Path) -> None:
+    raw = b"\xef\xbb\xbf" + lines_file(BEFORE_CUTOFF)
+    with pytest.raises(data_v20.DataInputError, match="第一行必须恰为表头"):
+        file_metadata(raw)
+    with pytest.raises(data_v20.DataInputError, match="第一行必须恰为表头"):
+        read_until(put(tmp_path, "series.csv", raw), "SPX", CUTOFF, ruled_registered("SPX", raw), ())
+
+
+def test_d16_source_comes_from_field_seven_before_the_price(tmp_path: Path) -> None:
+    with pytest.raises(data_v20.DataInputError, match="来源标识不在允许清单内"):
+        read_lines(tmp_path, replaced(12, line8(DAYS[12], "100.00", "tiingo")))
+    with pytest.raises(data_v20.DataInputError, match="来源标识不在允许清单内"):
+        read_lines(tmp_path, replaced(12, line8(DAYS[12], "", "tiingo")))       # 先来源后价格

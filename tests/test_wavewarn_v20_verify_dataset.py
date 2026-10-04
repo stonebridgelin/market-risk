@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import json
 import os
@@ -27,6 +28,14 @@ DECISIONS = ("- date: 2001-01-04\n  symbol: SPY\n  decision: exclude\n  reason: 
 
 
 def csv_bytes(rows: list[tuple[str, str]]) -> bytes:
+    """八列（负责人裁决 D16）：表头字面量独立写出，不引用 data_v20.HEADER；
+    下标 2—6 为固定占位，价格为空时只置空第 2 字段。"""
+    return ("date,value,open,high,low,close,volume,source\n" + "".join(
+        f"{day},{price},IGN_OPEN,IGN_HIGH,IGN_LOW,IGN_CLOSE,IGN_VOLUME,yahoo\n" for day, price in rows)).encode("utf-8")
+
+
+def three_column_bytes(rows: list[tuple[str, str]]) -> bytes:
+    """D16 之前的三列格式，用来构造表头不符的文件。"""
     return ("date,value,source\n" + "".join(f"{day},{price},yahoo\n" for day, price in rows)).encode("utf-8")
 
 
@@ -133,6 +142,8 @@ def test_entry_passes_when_files_match_registered_values(tmp_path: Path) -> None
     assert (values["data_rows"]["file"], values["first_date"]["file"], values["last_date"]["file"]) == (
         "4", "2001-01-02", "2001-01-05")
     assert all(item["equal"] for item in spx["items"]) and len(spx["items"]) == 5
+    assert all(item["entry_error"] is None for item in report["files"])
+    assert {item["status"] for item in spx["items"]} == {"已比较"}
     assert "本命令不启动子进程" in report["coverage"]
 
 
@@ -142,7 +153,8 @@ def test_entry_fails_and_lists_differences_when_a_file_changed(tmp_path: Path) -
     code, report = run_entry(tmp_path)
     assert code == 1 and report["passed"] is False
     spx, qqq = report["files"]
-    assert spx["differences"] == []
+    assert spx["differences"] == [] and spx["entry_error"] is None and qqq["entry_error"] is None
+    assert {item["status"] for item in qqq["items"]} == {"已比较"}
     assert len(qqq["differences"]) == 4                                           # 两种哈希、数据行数、末日
     assert any("数据行数：文件为 4，登记为 3" in text for text in qqq["differences"])
     assert any("末日：文件为 2001-01-08，登记为 2001-01-05" in text for text in qqq["differences"])
@@ -176,7 +188,7 @@ def test_entry_does_not_parse_prices(tmp_path: Path) -> None:
     bad = [("2001-01-02", "不是数字"), ("2001-01-03", "abc"), ("2001-01-04", "")]
     layout(tmp_path, spx=bad)
     code, report = run_entry(tmp_path)
-    assert code == 0 and report["passed"] is True
+    assert code == 0 and report["passed"] is True and report["files"][0]["entry_error"] is None
     values = {item["name"]: item["file"] for item in report["files"][0]["items"]}
     assert (values["data_rows"], values["first_date"], values["last_date"]) == ("3", "2001-01-02", "2001-01-04")
 
@@ -189,8 +201,84 @@ def test_entry_reports_configuration_problems_with_a_non_zero_exit(tmp_path: Pat
 
 
 # ---------------------------------------------------------------------------
+# 负责人裁决 D16：数据入口异常的结构化报告（子进程）
+# ---------------------------------------------------------------------------
+
+
+def three_column_layout(root: Path, assets: tuple[str, ...]) -> dict[str, Path]:
+    """先按八列布局构造，再把指定资产的文件换成三列表头，并按换后的字节重写登记值（不新增写文件语句）。"""
+    paths = layout(root)
+    files = {"SPX": (csv_bytes(SPX_ROWS), SPX_ROWS), "QQQ": (csv_bytes(QQQ_ROWS), QQQ_ROWS)}
+    for asset in assets:
+        rows = files[asset][1]
+        files[asset] = (three_column_bytes(rows), rows)
+        put(paths[asset], files[asset][0])
+    put(paths["dataset"], registered_yaml(files).encode("utf-8"))
+    return paths
+
+
+def market_opens(report: dict, paths: dict[str, Path]) -> list[tuple[str, str]]:
+    market = report["open_check"]["market"]
+    assert all(verify_dataset.read_only(mode, flags) for _, mode, flags in market)
+    return sorted((verify_dataset.normalized(path), mode) for path, mode, _ in market)
+
+
+def test_d16_three_column_spx_is_reported_and_qqq_is_still_compared(tmp_path: Path) -> None:
+    paths = three_column_layout(tmp_path, ("SPX",))
+    code, report = run_entry(tmp_path)
+    assert code == 1 and report["passed"] is False
+    spx, qqq = report["files"]
+    assert spx["asset"] == "SPX" and spx["entry_error"]["exception_type"] == "DataInputError"
+    assert "第一行必须恰为表头" in spx["entry_error"]["message"]
+    assert len(spx["items"]) == 5 and all(item["status"] == "未执行" and item["equal"] is None
+                                          for item in spx["items"])
+    assert qqq["entry_error"] is None and qqq["differences"] == []
+    assert all(item["equal"] is True and item["status"] == "已比较" for item in qqq["items"])
+    assert market_opens(report, paths) == sorted(
+        (verify_dataset.normalized(paths[asset]), "r") for asset in ("SPX", "QQQ"))   # 两份行情文件各一次，只读
+    assert report["open_check"]["problems"] == []
+
+
+def test_d16_both_three_column_files_are_reported(tmp_path: Path) -> None:
+    paths = three_column_layout(tmp_path, ("SPX", "QQQ"))
+    code, report = run_entry(tmp_path)
+    assert code == 1 and report["passed"] is False
+    assert [item["entry_error"]["exception_type"] for item in report["files"]] == ["DataInputError"] * 2
+    assert report["open_records"] and report["open_check"]["problems"] == []          # 打开记录完整输出
+    assert market_opens(report, paths) == sorted(
+        (verify_dataset.normalized(paths[asset]), "r") for asset in ("SPX", "QQQ"))
+
+
+def test_d16_both_eight_column_files_pass(tmp_path: Path) -> None:
+    layout(tmp_path)
+    code, report = run_entry(tmp_path)
+    assert code == 0 and report["passed"] is True
+    assert [item["entry_error"] for item in report["files"]] == [None, None]
+
+
+# ---------------------------------------------------------------------------
 # 比较与格式化逻辑的纯函数测试（本进程，普通导入）
 # ---------------------------------------------------------------------------
+
+
+def test_d16_entry_error_result_structure(tmp_path: Path) -> None:
+    from market_risk.wavewarn_v20.data_v20 import DataInputError
+    from market_risk.wavewarn_v20.dataset_v20 import RegisteredFile
+
+    registered = RegisteredFile("SPX", "a" * 64, "b" * 64, 4, dt.date(2001, 1, 2), dt.date(2001, 1, 5))
+    path = tmp_path / "SPX.csv"
+    result = verify_dataset.entry_error_result("SPX", path, registered, DataInputError("第一行必须恰为表头 x"))
+    assert set(result) == {"asset", "path", "items", "total_rows", "differences", "entry_error"}
+    assert result["asset"] == "SPX" and result["path"] == str(path)
+    assert result["total_rows"] is None and result["differences"] == []
+    assert result["entry_error"] == {"exception_type": "DataInputError", "reason": "输入校验失败",
+                                     "message": "第一行必须恰为表头 x"}
+    assert [item["name"] for item in result["items"]] == [
+        "raw_sha256", "normalized_sha256", "data_rows", "first_date", "last_date"]
+    assert [item["registered"] for item in result["items"]] == ["a" * 64, "b" * 64, "4", "2001-01-02", "2001-01-05"]
+    assert all(item["file"] is None and item["equal"] is None and item["status"] == "未执行"
+               for item in result["items"])
+    json.dumps(result, ensure_ascii=False)                                          # 可序列化为 JSON
 
 
 def test_open_classification_rules(tmp_path: Path) -> None:

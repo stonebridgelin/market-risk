@@ -157,10 +157,12 @@ def scenario_cutoff(scenario: Mapping) -> str:
 
 
 def csv_bytes(scenario: Mapping, asset: str) -> bytes:
-    """表头 date,value,source；轴上全部日期逐行写入（含截止日之后的行）；缺价行 value 为空；source 固定 yahoo。"""
-    rows = ["date,value,source"]
+    """表头 date,value,open,high,low,close,volume,source（D16，独立字面量，不引用 data_v20.HEADER）；
+    轴上全部日期逐行写入（含截止日之后的行）；缺价行 value 为空、其余七个字段照写；
+    下标 2—6 为固定占位 IGN_OPEN … IGN_VOLUME；source 固定 yahoo。"""
+    rows = ["date,value,open,high,low,close,volume,source"]
     for day, price in zip(scenario["axis"], scenario["prices"][asset], strict=True):
-        rows.append(f"{day},{'' if price is None else price},yahoo")
+        rows.append(f"{day},{'' if price is None else price},IGN_OPEN,IGN_HIGH,IGN_LOW,IGN_CLOSE,IGN_VOLUME,yahoo")
     return ("\n".join(rows) + "\n").encode("utf-8")
 
 
