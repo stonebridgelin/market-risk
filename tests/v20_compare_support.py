@@ -16,16 +16,17 @@ import datetime as dt
 import hashlib
 import json
 import math
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 from wavewarn_v20_helpers import POLICY, POSITIONS, TOLERANCE, WINDOWS
 
 from market_risk.calendar import stock_trading_days
 from market_risk.storage.paths import StoragePaths
-from market_risk.wavewarn_v20 import config_v20, data_v20, nav, r1, research_run
+from market_risk.wavewarn_v20 import config_v20, confirmatory, data_v20, nav, r1, research_run
 from market_risk.wavewarn_v20.confirmatory import stationary_bootstrap_indices
 from market_risk.wavewarn_v20.convergence import (
     CHANNEL_NAMES,
@@ -576,6 +577,11 @@ def project_bootstrap(items: Sequence[Mapping]) -> list[dict]:
 # 四种比对状态，另加“路径差异”（乙补修二第二节：项目两条路径的异常类别不同，已知原因，不计一致）。
 # 窗口末日边界按负责人 2026-10-03 裁决记“未比较”，另以 window_end() 单独计数。
 STATUSES = ("一致", "不一致", "未比较", "接口差异", "路径差异", "裁决差异（D13-甲）")
+# 第二轮 B（《第二轮 B 设计（修订二）》第五节）新增两种单列状态，不计入一致；
+# 只在 B 的记录中出现，A 的计数仍按 STATUSES。
+TOLERANCE_STATUS = "容差内"
+D15_STATUS = "构造边界差异（D15）"
+B_STATUSES = (*STATUSES, TOLERANCE_STATUS, D15_STATUS)
 
 
 @dataclass
@@ -588,7 +594,7 @@ class Recorder:
 
     def add(self, layer: str, item: str, status: str, where: str = "", tool: object = None,
             project: object = None, note: str = "") -> None:
-        assert status in STATUSES, status
+        assert status in B_STATUSES, status
         key = (layer, item, status)
         self.counts[key] = self.counts.get(key, 0) + 1
         if status != "一致" and self.counts[key] <= self.limit:
@@ -1972,6 +1978,7 @@ OLD_TOOL = ToolBinding(r"C:\Users\stone\v20_tool_a161387", "a161387fb13954eaa117
                        "40abfb78281a4af443618ed384415ae001169720f3d6b256a80add9af27a74c3")
 NEW_TOOL = ToolBinding(r"C:\Users\stone\v20_tool_1709880", "170988007994134577296e9931bba4cd1786cd36",
                        "8ff8081828c94134bc0d3e000ea77f3442564241438c8d444c601003bb19ca3d")
+NEW_TOOL_VERSION = "v20-indep-3"          # 工具 README（1709880）第 101 行：“`tool`：工具版本（本版 `v20-indep-3`）”
 SOURCE_SECOND, SOURCE_THIRD = "_2", "_1"                 # 工具输出来源：第二次运行目录 / 第三轮目录
 
 
@@ -2047,3 +2054,610 @@ def tool_source_fields(source: ToolSource) -> dict:
     """逐场景记录新增的四个字段（第二节第 4 条）。"""
     return {"工具输出来源": source.label, "工具输出 SHA-256": source.sha256, "生成工具提交": source.binding.commit,
             "生成工具 audit_v20.py SHA-256": source.binding.audit_sha256}
+
+
+# ---------------------------------------------------------------------------
+# 第二轮 B：确认性检验的构造场景比对（《第二轮 B 设计（修订二）》SHA-256 bbaf96b0…665d；《接线 B 试跑》950cadff…7240）。
+# 只做表示换算与比较：不重实现置零、净值、自助法；工具未输出的量记未比较。
+# ---------------------------------------------------------------------------
+
+B_PERIOD = "构造验收"
+B_LATER_SCENARIO = "confirm_空窗口_later"
+B_LATER_MESSAGE = "构造验收给出的固定起点须在轴上"
+B_NUMBER_TOLERANCE = 1e-12                  # 设计第二节第 4 项：精确不等且 |差| ≤ 1e-12 记“容差内”
+B_TOOL_INVALID_CONCLUSIONS = ("计算无效", "计算无效，不写任何优劣结论")
+B_TOOL_REASON_MAIN = "主设定 n ÷ b < 2"         # 设计第二节第 2 项：工具侧登记文字（↔ 项目“主设定无效：n ÷ b < 2…”）
+B_TOOL_REASON_DJ = "d_j 出现非有限值"           # 设计第二节第 2 项：工具侧与项目同名
+B_WARNINGS = {"敏感性区块下 p ≥ 0.10": confirmatory.WARNING_SENSITIVITY,
+              "前后两半的 Δ 方向不一致": confirmatory.WARNING_HALVES,
+              "事件窗口置零后不再为正": confirmatory.WARNING_ZEROING}
+B_REQUIRED_STOP = ("tool", "kind", "name", "exit_code", "stop_reason")
+B_REQUIRED_INVALID = ("tool", "kind", "name", "exit_code", "input_checks", "registered_settings", "params", "window",
+                      "r2", "valid", "invalid_reasons", "category", "conclusion")
+B_OPTIONAL_INVALID = ("n", "delta", "delta_min", "annual_relative_growth", "bootstrap", "r1", "r2_ok", "unstable",
+                      "warnings", "judgement_test_pass", "judgement_point_estimate", "halves", "event_zeroing",
+                      "own_loss_text", "lnW")
+B_TOOL_EARLY = "未比较（工具提前返回未输出）"
+B_PROJECT_SHORT = "未比较（项目无效分支短路未计算）"
+B_NOT_PROVIDED = "未比较（项目接口未提供）"
+B_UNREGISTERED_EXIT = "未登记的出口组合"
+
+
+def confirm_parameters(split: dt.date) -> confirmatory.ConfirmatoryParameters:
+    """设计第一节登记值：主设定 (20, 20261020)；敏感性 (10, 20261010)、(40, 20261040)、(60, 20261060)、
+    (120, 202610120)；B = 10,000；α = 0.05；警示线 0.10；年化 252；最低改善 1%；容差 1e-10；padding 20。"""
+    block = confirmatory.BlockSetting
+    return confirmatory.ConfirmatoryParameters(
+        block(20, 20261020), (block(10, 20261010), block(40, 20261040), block(60, 20261060), block(120, 202610120)),
+        10_000, 0.05, 0.10, 252, 0.01, 1e-10, 20, split)
+
+
+def confirm_run_parameters() -> research_run.RunParameters:
+    """组合层运行参数：与 A 第二轮相同的登记值，诊断关闭（设计第一节）。"""
+    return research_run.RunParameters(WINDOWS, POSITIONS, POLICY, A2_THRESHOLDS, A2_RULE, COMMON_START_OFFSET,
+                                      TOLERANCE, A2_R1_RATIO, (), False)
+
+
+def confirm_candidate(scenario: Mapping) -> Candidate:
+    k, theta, h = scenario["params"]
+    return Candidate(int(k), Decimal(str(theta)), int(h))
+
+
+def b_float(value: object) -> object:
+    """补充一第一节第 1 条：工具数值按 A 的约定读成 Decimal，比较前先 float()（与 A 的 record.number 同法）。"""
+    return float(value) if isinstance(value, Decimal) else value
+
+
+def b_number(record: Recorder, layer: str, item: str, where: str, tool: object, project: object) -> str:
+    """设计第二节第 4 项的容差规则：精确相等一致；不等且 |差| ≤ 1e-12 记“容差内”（单列，不计一致）；否则不一致。
+    比较前工具值 Decimal → float（补充一第一节第 1 条）。"""
+    tool, project = b_float(tool), b_float(project)
+    if tool == project:
+        status = "一致"
+    elif (isinstance(tool, int | float) and isinstance(project, int | float) and not isinstance(tool, bool)
+          and math.isfinite(tool) and math.isfinite(project) and abs(tool - project) <= B_NUMBER_TOLERANCE):
+        status = TOLERANCE_STATUS
+    else:
+        status = "不一致"
+    record.add(layer, item, status, where, tool, project)
+    return status
+
+
+def b_premise(tool: Mapping, events: Mapping) -> dict[str, bool]:
+    """confirm 专用不可得前提 P_B(a)（设计第二节第 9 项）：项目 common.events[a] 为
+    Unavailable(labels_r2.r2_events, 缺少必需价格) ∧ 工具 invalid_reasons 含 {object: "R2 a", reason: 缺少必需价格}
+    且 missing_days 逐日相同 ∧ 工具 r2 无键 a。三条齐备才成立；不凭缺键单独认定。"""
+    reasons = tool.get("invalid_reasons") or []
+    tool_r2 = tool.get("r2") or {}
+    premise = {}
+    for asset in ASSETS:
+        mine = events.get(asset)
+        listed = (isinstance(mine, research_run.Unavailable) and unavailable_allowed(mine, LABELS_UNAVAILABLE)
+                  and any(isinstance(item, Mapping) and item.get("object") == f"R2 {asset}"
+                          and item.get("reason") == "缺少必需价格"
+                          and item.get("missing_days") == [day_text(day) for _, day in mine.missing]
+                          for item in reasons))
+        premise[asset] = bool(listed) and asset not in tool_r2
+    return premise
+
+
+def b_note_class(note: str | None) -> str | None:
+    """自助法行的无效类别（设计第二节第 5 项“note 只比无效类别”）。"""
+    if not note:
+        return None
+    for name in ("n ÷ b < 2", "重抽样过程出错"):
+        if name in note:
+            return name
+    return note
+
+
+def b_tool_missing(entry: Mapping) -> list | None:
+    """工具原因条目的缺价日期：missing_days（日期列表）或 missing（[资产, 日期] 列表），逐日比较。"""
+    if "missing_days" in entry:
+        return list(entry["missing_days"])
+    if "missing" in entry:
+        return [list(item) for item in entry["missing"]]
+    return None
+
+
+def b_expected_reasons(project_reason: str, nav_missing: Sequence[tuple[str, dt.date]], events: Mapping,
+                       r2: Mapping) -> list[tuple[str, object]] | None:
+    """项目短路原因 → 工具应列出的（判定函数, 说明）。设计第二节第 2 项的类别映射；表外原因返回 None。"""
+    if project_reason == "净值所需价格缺失，收益无法计算":
+        days = [day_text(day) for _, day in nav_missing]
+        pairs = [[asset, day_text(day)] for asset, day in nav_missing]
+        return [(lambda e, d=days, p=pairs: e.get("reason") == "缺少必需价格" and e.get("object") == "净值"
+                 and b_tool_missing(e) in (d, p), f"缺少必需价格 / 净值 / {days}")]
+    if project_reason == "R2 无法计算":
+        expected = []
+        for asset in ASSETS:
+            mine = events.get(asset)
+            if isinstance(mine, research_run.Unavailable) and unavailable_allowed(mine, LABELS_UNAVAILABLE):
+                days = [day_text(day) for _, day in mine.missing]
+                expected.append((lambda e, a=asset, d=days: e.get("reason") == "缺少必需价格"
+                                  and e.get("object") == f"R2 {a}" and b_tool_missing(e) == d,
+                                  f"缺少必需价格 / R2 {asset} / {days}"))
+            elif r2.get(asset) is not None and not r2[asset].computable:
+                expected.append((lambda e, a=asset: e.get("reason") == "R2 无法计算（非左截断事件为 0 个）"
+                                 and e.get("object") == f"R2 {a}", f"R2 无法计算（非左截断事件为 0 个）/ R2 {asset}"))
+        return expected or None
+    # 《接线 B 全量 补充一》第一节第 1、2 条：工具这两类原因条目不带 object；工具 reason 须精确等于登记的工具侧文字
+    # （设计第二节第 2 项），不是等于项目原因文字；条目无 object 键才匹配。
+    if project_reason.startswith("主设定无效：") and "n ÷ b < 2" in project_reason:
+        return [(lambda e: e.get("reason") == B_TOOL_REASON_MAIN and "object" not in e,
+                 f"{B_TOOL_REASON_MAIN}（工具侧登记文字、无 object）↔ {project_reason}")]
+    if project_reason == "d_j 出现非有限值":
+        return [(lambda e: e.get("reason") == B_TOOL_REASON_DJ and "object" not in e,
+                 f"{B_TOOL_REASON_DJ}（工具侧登记文字、无 object）")]
+    return None
+
+
+def compare_b_reasons(record: Recorder, tool_reasons: Sequence[Mapping], project_reason: str,
+                      nav_missing: Sequence[tuple[str, dt.date]], events: Mapping, r2: Mapping) -> None:
+    """设计第二节第 2 项：项目短路只报一条；把项目原因映射为工具（类别, 对象[, 缺价日期]），在工具列表中找到全同的
+    一条才记一致；工具其余原因逐条“未比较（工具多报原因，项目短路未检查）”；找不到即不一致。对账不符待裁决，不记一致。"""
+    layer = "检验层"
+    if project_reason.startswith("对账不符"):
+        record.add(layer, "对账不符（待裁决口径，实际发生即停）", "不一致", "invalid_reasons", tool_reasons,
+                   project_reason)
+        return
+    expected = b_expected_reasons(project_reason, nav_missing, events, r2)
+    if expected is None:
+        record.add(layer, "invalid_reasons（项目原因不在映射表内）", "不一致", "invalid_reasons", tool_reasons,
+                   project_reason)
+        return
+    used: set[int] = set()
+    for predicate, label in expected:
+        found = next((index for index, entry in enumerate(tool_reasons)
+                      if index not in used and isinstance(entry, Mapping) and predicate(entry)), None)
+        if found is None:
+            record.add(layer, "invalid_reasons（项目原因在工具列表中找不到）", "不一致", label, tool_reasons,
+                       project_reason)
+        else:
+            used.add(found)
+            record.add(layer, "invalid_reasons（类别、对象、缺价日期全同）", "一致", label, tool_reasons[found],
+                       project_reason)
+    for index, entry in enumerate(tool_reasons):
+        if index not in used:
+            record.add(layer, "invalid_reasons（工具多报原因）", "未比较", str(entry.get("object")), entry, None,
+                       "未比较（工具多报原因，项目短路未检查）")
+
+
+def b_start_facts(snapshot: Snapshot, candidate: Candidate) -> dict:
+    """D15 与未收敛情形 b 的判定依据：t0 与 κ（单候选 + 主参照），用项目已有函数计算；未收敛记 None。"""
+    spx, qqq = (snapshot_asset_days(snapshot, asset, WINDOWS) for asset in ASSETS)
+    ma = snapshot_trend_days(snapshot, "SPX", WINDOWS)
+    try:
+        t0 = first_valid_index(spx, qqq, ma)
+    except ConvergenceError as error:
+        return {"t0": None, "kappa": None, "error": f"{type(error).__name__}：{error}"}
+    try:
+        system = candidate_convergence(spx, qqq, ma, t0, candidate, WINDOWS.average).system_index
+        reference = t0 + 1 + reference_convergence(ma[t0 + 1:], WINDOWS.average)
+    except ConvergenceError as error:
+        return {"t0": t0, "kappa": None, "error": f"{type(error).__name__}：{error}"}
+    return {"t0": t0, "kappa": max(system, reference), "error": None}
+
+
+def compare_b_exit(record: Recorder, tool: Mapping, stop: research_run.StopRecord | None, error: str | None,
+                   axis: Sequence[dt.date], j0: int | None, facts: Mapping | None) -> str:
+    """设计第三节出口表。返回登记情形名；未登记的组合记不一致（触发停止）。双方均未停止时返回“双方均完成”。"""
+    layer = "出口"
+    reason_info = tool.get("stop_reason") if isinstance(tool.get("stop_reason"), Mapping) else {}
+    reason, sub = reason_info.get("reason"), reason_info.get("sub_reason")
+    tool_stopped = tool.get("exit_code") == 3
+    project = None if stop is None else stop.exit.value
+    pair = [reason if tool_stopped else f"退出码 {tool.get('exit_code')}", error or project]
+    e_index = len(axis) - 1
+    if not tool_stopped and stop is None and error is None:
+        record.add(layer, "exit_code（双方均完成）", "一致" if tool.get("exit_code") == 0 else "不一致", "场景",
+                   tool.get("exit_code"), "完成")
+        return "双方均完成"
+    if tool_stopped and reason == "评价窗口为空" and sub == "起点等于最后一个收盘日" and (
+            stop is not None and stop.exit is research_run.Exit.FIXED_START_UNMET and j0 == e_index):
+        case = "window_start == E：工具评价窗口为空 ↔ 项目固定窗口不满足预热或收敛条件"
+    elif tool_stopped and reason == "评价窗口为空" and sub == "起点晚于最后一个收盘日" and error == B_LATER_MESSAGE:
+        case = "window_start > E：工具评价窗口为空 ↔ 项目 ResearchRunError（构造验收给出的固定起点须在轴上）"
+    elif tool_stopped and reason == "未收敛" and stop is not None and stop.exit is research_run.Exit.NOT_CONVERGED:
+        case = "未收敛情形 a：始终不收敛"
+    elif (tool_stopped and reason == "未收敛" and stop is not None
+          and stop.exit is research_run.Exit.FIXED_START_UNMET and facts is not None
+          and facts.get("kappa") is not None and j0 is not None and j0 - 1 < facts["kappa"]):
+        case = "未收敛情形 b：最终已收敛，但 j0 − 1 早于收敛日"
+    elif (not tool_stopped and tool.get("exit_code") == 0 and stop is not None
+          and stop.exit is research_run.Exit.FIXED_START_UNMET and facts is not None
+          and facts.get("t0") is not None and facts.get("kappa") is not None and j0 is not None
+          and facts["kappa"] + 1 <= j0 < facts["t0"] + COMMON_START_OFFSET):
+        record.add(layer, "预热不足（D15，口径未统一；本批未核验真实验证期是否触发）", D15_STATUS, "场景",
+                   "正常运行", project, json.dumps({"t0": facts["t0"], "kappa": facts["kappa"], "j0": j0}))
+        return "D15"
+    else:
+        record.add(layer, B_UNREGISTERED_EXIT, "不一致", "场景", {"exit_code": tool.get("exit_code"), **reason_info},
+                   pair[1], json.dumps({"facts": facts, "j0": j0}, ensure_ascii=False, default=str))
+        return B_UNREGISTERED_EXIT
+    record.add(layer, case, "接口差异", "场景", {"exit_code": tool.get("exit_code"), **reason_info}, pair[1],
+               "" if stop is None else json.dumps({"exception_type": stop.exception_type,
+                                                   "detail": dict(stop.detail)}, ensure_ascii=False, default=str))
+    return case
+
+
+def b_alignment(scenario: Mapping, axis: Sequence[dt.date], j0: int, data: confirmatory.ConfirmatoryInput,
+                split: dt.date, tool: Mapping) -> dict[str, bool | None]:
+    """设计第一节对齐断言（第 1—4 条）。工具提前返回而未产生的字段（含 n）记 None（未比较），不强行读取。"""
+    window = tool.get("window") or {}
+    start = dt.date.fromisoformat(scenario["window_start"])
+    n = len(axis) - 1 - j0
+    end_days = tuple(data.end_days)
+    before = sum(1 for day in end_days if day < split)
+    checks: dict[str, bool | None] = {
+        "1 axis[j0] == window_start": axis[j0] == start,
+        "1 工具 window.start == window_start": window.get("start") == scenario["window_start"],
+        "2 项目 first_signal_day == axis[j0−1]": data.first_signal_day == axis[j0 - 1],
+        "2 工具 window.first_signal_day == axis[j0−1]": window.get("first_signal_day") == day_text(axis[j0 - 1]),
+        "3 项目 end_days == axis[j0+1 .. E]": end_days == tuple(axis[j0 + 1:]),
+        "3 项目 n == E_index − j0": len(end_days) == n,
+        "3 工具 n == 项目 n": None if "n" not in tool else tool["n"] == n,
+        "3 工具 window.E == axis[E]": window.get("E") == day_text(axis[-1]),
+        "4 split == half_split": split == dt.date.fromisoformat(scenario["half_split"]),
+        "4 前后两半区间数 n // 2 与 n − n // 2": (before, len(end_days) - before) == (n // 2, n - n // 2),
+        "4 工具 window.half_split == half_split": window.get("half_split") == scenario["half_split"]}
+    return checks
+
+
+def b_pair(record: Recorder, layer: str, item: str, tool: Mapping, key: str, project: object, tool_valid: object,
+           project_valid: bool) -> tuple[bool, object]:
+    """设计第二节第 1 小节的两阶段规则：返回（是否可比，工具值）。应存在而缺键 → 不一致；可不存在而缺 → 未比较
+    （工具提前返回）；工具已算而项目短路为 None → 未比较（项目无效分支短路未计算）。
+    不设“项目 None + 工具缺键 → 一致”。"""
+    if key not in tool:
+        if tool_valid is True:
+            record.add(layer, f"{item}（缺键）", "不一致", key, None, project)
+        else:
+            record.add(layer, item, "未比较", key, None, project, B_TOOL_EARLY)
+        return False, None
+    if project is None and not project_valid:
+        record.add(layer, item, "未比较", key, tool[key], None, B_PROJECT_SHORT)
+        return False, tool[key]
+    return True, tool[key]
+
+
+def compare_b_zeroing(record: Recorder, tool_items: Sequence[Mapping], zeroed: Sequence[confirmatory.ZeroedEvent],
+                      events: Mapping, first_signal_day: dt.date) -> None:
+    """设计第二节第 13 项：先核对两侧事件集合（资产、P、Tr）；Tr 取窗口结果中同 P 事件的 trough；
+    P ≤ f 的事件两侧均不出现；delta_zeroed 容差规则；not_positive ↔ delta ≤ 0。
+    置零范围工具未输出，不在接线中重实现。"""
+    layer = "检验层"
+    troughs = {(asset, day_text(event.peak)): day_text(event.trough)
+               for asset, items in events.items() if not isinstance(items, research_run.Unavailable) for event in items}
+    mine = {(item.asset, day_text(item.peak), troughs.get((item.asset, day_text(item.peak)))): item for item in zeroed}
+    theirs = {(item.get("asset"), item.get("P"), item.get("Tr")): item for item in tool_items}
+    record.exact(layer, "event_zeroing 事件集合（资产、P、Tr）", "场景", sorted(map(list, theirs), key=str),
+                 sorted(map(list, mine), key=str))
+    record.check(layer, "event_zeroing 无 P ≤ f 的事件", all(str(key[1]) > day_text(first_signal_day) for key in theirs)
+                 and all(key[1] > day_text(first_signal_day) for key in mine), "场景",
+                 sorted(str(key[1]) for key in theirs), sorted(key[1] for key in mine))
+    for key in sorted(set(theirs) & set(mine), key=str):
+        where = " ".join(map(str, key))
+        b_number(record, layer, "event_zeroing.delta_zeroed", where, theirs[key].get("delta_zeroed"), mine[key].delta)
+        record.exact(layer, "event_zeroing.not_positive", where, theirs[key].get("not_positive"), mine[key].delta <= 0)
+    record.add(layer, "event_zeroing 置零范围", "未比较", "场景", None, None,
+               "工具范围未由输出核验（按共同轴与两侧源码契约：交易日轴 ±20、截在窗口内）")
+
+
+def compare_b_bootstrap(record: Recorder, tool_rows: Sequence[Mapping],
+                        rows: Sequence[confirmatory.BootstrapRow]) -> None:
+    """设计第二节第 5—7 项：按 b 对应；b、seed、valid 精确；note 只比无效类别；p 精确；q025、q975 容差规则；
+    tail_count、delta_star、tail 未比较。"""
+    layer = "检验层"
+    theirs = {item.get("b"): item for item in tool_rows}
+    numeric = lambda value: math.inf if value is None else float(value)          # noqa: E731  按数值排序（补充一）
+    record.exact(layer, "bootstrap 行（b 集合）", "场景", sorted(theirs, key=numeric),
+                 sorted((row.block for row in rows), key=numeric))
+    for row in rows:
+        left = theirs.get(row.block)
+        if left is None:
+            continue
+        where = f"b={row.block}"
+        record.exact(layer, "bootstrap.seed", where, left.get("seed"), row.seed)
+        record.exact(layer, "bootstrap.valid", where, left.get("valid"), row.valid)
+        if not row.valid or not left.get("valid"):
+            record.exact(layer, "bootstrap.note（无效类别）", where, b_note_class(left.get("note")),
+                         b_note_class(row.note))
+        if row.valid and left.get("valid"):
+            record.exact(layer, "bootstrap.p（精确）", where, b_float(left.get("p")), row.p_value)   # 换算后仍精确
+            b_number(record, layer, "bootstrap.q025", where, left.get("q025"), row.low)
+            b_number(record, layer, "bootstrap.q975", where, left.get("q975"), row.high)
+        for name in ("tail_count", "delta_star", "tail"):
+            if name in left:
+                record.add(layer, f"bootstrap.{name}", "未比较", where, None, None, B_NOT_PROVIDED)
+
+
+B_PERCENT = re.compile(r"[+-]?\d+(?:\.\d+)?(?=%)")
+B_N_TEXT = re.compile(r"n = (\d+)")
+B_TEXT_UNREGISTERED = "未比较（工具文字格式未登记）"
+
+
+def b_tool_own_loss(text: str, tool: Mapping) -> tuple[str, list]:
+    """补充一第一节第 5 条工具侧：按出现顺序取所有“数字%”，须恰为 4 个，依次对应候选、参照、一直持有的自身收益
+    (exp(lnW) − 1)·100 与年化相对净值增长率 annual_relative_growth·100（顺序取自工具实际输出，未见登记文档）；
+    每个数字须等于本侧数值按文字所示小数位四舍五入的结果；“n = ”后的整数须等于工具 n。
+    返回（状态, 明细）：取不出 4 个数字或无 n → 未比较；取出但不符 → 不一致；全部相符 → 一致。"""
+    numbers = B_PERCENT.findall(text)
+    found_n = B_N_TEXT.search(text)
+    if len(numbers) != 4 or found_n is None:
+        return "未比较", [numbers, None if found_n is None else found_n.group(1)]
+    lnw = tool.get("lnW") or {}
+    values = [math.expm1(float(lnw.get(name))) * 100 if lnw.get(name) is not None else None
+              for name in ("candidate", "reference", "hold")]
+    growth = tool.get("annual_relative_growth")
+    values.append(None if growth is None else float(growth) * 100)
+    checks = []
+    for shown, value in zip(numbers, values, strict=True):
+        places = len(shown.split(".")[1]) if "." in shown else 0
+        rounded = None if value is None else Decimal(repr(value)).quantize(Decimal(1).scaleb(-places), ROUND_HALF_UP)
+        checks.append([shown, None if rounded is None else str(rounded), rounded is not None
+                       and Decimal(shown) == rounded])
+    n_ok = int(found_n.group(1)) == tool.get("n")
+    checks.append(["n = " + found_n.group(1), tool.get("n"), n_ok])
+    return ("一致" if all(item[2] for item in checks) else "不一致"), checks
+
+
+def compare_b_own_loss(record: Recorder, tool_text: object, tool: Mapping, project_text: str | None,
+                       project_expected: str | None) -> None:
+    """设计第二节第 15 项与补充一第一节第 5 条：null 与否、“相对参照少亏”有无精确比较；项目侧文字与
+    own_result_text 重算逐字相等；工具侧文字中的数字与工具本侧数值核对。不互比两侧舍入文字。"""
+    layer = "检验层"
+    record.exact(layer, "own_loss_text 是否为 null", "own_loss_text", tool_text is None, project_text is None)
+    if tool_text is None or project_text is None:
+        return
+    record.exact(layer, "own_loss_text “相对参照少亏”有无", "own_loss_text", "相对参照少亏" in str(tool_text),
+                 "相对参照少亏" in project_text)
+    record.exact(layer, "own_result ↔ own_result_text 重算（项目侧）", "own_result", project_expected, project_text)
+    status, checks = b_tool_own_loss(str(tool_text), tool)
+    record.add(layer, "own_loss_text 文字与工具本侧数值（工具侧）", status, "own_loss_text", str(tool_text), checks,
+               B_TEXT_UNREGISTERED if status == "未比较" else "")
+
+
+def b_accept_error(name: str, message: str) -> bool:
+    """设计第六节第 6 条：只有 confirm_空窗口_later 允许捕获 ResearchRunError，且消息须恰为登记原文。"""
+    return name == B_LATER_SCENARIO and message == B_LATER_MESSAGE
+
+
+def b_invalid_conclusion_ok(tool_text: object, project_text: str) -> bool:
+    """设计第二节第 14 项：无效结果的列明映射——工具“计算无效”或“计算无效，不写任何优劣结论”↔ 项目“计算无效”。"""
+    return tool_text in B_TOOL_INVALID_CONCLUSIONS and project_text == confirmatory.INVALID
+
+
+def b_mapped_warnings(tool_texts: Sequence[str]) -> list[str]:
+    """设计第二节第 11 项：工具警示文字按三条映射换为项目常量；表外文字原样保留（集合比较时即不相等）。"""
+    return sorted(B_WARNINGS.get(text, text) for text in tool_texts)
+
+
+B_STOP_REQUIRED = ("tool", "kind", "name", "exit_code", "stop_reason.reason", "stop_reason.detail")
+B_STOP_OPTIONAL = ("sub_reason", "n", "j0_index", "E_index")
+
+
+def compare_b_common_top(record: Recorder, tool: Mapping, scenario: Mapping) -> None:
+    """《接线 B 全量》第一节第 1 条：共同顶层键在停止／完成分支之前比较，所有场景都记状态——tool 与登记值
+    NEW_TOOL_VERSION 精确（补充一第一节第 3 条）；kind、name 与场景精确。缺键即不一致。"""
+    for key, expected in (("tool", NEW_TOOL_VERSION), ("kind", scenario["kind"]), ("name", scenario["name"])):
+        if key in tool:
+            record.exact("顶层键", key, key, tool[key], expected)
+        else:
+            record.add("顶层键", f"{key}（缺键）", "不一致", key, None, expected)
+
+
+def compare_b_stop_keys(record: Recorder, tool: Mapping) -> dict:
+    """《接线 B 全量》第一节第 2 条：停止类（退出码 3）工具输出必须有 tool、kind、name、exit_code、
+    stop_reason{reason, detail}，缺任一记不一致（缺键）；sub_reason、n、j0_index、E_index 为可有键，有则返回原值供记录。
+    不对停止类要求 params、registered_settings、input_checks 等；不改接口差异映射。"""
+    for path in B_STOP_REQUIRED:
+        record.check("顶层键", f"停止类必需键 {path}", b_has(tool, path), path, b_has(tool, path), True)
+    reason = tool.get("stop_reason") if isinstance(tool.get("stop_reason"), Mapping) else {}
+    return {key: reason[key] for key in B_STOP_OPTIONAL if key in reason}
+
+
+def compare_b_top(record: Recorder, tool: Mapping, scenario: Mapping, candidate: Candidate) -> None:
+    """设计第二节第 2 小节顶层键中完成类专有的两项：params 精确；registered_settings 须为 true，否则不一致。
+    tool、kind、name 已由 compare_b_common_top 在分支之前比较。"""
+    record.exact("顶层键", "params", "params", tool.get("params"), group_key(candidate))
+    record.exact("顶层键", "registered_settings", "registered_settings", tool.get("registered_settings"), True)
+
+
+def compare_b_confirm(record: Recorder, tool: Mapping, scenario: Mapping, candidate: Candidate,
+                      result: research_run.WindowResult, data: confirmatory.ConfirmatoryInput,
+                      outcome: confirmatory.ConfirmatoryResult, premise: Mapping[str, bool]) -> None:
+    """双方均完成时的检验层比较（设计第二节第 2、3 小节）。"""
+    layer = "检验层"
+    tool_valid = tool.get("valid")
+    required = B_REQUIRED_INVALID if tool_valid is False else (*B_REQUIRED_INVALID, *B_OPTIONAL_INVALID)
+    for key in required:
+        if key not in tool:
+            record.add(layer, f"{key}（应存在而缺键）", "不一致", key, None, None)
+    compare_b_top(record, tool, scenario, candidate)
+    # 有效性与原因
+    record.exact(layer, "valid", "valid", tool_valid, outcome.valid)
+    common = result.common
+    events = dict(common.events) if common is not None else {}
+    item = result.candidates[candidate]
+    if not outcome.valid:
+        nav = item.outcome.signal_nav
+        missing = nav.missing if isinstance(nav, research_run.Unavailable) else ()
+        compare_b_reasons(record, list(tool.get("invalid_reasons") or []), outcome.reason, missing, events,
+                          dict(item.r2))
+    elif tool.get("invalid_reasons"):
+        record.add(layer, "invalid_reasons（项目有效而工具列出原因）", "不一致", "invalid_reasons",
+                   tool.get("invalid_reasons"), None)
+    # n 与类别、结论
+    ok, value = b_pair(record, layer, "n", tool, "n", outcome.n, tool_valid, True)
+    if ok:
+        record.exact(layer, "n", "n", value, outcome.n)
+    if outcome.valid:
+        record.exact(layer, "category", "category", tool.get("category"), outcome.category)
+        record.exact(layer, "conclusion（有效结果精确）", "conclusion", tool.get("conclusion"), outcome.conclusion)
+    else:
+        record.check(layer, "category（计算无效 ↔ valid=False）", tool.get("category") == confirmatory.INVALID,
+                     "category", tool.get("category"), outcome.category)
+        record.check(layer, "conclusion（无效结果按列明映射）",
+                     b_invalid_conclusion_ok(tool.get("conclusion"), outcome.conclusion), "conclusion",
+                     tool.get("conclusion"), outcome.conclusion)
+    # 数值（第 4 项）与 lnW
+    for name, mine in (("delta", outcome.delta), ("delta_min", outcome.delta_min),
+                       ("annual_relative_growth", outcome.annual_growth)):
+        ok, value = b_pair(record, layer, name, tool, name, mine, tool_valid, outcome.valid)
+        if ok:
+            b_number(record, layer, name, name, value, mine)
+    ok, value = b_pair(record, layer, "lnW", tool, "lnW", data.candidate_log_wealth, tool_valid, outcome.valid)
+    if ok:
+        for name, mine in (("candidate", data.candidate_log_wealth), ("reference", data.reference_log_wealth),
+                           ("hold", data.hold_log_wealth)):
+            b_number(record, layer, f"lnW.{name}", name, (value or {}).get(name), mine)
+    # 自助法
+    rows = () if outcome.main is None else (outcome.main, *outcome.sensitivities)
+    ok, value = b_pair(record, layer, "bootstrap", tool, "bootstrap", rows or None, tool_valid, outcome.valid)
+    if ok:
+        compare_b_bootstrap(record, list(value or []), rows)
+    # R1、R2
+    if "r1" in tool:
+        compare_b_r1(record, group_key(candidate), tool, item.r1)          # 补充二：先判断子键是否存在
+    elif tool_valid is True:
+        record.add("R1", "r1（缺键）", "不一致", "r1")
+    else:
+        record.add("R1", "r1", "未比较", "r1", note=B_TOOL_EARLY)
+    if "r2" in tool:
+        compare_b_r2(record, group_key(candidate), tool, item.r2, premise)  # 补充二：先判断子键是否存在
+    ok, value = b_pair(record, layer, "r2_ok", tool, "r2_ok", True, tool_valid, True)
+    if ok:
+        record.exact(layer, "r2_ok ↔ all(r2[a] is True)", "r2_ok", value,
+                     bool(data.r2) and all(flag is True for flag in data.r2.values()))
+    # 判断（第 10 项）
+    for name, mine in (("unstable", outcome.unstable if outcome.valid else None),
+                       ("judgement_test_pass", outcome.improvement_passed),
+                       ("judgement_point_estimate", outcome.magnitude_reached)):
+        ok, value = b_pair(record, layer, name, tool, name, mine, tool_valid, outcome.valid)
+        if ok:
+            record.exact(layer, name, name, value, mine)
+    # 警示（第 11 项）
+    ok, value = b_pair(record, layer, "warnings", tool, "warnings", outcome.warnings if outcome.valid else None,
+                       tool_valid, outcome.valid)
+    if ok:
+        record.exact(layer, "warnings（文字映射后集合）", "warnings",
+                     b_mapped_warnings(value or []), sorted(outcome.warnings))
+    # 前后两半（第 12 项）
+    ok, value = b_pair(record, layer, "halves", tool, "halves", outcome.halves, tool_valid, outcome.valid)
+    if ok:
+        halves = value if isinstance(value, Mapping) else {}
+        b_number(record, layer, "halves.first", "first", halves.get("first"), outcome.halves[0])
+        b_number(record, layer, "halves.second", "second", halves.get("second"), outcome.halves[1])
+        record.exact(layer, "halves.consistent", "consistent", halves.get("consistent"),
+                     confirmatory.halves_consistent(*outcome.halves))
+    # 事件置零（第 13 项）
+    ok, value = b_pair(record, layer, "event_zeroing", tool, "event_zeroing",
+                       outcome.zeroed if outcome.valid else None, tool_valid, outcome.valid)
+    if ok:
+        compare_b_zeroing(record, list(value or []), outcome.zeroed, events, data.first_signal_day)
+    # 自身亏损措辞（第 15 项）
+    ok, value = b_pair(record, layer, "own_loss_text", tool, "own_loss_text",
+                       outcome.own_result if outcome.valid else None, tool_valid, outcome.valid)
+    if ok:
+        expected = (confirmatory.own_result_text(data, outcome.delta, outcome.annual_growth)
+                    if outcome.delta is not None and outcome.annual_growth is not None else None)
+        compare_b_own_loss(record, value, tool, outcome.own_result, expected)
+    # 逐日净值路径（第 16 项）
+    record.add(layer, "候选、参照、一直持有逐日净值路径", "未比较", "场景",
+               note="未比较（工具 confirm 接口未输出逐日路径）")
+
+
+# ---------------------------------------------------------------------------
+# 第二轮 B 补充二：复用 A 映射时的缺键一次清理（《接线 B 试跑 补充二》c82982ef…5162 第一节）。
+# 在 B 调用 A 比较函数之前统一判断键是否存在；A 的比较函数与 A 路径行为不变。
+# 清理表（映射项 → 工具键路径）：键在 confirm 输出中存在 → 照 A 比较；
+# 不存在 → 记“未比较（工具 confirm 接口未输出 <键>）”。
+# ---------------------------------------------------------------------------
+
+B_ABSENT = "未比较（工具 confirm 接口未输出 {key}）"
+# 输入层（compare_input_layer）各项读取的工具键路径。“入口停止（缺少必需价格）”在 added_dates 非空时只靠 added_dates。
+B_INPUT_KEYS = {
+    "截止日以内原始轴": ("input_checks.raw_axis",),
+    "截止日之后": ("input_checks.post_cutoff.status",),
+    "派生轴（无整行缺失）": ("input_checks.derived_axis", "input_checks.added_dates"),
+    WHOLE_ROW_ITEM: ("input_checks.added_dates", "input_checks.derived_axis"),
+    "SPX 缺价日期集合": ("inputs",),
+    "QQQ 缺价日期集合": ("inputs",),
+    "入口停止": ("stop_reason.reason",),
+    "入口停止：CSV 入口 ↔ 工具 stop_reason（输入校验失败）": ("exit_code", "stop_reason.reason"),
+    "入口停止（缺少必需价格）": ("exit_code", "inputs", "stop_reason.reason"),
+}
+B_R1_KEYS = ("r1.computable", "r1.ok", "r1.mdd_signal", "r1.mdd_hold")          # ratio、segments 由 A 按“有则记”处理
+B_R2_KEYS = ("events", "counts", "denominator", "passed", "new_only", "computable", "ratio_ok",
+             "excluding_insufficient")
+B_R2_EVENT_KEYS = ("P", "category", "first_new", "exec_idx", "offset_vs_T3", "peak_new_uncertain",
+                   "first_new_confirmable")
+
+
+def b_has(tool: Mapping, path: str) -> bool:
+    """工具输出中键路径是否存在（逐层判断 Mapping 与键）；不以缺键推出取值。"""
+    node: object = tool
+    for part in path.split("."):
+        if not isinstance(node, Mapping) or part not in node:
+            return False
+        node = node[part]
+    return True
+
+
+def b_absent_keys(tool: Mapping, paths: Sequence[str]) -> list[str]:
+    return [path for path in paths if not b_has(tool, path)]
+
+
+def compare_b_input_layer(record: Recorder, tool: Mapping, facts: InputFacts, cutoff_text: str,
+                          evidence: AxisEvidence | None) -> None:
+    """补充二第一节第 1、2 条：在独立的记录器中调用 A 的 compare_input_layer，再逐项转入；该项所读的工具键在 confirm
+    输出中不存在时改记“未比较（工具 confirm 接口未输出 <键>）”，不以缺键推出取值。A 的函数不改。"""
+    sandbox = Recorder(limit=10_000)
+    compare_input_layer(sandbox, tool, facts, cutoff_text, evidence)
+    added = (tool.get("input_checks") or {}).get("added_dates") if b_has(tool, "input_checks.added_dates") else None
+    for (layer, item, status), count in sandbox.counts.items():
+        paths = B_INPUT_KEYS.get(item, ())
+        if item == "入口停止（缺少必需价格）" and added:
+            paths = ("exit_code", "input_checks.added_dates", "stop_reason.reason")
+        absent = b_absent_keys(tool, paths)
+        details = [entry for entry in sandbox.details if (entry["layer"], entry["item"], entry["status"]) ==
+                   (layer, item, status)]
+        if absent:
+            for index in range(count):
+                entry = details[index] if index < len(details) else {}
+                record.add(layer, item, "未比较", entry.get("where", "场景"), None, entry.get("project"),
+                           B_ABSENT.format(key="、".join(absent)))
+            continue
+        for index in range(count):
+            entry = details[index] if index < len(details) else {}
+            record.add(layer, item, status, entry.get("where", ""), entry.get("tool"), entry.get("project"),
+                       entry.get("note", ""))
+
+
+def compare_b_r1(record: Recorder, key: str, tool: Mapping, mine: object) -> None:
+    """R1：r1 的四个必读子键齐全才照 A 比较；缺任一键则逐键记未比较。r1 整体缺失由 B 两阶段规则处理。"""
+    absent = b_absent_keys(tool, B_R1_KEYS)
+    if absent:
+        for path in absent:
+            record.add("R1", path, "未比较", key, None, None, B_ABSENT.format(key=path))
+        return
+    compare_r1(record, key, {"r1": tool["r1"]}, mine)
+
+
+def compare_b_r2(record: Recorder, key: str, tool: Mapping, results: Mapping, premise: Mapping[str, bool]) -> None:
+    """R2 判定：工具 r2[资产] 为对象时，对象与各事件的必读子键齐全才照 A 比较（A 的 P_B 分支照常）；
+    任一对象缺键则该组 R2 判定逐键记未比较，不调用 A 的比较。r2[资产] 缺键（资产不可得）按 P_B 分支，不属此列。"""
+    tool_r2 = tool.get("r2") or {}
+    absent = []
+    for asset, value in tool_r2.items():
+        if isinstance(value, Mapping):
+            absent += [f"r2.{asset}.{name}" for name in B_R2_KEYS if name not in value]
+            for index, event in enumerate(value.get("events") or []):
+                absent += [f"r2.{asset}.events[{index}].{name}" for name in B_R2_EVENT_KEYS
+                           if not isinstance(event, Mapping) or name not in event]
+    if absent:
+        for path in absent:
+            record.add("R2 判定", path, "未比较", key, None, None, B_ABSENT.format(key=path))
+        return
+    compare_r2_judgements(record, key, {"r2": tool_r2}, results, premise)

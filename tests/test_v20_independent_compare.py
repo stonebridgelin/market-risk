@@ -182,7 +182,10 @@ def run_parameters(kind: str, name: str, scenario: Path, tool_out: Path, source:
                                            "PYTHONDONTWRITEBYTECODE": "1"}}
 
 
-def run_tool(scenario: Path, tool_out: Path) -> tuple[int, float, str]:
+def run_tool(scenario: Path, tool_out: Path, AUDIT: Path = AUDIT, TOOL_ROOT: Path = TOOL_ROOT
+             ) -> tuple[int, float, str]:
+    """A 默认用旧工具；第二轮 B 显式传入 NEW_TOOL 的 audit_v20.py 与工作树。
+    子进程语句原文不变，沿用隔离检查已登记的例外（按函数名与语句原文匹配）。"""
     environment = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONDONTWRITEBYTECODE": "1"}
     started = time.perf_counter()
     done = subprocess.run([sys.executable, str(AUDIT), str(scenario), str(tool_out)], cwd=TOOL_ROOT,
@@ -437,6 +440,153 @@ def test_summary() -> None:
                      f"{counts.get('接口差异', 0)} | {counts.get('窗口末日边界', 0)} |")
     support.put_bytes(out / "汇总.md", ("\n".join(lines) + "\n").encode("utf-8"))
     assert totals.get("不一致", 0) == 0
+
+
+# ---------------------------------------------------------------------------
+# 第二轮 B：确认性检验的构造场景比对（《第二轮 B 设计（修订二）》；《接线 B 试跑》）。
+# V20_COMPARE_B == "1" 且 V20_COMPARE_OUT 已设置时才参数化 69 个场景，否则参数化为空、不读取任何外部材料。
+# B 运行中 V20_COMPARE_FROM、V20_COMPARE_A2、V20_COMPARE_TOOL_FROM 必须未设置。
+# ---------------------------------------------------------------------------
+
+B_ENV = "V20_COMPARE_B"
+B_ROOT = Path(r"C:\Users\stone\Downloads\v20_独立工具导出_B")
+B_MANIFEST = B_ROOT / "manifest.json"
+B_MANIFEST_SHA256 = "6c40a794d811a8840672d58d05cb2c76ef6f2cf1466acb925e6113225d9654bb"
+B_LISTING_SHA256 = "ca6667103fe2a64baf3c6b446bd05ab1f732bd6495e448d7741501a8d166546f"
+NEW_AUDIT = Path(support.NEW_TOOL.root) / AUDIT_RELATIVE
+
+
+def b_cases() -> list[str]:
+    """manifest 的 69 个名称（按 manifest 顺序）；未设置 V20_COMPARE_B=1 或 V20_COMPARE_OUT 时为空。"""
+    if os.environ.get(B_ENV) != "1" or not os.environ.get(OUT_ENV):
+        return []
+    return [item["name"] for item in support.load_json(B_MANIFEST)["scenarios"]]
+
+
+B_CASES = b_cases()
+
+
+def b_parameters(name: str, scenario: Path, histories: dict, split: str) -> dict:
+    """逐场景记录的运行依据：场景、工具、接线源码、组合层与检验参数；histories、initial、continuity 写入记录。"""
+    return {"kind": "confirm", "scenario": str(scenario),
+            "scenario_sha256": support.sha256(support.get_bytes(scenario)),
+            "audit_sha256": support.sha256(support.get_bytes(NEW_AUDIT)), "tool_commit": support.NEW_TOOL.commit,
+            "tool_root": support.NEW_TOOL.root, "manifest_sha256": support.sha256(support.get_bytes(B_MANIFEST)),
+            "listing_sha256": support.sha256(support.get_bytes(B_ROOT / "清单.md")),
+            "wiring": {path.name: support.sha256(support.get_bytes(path)) for path in WIRING_FILES},
+            "research_run_sha256": support.sha256(support.get_bytes(RESEARCH_RUN)),
+            "histories": {asset: str(day) for asset, day in histories.items()},
+            "initial": "登记初始快照（REGISTERED_CHANNELS、REGISTERED_SYSTEM、REGISTERED_REFERENCE）",
+            "continuity": "COMPLETE_TRADING_AXIS", "purpose": "CONSTRUCTED", "diagnostics": False,
+            "confirm_parameters": {"main": [20, 20261020], "sensitivities": [[10, 20261010], [40, 20261040],
+                                                                          [60, 20261060], [120, 202610120]],
+                                   "resamples": 10_000, "alpha": 0.05, "warning_p": 0.10, "annual_days": 252,
+                                   "minimum_growth": 0.01, "tolerance": 1e-10, "padding": 20, "split": split},
+            "python": sys.version, "env": {OUT_ENV: os.environ.get(OUT_ENV), B_ENV: os.environ.get(B_ENV),
+                                           ONLY_ENV: os.environ.get(ONLY_ENV)}, "name": name}
+
+
+@pytest.mark.parametrize("name", B_CASES, ids=B_CASES)
+def test_b_confirm_case(name: str) -> None:
+    """一个 confirm 场景：核对场景、manifest 与工具哈希 → 子进程运行新工具 → 构造输入与快照 →
+    项目 run_window（构造验收、固定起点、单候选、诊断关闭）→ 未停止时 confirmatory_input → confirmatory_test →
+    出口、对齐断言、各层比较 → 写出记录。"""
+    if os.environ.get(B_ENV) != "1":
+        pytest.skip(f"未设置 {B_ENV}=1：B 比对不运行")
+    out = output_root()
+    if not selected(name):
+        pytest.skip(f"{ONLY_ENV} 未选中")
+    for variable in (FROM_ENV, A2_ENV, TOOL_FROM_ENV):
+        assert variable not in os.environ, f"B 运行中 {variable} 必须未设置"
+    assert support.sha256(support.get_bytes(B_MANIFEST)) == B_MANIFEST_SHA256, "B 场景 manifest 哈希不符"
+    assert support.sha256(support.get_bytes(B_ROOT / "清单.md")) == B_LISTING_SHA256, "B 场景清单哈希不符"
+    assert support.sha256(support.get_bytes(NEW_AUDIT)) == support.NEW_TOOL.audit_sha256, "audit_v20.py 哈希不符"
+    entry = next(item for item in support.load_json(B_MANIFEST)["scenarios"] if item["name"] == name)
+    scenario = B_ROOT / "scenarios" / f"{name}.json"
+    assert support.sha256(support.get_bytes(scenario)) == entry["sha256"], f"{name} 场景文件哈希与 manifest 不符"
+    data = support.load_json(scenario)
+    assert data["kind"] == "confirm", f"{name} 不是 confirm 场景"
+    tool_out = out / "工具输出" / f"{name}.json"
+    tool_out.parent.mkdir(parents=True, exist_ok=True)
+    started = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    exit_code, tool_seconds, stderr = run_tool(scenario, tool_out, NEW_AUDIT, Path(support.NEW_TOOL.root))
+    assert exit_code in (0, 3), f"{name} 工具退出码 {exit_code}：{stderr}"
+    tool = support.load_json(tool_out)
+    project_started = time.perf_counter()
+    record = support.Recorder()
+    # 构造输入（与 A 的 full 同一转换）→ CSV 入口与快照适配路径 → 输入层（沿用 A 映射）
+    cutoff_text = support.scenario_cutoff(data)
+    root = out / "构造输入" / name
+    constructed = support.construct(data, root)
+    cutoff = dt.date.fromisoformat(cutoff_text)
+    assert_decision_dates(data, cutoff)
+    csv = support.csv_entry(constructed, cutoff)
+    adaptation = support.adapt(data, constructed, cutoff_text)
+    evidence = (support.axis_evidence(*support.constructed_axis_inputs(root), cutoff)
+                if needs_axis_evidence(tool) else None)
+    # 补充二：在 B 调用 A 的输入层比较之前统一判断键是否存在（缺键项记未比较）；A 的函数不改。
+    support.compare_b_input_layer(record, tool, support.input_facts(csv, adaptation), cutoff_text, evidence)
+    snapshot = adaptation.snapshot
+    assert snapshot is not None, f"{name} 快照适配路径未构造出快照"
+    axis = snapshot.days
+    candidate = support.confirm_candidate(data)
+    histories = {asset: axis[0] for asset in support.ASSETS}
+    split = dt.date.fromisoformat(data["half_split"])
+    spec = support.research_run.WindowSpec(
+        support.research_run.Purpose.CONSTRUCTED, dt.date.fromisoformat(data["window_start"]), snapshot.day, histories,
+        support.research_run.InitialStates(support.REGISTERED_CHANNELS, support.REGISTERED_SYSTEM,
+                                           support.REGISTERED_REFERENCE),
+        support.research_run.Continuity.COMPLETE_TRADING_AXIS)
+    error, result = None, None
+    try:
+        result = support.research_run.run_window(snapshot, spec, support.confirm_run_parameters(), (candidate,))
+    except support.research_run.ResearchRunError as caught:
+        # 设计第六节第 6 条：只有 confirm_空窗口_later 允许捕获，且消息须恰为登记原文；其他一律停止。
+        assert support.b_accept_error(name, str(caught)), f"{name} 未登记的异常：{type(caught).__name__}：{caught}"
+        error = str(caught)
+    stop = None if result is None else result.stop
+    j0 = (result.window.j0 if result is not None and result.window is not None
+          else (stop.detail.get("j0_index") if stop is not None else None))
+    facts = support.b_start_facts(snapshot, candidate) if (stop is not None or tool.get("exit_code") == 3) else None
+    support.compare_b_common_top(record, tool, data)                       # 《接线 B 全量》第一节第 1 条：分支之前
+    stop_optional = support.compare_b_stop_keys(record, tool) if tool.get("exit_code") == 3 else None
+    case = support.compare_b_exit(record, tool, stop, error, axis, j0, facts)
+    extra: dict = {"出口情形": case, "起点依据": facts, "工具 stop_reason": tool.get("stop_reason"),
+                   "停止类可有键原值": stop_optional,
+                   "项目 stop": None if stop is None else {"exit": stop.exit.value,
+                                                           "exception_type": stop.exception_type,
+                                                           "message": stop.message, "detail": dict(stop.detail)},
+                   "项目异常": None if error is None else {"type": "ResearchRunError", "message": error},
+                   "自洽": "无第一轮基准（B 场景无第一轮同名组合层记录；确认性检验在第一轮双方均未运行）"}
+    if case == "双方均完成":
+        assert result is not None and result.window is not None
+        confirm_data = support.research_run.confirmatory_input(result, candidate, support.B_PERIOD)
+        outcome = support.confirmatory.confirmatory_test(confirm_data, support.confirm_parameters(split))
+        alignment = support.b_alignment(data, axis, j0, confirm_data, split, tool)
+        extra["对齐断言"] = alignment
+        assert all(value is not False for value in alignment.values()), f"{name} 对齐断言不成立：{alignment}"
+        premise = support.b_premise(tool, result.common.events)
+        extra["P_B"] = premise
+        support.compare_b_confirm(record, tool, data, candidate, result, confirm_data, outcome, premise)
+        if outcome.valid:                                                    # 第一节第 4 条：p 原值，便于复算
+            rows = (outcome.main, *outcome.sensitivities)
+            extra["p 原值"] = {"项目": {str(row.block): row.p_value for row in rows},
+                              "工具": {str(item.get("b")): str(item.get("p")) for item in tool.get("bootstrap") or []}}
+        extra["项目检验"] = {"valid": outcome.valid, "reason": outcome.reason, "n": outcome.n,
+                          "category": outcome.category, "conclusion": outcome.conclusion}
+    project_seconds = time.perf_counter() - project_started
+    counts = {status: record.total(status) for status in support.B_STATUSES}
+    counts["窗口末日边界"] = record.window_end()
+    payload = {"name": name, "kind": "confirm", "parameters": b_parameters(name, scenario, histories,
+                                                                          data["half_split"]),
+               "started": started, "tool_exit_code": exit_code, "tool_seconds": round(tool_seconds, 3),
+               "project_seconds": round(project_seconds, 3),
+               "tool_output_sha256": support.sha256(support.get_bytes(tool_out)), "counts": counts,
+               "by_layer": {layer: items for layer, items in record.summary().items()}, "details": record.details,
+               "evidence": extra}
+    record_path = out / "逐场景比对" / f"{name}.json"
+    support.put_bytes(record_path, support.dump_json(payload))
+    assert counts["不一致"] == 0, f"{name} 有 {counts['不一致']} 处不一致，见 {record_path}"
 
 
 # ---------------------------------------------------------------------------
@@ -1081,3 +1231,340 @@ def test_wiring_a3r_ledger_structure_requires_keys() -> None:
         support.compare_ledgers(record, "构造组", {"ledger": ledger}, {"SPX": None, "QQQ": None}, premise,
                                 support.SOURCE_THIRD)
         assert record.summary()["提示段账"][support.LEDGER_STRUCTURE_ITEM] == expected
+
+
+# ---------------------------------------------------------------------------
+# 第二轮 B 接线自检（《接线 B 试跑》第一节第 8 条；纯内存构造，不读场景文件、不跑子进程）。
+#
+# 已覆盖 / 未覆盖分支表：
+# | 分支 | 覆盖用例 |
+# | 1 原因匹配：类别 + 对象 + 缺价日期全同才一致；多报记未比较；找不到不一致；净值 / 标签史按 object 区分 |
+# |   | test_wiring_b_reason_matching |
+# | 1 原因：主设定 n ÷ b < 2、d_j 非有限（工具侧登记文字、无 object） | test_wiring_b_reason_exact_without_object |
+# | 1 原因：R2 非左截断事件为 0 个、对账不符 | 未覆盖（无自检；若试跑触发，以实际记录检验） |
+# | 补充一 1 Decimal 换算：容差规则与 p 精确 | test_wiring_b_decimal_numbers |
+# | 补充一 2 / 补充二 1 工具 confirm 无 inputs → 缺价日期集合与入口停止（缺价）未比较 |
+#   | test_wiring_b_absent_inputs |
+# | 补充二 2 清理表各类不存在的键（stop_reason、input_checks、r1、r2 子键、事件子键） |
+#   | test_wiring_b_absent_key_classes |
+# | 补充一 5 own_loss_text：一致 / 不一致 / 未比较（文字格式未登记） | test_wiring_b_own_loss_text |
+# | 2 两阶段：提前返回缺键 → 未比较；项目短路 → 未比较；无“项目 None + 工具缺键 → 一致”；应存在而缺键 → 不一致 |
+# |   | test_wiring_b_two_phase_pairs |
+# | 3 P_B(a) 三条件；工具 r2 缺键单独不构成不可得 | test_wiring_b_premise |
+# | 4 无效结论两种文字 ↔ 计算无效；其他文字不放宽 | test_wiring_b_invalid_conclusion |
+# | 5 警示三条映射；集合不等即不一致 | test_wiring_b_warnings |
+# | 6 浮点容差内而类别或判断不同 → 不一致 | test_wiring_b_tolerance_does_not_mask_judgement |
+# | 7 p 精确、n 精确 | test_wiring_b_p_and_n_exact |
+# | 8 出口四条接口差异、未登记组合、D15 条件缺一不成立 | test_wiring_b_exits |
+# | 9 ResearchRunError 只在指定场景、指定原文时接受 | test_wiring_b_accept_error |
+# | 10 registered_settings = false → 不一致 | test_wiring_b_registered_settings |
+# | 全量 1 停止类顶层键前置与必需键 | test_wiring_b_stop_class_top_keys |
+# | 全量 3 b 集合按数值排序的区分性 | test_wiring_b_bootstrap_numeric_order |
+# | 事件置零集合与自助法逐行比较（compare_b_zeroing、compare_b_bootstrap） | 未覆盖（由试跑实际记录检验） |
+# | compare_b_confirm 整体流程、b_alignment | 未覆盖（需要窗口结果，由试跑实际记录检验） |
+# ---------------------------------------------------------------------------
+
+
+def test_wiring_b_reason_matching() -> None:
+    """净值缺价：类别、对象、缺价日期全同才一致，工具多报的 R2 原因记未比较；日期不同或只有 R2 对象 → 不一致。"""
+    day = dt.date.fromisoformat(DAYS[2])
+    nav = [{"reason": "缺少必需价格", "object": "净值", "missing": [["SPX", DAYS[2]]]}]
+    labels = [{"reason": "缺少必需价格", "object": "R2 SPX", "missing_days": [DAYS[2]]}]
+    reason = "净值所需价格缺失，收益无法计算"
+    record = support.Recorder()
+    support.compare_b_reasons(record, nav + labels, reason, [("SPX", day)], {}, {})
+    assert record.total("一致") == 1 and record.total("不一致") == 0
+    assert record.summary()["检验层"]["invalid_reasons（工具多报原因）"] == {"未比较": 1}
+    record = support.Recorder()
+    support.compare_b_reasons(record, [{**nav[0], "missing": [["SPX", DAYS[3]]]}], reason, [("SPX", day)], {}, {})
+    assert record.total("不一致") == 1                                         # 缺价日期不同
+    record = support.Recorder()
+    support.compare_b_reasons(record, labels, reason, [("SPX", day)], {}, {})
+    assert record.total("不一致") == 1                                         # 标签史缺价不能顶替净值缺价
+    record = support.Recorder()
+    support.compare_b_reasons(record, nav, "R1 无法计算", [], {}, {})
+    assert record.summary()["检验层"]["invalid_reasons（项目原因不在映射表内）"] == {"不一致": 1}
+
+
+def test_wiring_b_two_phase_pairs() -> None:
+    """两阶段：工具提前返回缺可不存在键 → 未比较；工具已算而项目短路 → 未比较；不存在“项目 None + 工具缺键 → 一致”；
+    工具有效而缺应存在键 → 不一致。"""
+    record = support.Recorder()
+    assert support.b_pair(record, "检验层", "delta", {}, "delta", None, False, False) == (False, None)
+    assert support.b_pair(record, "检验层", "delta", {"delta": 0.1}, "delta", None, False, False) == (False, 0.1)
+    assert record.summary()["检验层"]["delta"] == {"未比较": 2}
+    assert [item["note"] for item in record.details] == [support.B_TOOL_EARLY, support.B_PROJECT_SHORT]
+    assert record.total("一致") == 0
+    record = support.Recorder()
+    support.b_pair(record, "检验层", "delta", {}, "delta", None, True, True)
+    assert record.summary()["检验层"]["delta（缺键）"] == {"不一致": 1}
+
+
+def test_wiring_b_premise() -> None:
+    """P_B(a)：项目 labels_r2 缺价不可得 ∧ 工具 invalid_reasons 有 {R2 QQQ, 缺少必需价格, 同缺价日}
+    ∧ 工具 r2 无 QQQ 键。"""
+    events = {"SPX": (), "QQQ": unavailable_qqq()}
+    reasons = [{"reason": "缺少必需价格", "object": "R2 QQQ", "missing_days": [DAYS[1]]}]
+    assert support.b_premise({"invalid_reasons": reasons, "r2": {"SPX": {}}}, events) == {"SPX": False, "QQQ": True}
+    assert support.b_premise({"invalid_reasons": reasons, "r2": {"QQQ": {}}}, events)["QQQ"] is False
+    assert support.b_premise({"invalid_reasons": [], "r2": {}}, events)["QQQ"] is False
+    assert support.b_premise({"invalid_reasons": reasons, "r2": {}}, {"SPX": (), "QQQ": ()})["QQQ"] is False
+
+
+def test_wiring_b_invalid_conclusion() -> None:
+    """无效结论：工具两种文字 ↔ 项目“计算无效”；其他文字不放宽。"""
+    assert support.b_invalid_conclusion_ok("计算无效", "计算无效")
+    assert support.b_invalid_conclusion_ok("计算无效，不写任何优劣结论", "计算无效")
+    assert not support.b_invalid_conclusion_ok("计算无效。", "计算无效")
+    assert not support.b_invalid_conclusion_ok("计算无效", "未证明长期收益优于参照规则")
+
+
+def test_wiring_b_warnings() -> None:
+    """警示文字三条映射；映射后集合不等即不一致。"""
+    tool = ["敏感性区块下 p ≥ 0.10", "前后两半的 Δ 方向不一致", "事件窗口置零后不再为正"]
+    mine = [support.confirmatory.WARNING_SENSITIVITY, support.confirmatory.WARNING_HALVES,
+            support.confirmatory.WARNING_ZEROING]
+    assert support.b_mapped_warnings(tool) == sorted(mine)
+    record = support.Recorder()
+    record.exact("检验层", "warnings", "场景", support.b_mapped_warnings(tool[:2]), sorted(mine))
+    assert record.total("不一致") == 1
+
+
+def test_wiring_b_tolerance_does_not_mask_judgement() -> None:
+    """浮点“容差内”而类别不同：容差内单列、类别记不一致（触发停止）；超出容差即不一致。"""
+    record = support.Recorder()
+    assert support.b_number(record, "检验层", "delta", "场景", 0.1, 0.1 + 1e-15) == support.TOLERANCE_STATUS
+    record.exact("检验层", "category", "category", "A", "B")
+    assert record.total(support.TOLERANCE_STATUS) == 1 and record.total("不一致") == 1 and record.total("一致") == 0
+    assert support.b_number(support.Recorder(), "检验层", "delta", "场景", 0.1, 0.1 + 1e-9) == "不一致"
+    assert support.b_number(support.Recorder(), "检验层", "delta", "场景", 0.1, 0.1) == "一致"
+
+
+def test_wiring_b_p_and_n_exact() -> None:
+    """p 精确（不用容差）；n 精确。"""
+    record = support.Recorder()
+    support.compare_b_bootstrap(record, [{"b": 20, "seed": 20261020, "valid": True, "p": 0.04, "q025": -0.1,
+                                          "q975": 0.1}],
+                                [support.confirmatory.BootstrapRow(20, 20261020, True, 0.04 + 1e-15, -0.1, 0.1, "")])
+    assert record.summary()["检验层"]["bootstrap.p（精确）"] == {"不一致": 1}
+    record = support.Recorder()
+    record.exact("检验层", "n", "n", 341, 340)
+    assert record.total("不一致") == 1
+
+
+def test_wiring_b_exits() -> None:
+    """出口：四条接口差异各一例；未登记组合 → 不一致；D15 条件缺一不成立。"""
+    rr = support.research_run
+    axis = [dt.date(2006, 1, 2) + dt.timedelta(days=index) for index in range(300)]
+    e_index = len(axis) - 1
+    unmet = stop_record(rr.Exit.FIXED_START_UNMET, None, None, {"j0_index": e_index})
+    empty = {"exit_code": 3, "stop_reason": {"reason": "评价窗口为空", "sub_reason": "起点等于最后一个收盘日"}}
+    later = {"exit_code": 3, "stop_reason": {"reason": "评价窗口为空", "sub_reason": "起点晚于最后一个收盘日"}}
+    unconverged = {"exit_code": 3, "stop_reason": {"reason": "未收敛"}}
+    cases = [(empty, unmet, None, e_index, None), (later, None, support.B_LATER_MESSAGE, None, None),
+             (unconverged, stop_record(rr.Exit.NOT_CONVERGED, "NotConvergedError", "始终不收敛", {}), None, None, None),
+             (unconverged, unmet, None, 205, {"t0": 199, "kappa": 210})]
+    for tool, stop, error, j0, facts in cases:
+        record = support.Recorder()
+        support.compare_b_exit(record, tool, stop, error, axis, j0, facts)
+        assert record.total("接口差异") == 1 and record.total("不一致") == 0, (tool, j0)
+    record = support.Recorder()
+    support.compare_b_exit(record, {"exit_code": 3, "stop_reason": {"reason": "计算失败"}}, None, None, axis, 220, None)
+    assert record.summary()["出口"][support.B_UNREGISTERED_EXIT] == {"不一致": 1}
+    record = support.Recorder()
+    support.compare_b_exit(record, {"exit_code": 0}, unmet, None, axis, 220, {"t0": 199, "kappa": 210})
+    assert record.total(support.D15_STATUS) == 1 and record.total("不一致") == 0
+    for j0, facts in ((220, {"t0": 199, "kappa": None}), (262, {"t0": 199, "kappa": 210}),
+                      (205, {"t0": 199, "kappa": 210}), (220, None)):
+        record = support.Recorder()
+        support.compare_b_exit(record, {"exit_code": 0}, unmet, None, axis, j0, facts)
+        assert record.total(support.D15_STATUS) == 0 and record.total("不一致") == 1, (j0, facts)
+
+
+def test_wiring_b_accept_error() -> None:
+    """ResearchRunError 只在 confirm_空窗口_later、且消息恰为登记原文时接受。"""
+    assert support.b_accept_error("confirm_空窗口_later", "构造验收给出的固定起点须在轴上")
+    assert not support.b_accept_error("confirm_空窗口_equal", "构造验收给出的固定起点须在轴上")
+    assert not support.b_accept_error("confirm_空窗口_later", "构造验收给出的固定起点须在轴上。")
+
+
+def test_wiring_b_registered_settings() -> None:
+    """registered_settings 为 false → 不一致；params 精确（完成类专有）；tool、kind、name 由 compare_b_common_top
+    在分支之前比较（《接线 B 全量》第一节第 1 条），tool 与登记值 NEW_TOOL_VERSION 精确。"""
+    from decimal import Decimal
+
+    from market_risk.wavewarn_v20.convergence import Candidate
+
+    candidate = Candidate(3, Decimal("0.015"), 1)
+    scenario = {"kind": "confirm", "name": "confirm_000"}
+    tool = {"tool": "v20-indep-3", "kind": "confirm", "name": "confirm_000", "params": support.group_key(candidate),
+            "registered_settings": False}
+    record = support.Recorder()
+    support.compare_b_common_top(record, tool, scenario)
+    support.compare_b_top(record, tool, scenario, candidate)
+    summary = record.summary()["顶层键"]
+    assert summary["registered_settings"] == {"不一致": 1}
+    assert summary["tool"] == summary["kind"] == summary["name"] == summary["params"] == {"一致": 1}
+    record = support.Recorder()
+    support.compare_b_common_top(record, {**tool, "tool": "v20-indep-2"}, scenario)
+    assert record.summary()["顶层键"]["tool"] == {"不一致": 1}
+
+
+def stop_class_tool() -> dict:
+    return {"tool": "v20-indep-3", "kind": "confirm", "name": "confirm_空窗口_equal", "exit_code": 3,
+            "stop_reason": {"reason": "评价窗口为空", "detail": "确认性检验窗口内没有可计入收益的区间",
+                            "sub_reason": "起点等于最后一个收盘日", "n": 0}}
+
+
+def test_wiring_b_stop_class_top_keys() -> None:
+    """《接线 B 全量》第一节第 3 条：停止类三项（tool、kind、name）正确值 → 一致；错误值各一例 → 不一致；
+    必需键齐全时必需键检查全一致，可有键返回原值；缺 stop_reason 或缺 name → 不一致。"""
+    scenario = {"kind": "confirm", "name": "confirm_空窗口_equal"}
+    tool = stop_class_tool()
+    record = support.Recorder()
+    support.compare_b_common_top(record, tool, scenario)
+    optional = support.compare_b_stop_keys(record, tool)
+    assert record.total("不一致") == 0 and record.total("一致") == 3 + len(support.B_STOP_REQUIRED)
+    assert optional == {"sub_reason": "起点等于最后一个收盘日", "n": 0}
+    for key, wrong in (("tool", "v20-indep-2"), ("kind", "full"), ("name", "confirm_空窗口_later")):
+        record = support.Recorder()
+        support.compare_b_common_top(record, {**tool, key: wrong}, scenario)
+        assert record.summary()["顶层键"][key] == {"不一致": 1}, key
+    for missing in ("stop_reason", "name"):
+        record = support.Recorder()
+        changed = {k: v for k, v in tool.items() if k != missing}
+        support.compare_b_common_top(record, changed, scenario)
+        support.compare_b_stop_keys(record, changed)
+        assert record.total("不一致") >= 1, missing
+    record = support.Recorder()
+    support.compare_b_stop_keys(record, {**tool, "stop_reason": {"reason": "评价窗口为空"}})
+    assert record.summary()["顶层键"]["停止类必需键 stop_reason.detail"] == {"不一致": 1}
+
+
+def test_wiring_b_bootstrap_numeric_order() -> None:
+    """复核第 1 项：多区块（b = 10、20、120 乱序输入）按数值排序后集合比较一致；按字符串排序会得到 [10, 120, 20]，
+    与数值排序不同，本例能区分两种排序。"""
+    blocks = [120, 10, 20]
+    assert sorted(blocks, key=str) != sorted(blocks)                           # 前提：两种排序结果不同
+    rows = [support.confirmatory.BootstrapRow(block, 20261000 + block, True, 0.5, -0.1, 0.1, "")
+            for block in (10, 20, 120)]
+    tool_rows = [{"b": block, "seed": 20261000 + block, "valid": True, "p": 0.5, "q025": -0.1, "q975": 0.1}
+                 for block in blocks]
+    record = support.Recorder()
+    support.compare_b_bootstrap(record, tool_rows, rows)
+    assert record.summary()["检验层"]["bootstrap 行（b 集合）"] == {"一致": 1}
+    assert record.total("不一致") == 0
+
+
+def test_wiring_b_decimal_numbers() -> None:
+    """补充一第一节第 1 条：工具值为 Decimal 时先 float()：精确相等一致、差在 1e-12 内容差内、超出不一致；
+    p 换算后精确比较：相等一致、差 1e-17 不一致。"""
+    from decimal import Decimal
+
+    record = support.Recorder()
+    assert support.b_number(record, "检验层", "delta", "场景", Decimal("0.13360481864155985"),
+                            0.13360481864155985) == "一致"
+    assert support.b_number(record, "检验层", "delta", "场景", Decimal("0.01220100092709897"),
+                            0.01220100092709896) == support.TOLERANCE_STATUS
+    assert support.b_number(record, "检验层", "delta", "场景", Decimal("0.1"), 0.1 + 1e-9) == "不一致"
+    later = Decimal("0.17518248175182484")
+    assert float(later) != 0.17518248175182483                                  # 前提：差 1e-17 在 float 上可分
+    for tool_p, expected in ((Decimal("0.17518248175182483"), {"一致": 1}), (later, {"不一致": 1})):
+        record = support.Recorder()
+        support.compare_b_bootstrap(record, [{"b": 20, "seed": 20261020, "valid": True, "p": tool_p,
+                                              "q025": Decimal("-0.1"), "q975": Decimal("0.1")}],
+                                    [support.confirmatory.BootstrapRow(20, 20261020, True, 0.17518248175182483, -0.1,
+                                                                       0.1, "")])
+        assert record.summary()["检验层"]["bootstrap.p（精确）"] == expected
+        assert record.summary()["检验层"]["bootstrap 行（b 集合）"] == {"一致": 1}
+
+
+def test_wiring_b_reason_exact_without_object() -> None:
+    """《接线 B 全量 补充一》第一节第 3 条：项目“主设定无效：n ÷ b < 2（n = …）”↔ 工具 reason 精确等于登记的工具侧文字
+    “主设定 n ÷ b < 2”且无 object → 一致；带 object → 不一致；工具文字为项目文字 → 不一致；工具列表无此条 → 不一致。
+    d_j 非有限：工具 reason 精确等于“d_j 出现非有限值”且无 object → 一致；带 object → 不一致。"""
+    reason = "主设定无效：n ÷ b < 2（n = 30）"
+    for entries, expected in (([{"reason": "主设定 n ÷ b < 2"}], (1, 0)),
+                              ([{"reason": "主设定 n ÷ b < 2", "object": "检验"}], (0, 1)),
+                              ([{"reason": reason}], (0, 1)),
+                              ([{"reason": "缺少必需价格", "object": "净值", "missing": []}], (0, 1))):
+        record = support.Recorder()
+        support.compare_b_reasons(record, entries, reason, [], {}, {})
+        assert (record.total("一致"), record.total("不一致")) == expected, entries
+    for entries, expected in (([{"reason": "d_j 出现非有限值"}], (1, 0)),
+                              ([{"reason": "d_j 出现非有限值", "object": "检验"}], (0, 1))):
+        record = support.Recorder()
+        support.compare_b_reasons(record, entries, "d_j 出现非有限值", [], {}, {})
+        assert (record.total("一致"), record.total("不一致")) == expected, entries
+
+
+def b_input_facts(stop_class: str | None = None, missing: dict | None = None) -> object:
+    from types import SimpleNamespace
+
+    return SimpleNamespace(checks={}, snapshot_built=stop_class is None, missing=missing or {}, axis=[],
+                           stop_class=stop_class, stop_reason=None if stop_class is None else "缺少必需价格")
+
+
+B_INPUT_CHECKS = {"raw_axis": [], "post_cutoff": {"status": "未验证"}, "derived_axis": [], "added_dates": []}
+
+
+def test_wiring_b_absent_inputs() -> None:
+    """补充一第一节第 2 条、补充二第一节第 1 条：工具 confirm 输出缺 inputs 时，“入口停止（缺少必需价格）”与两项缺价日期
+    集合均为未比较，不出现一致或不一致；A 的 compare_input_layer 未改（直接调用时照旧按 A 记录）。"""
+    tool = {"exit_code": 0, "input_checks": B_INPUT_CHECKS}
+    record = support.Recorder()
+    support.compare_b_input_layer(record, tool, b_input_facts("MissingPriceEntryError", {"SPX": [DAYS[1]]}), DAYS[-1],
+                                  None)
+    summary = record.summary()["输入层"]
+    for item in ("入口停止（缺少必需价格）", "SPX 缺价日期集合", "QQQ 缺价日期集合"):
+        assert summary[item] == {"未比较": 1}, item
+    assert all("inputs" in entry["note"] for entry in record.details if entry["item"] in summary)
+    record = support.Recorder()
+    support.compare_input_layer(record, tool, b_input_facts("MissingPriceEntryError", {"SPX": [DAYS[1]]}), DAYS[-1])
+    assert record.summary()["输入层"]["入口停止（缺少必需价格）"] == {"不一致": 1}          # A 原样：缺键读成“未见缺价”
+
+
+def test_wiring_b_absent_key_classes() -> None:
+    """补充二第一节第 4 条：清理表中每一类“不存在”至少一例——stop_reason（退出码 0）、input_checks（停止类）、r1 子键、
+    r2[资产] 子键、r2 事件子键，均记未比较，不出现一致或不一致；键齐全时照 A 比较。"""
+    record = support.Recorder()
+    support.compare_b_input_layer(record, {"exit_code": 0, "input_checks": B_INPUT_CHECKS}, b_input_facts(),
+                                  DAYS[-1], None)
+    summary = record.summary()["输入层"]
+    assert summary["入口停止"] == {"未比较": 1}                                         # stop_reason 不存在
+    assert summary["截止日以内原始轴"] == summary["截止日之后"] == {"一致": 1}             # 键存在：照 A
+    record = support.Recorder()
+    support.compare_b_input_layer(record, {"exit_code": 3, "stop_reason": {"reason": "评价窗口为空"}}, b_input_facts(),
+                                  DAYS[-1], None)
+    summary = record.summary()["输入层"]
+    assert summary["截止日以内原始轴"] == summary["截止日之后"] == {"未比较": 1}           # 停止类无 input_checks
+    assert summary["入口停止"] == {"一致": 1}                                            # stop_reason 存在：照 A
+    record = support.Recorder()
+    support.compare_b_r1(record, "构造组", {"r1": {"computable": True, "ok": False, "mdd_signal": 0.1}}, object())
+    assert record.summary()["R1"] == {"r1.mdd_hold": {"未比较": 1}}
+    record = support.Recorder()
+    support.compare_b_r2(record, "构造组", {"r2": {"SPX": {"events": [{"P": DAYS[0]}]}}}, {"SPX": None, "QQQ": None},
+                         {"SPX": False, "QQQ": False})
+    summary = record.summary()["R2 判定"]
+    assert "r2.SPX.counts" in summary and "r2.SPX.events[0].category" in summary
+    assert record.total("一致") == 0 and record.total("不一致") == 0
+
+
+def test_wiring_b_own_loss_text() -> None:
+    """补充一第一节第 5 条：工具文字中的 4 个百分数与 n 和工具本侧数值相符 → 一致；不符 → 不一致；
+    取不出 4 个数字或无 n → 未比较（工具文字格式未登记）。项目侧文字须与 own_result_text 重算逐字相等。"""
+    import math as m
+
+    tool = {"lnW": {"candidate": -0.05, "reference": -0.08, "hold": -0.02}, "annual_relative_growth": 0.031, "n": 120}
+    shown = [f"{m.expm1(v) * 100:+.2f}%" for v in (-0.05, -0.08, -0.02)] + [f"{0.031 * 100:+.2f}%"]
+    good = f"候选自身收益 {shown[0]}，参照 {shown[1]}，一直持有 {shown[2]}；年化相对净值增长率 {shown[3]}（n = 120）"
+    for text, status in ((good, "一致"), (good.replace("n = 120", "n = 121"), "不一致"),
+                         (good.replace(shown[3], "+9.99%"), "不一致"), ("候选自身亏损，参照亏损更多", "未比较"),
+                         (good.replace("（n = 120）", ""), "未比较")):
+        record = support.Recorder()
+        support.compare_b_own_loss(record, text, tool, "项目文字", "项目文字")
+        assert record.summary()["检验层"]["own_loss_text 文字与工具本侧数值（工具侧）"] == {status: 1}, text
+        assert record.summary()["检验层"]["own_result ↔ own_result_text 重算（项目侧）"] == {"一致": 1}
+    record = support.Recorder()
+    support.compare_b_own_loss(record, None, tool, "项目文字", "项目文字")
+    assert record.summary()["检验层"]["own_loss_text 是否为 null"] == {"不一致": 1}
