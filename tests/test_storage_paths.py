@@ -102,3 +102,9 @@ def test_unique_run_id_suffix():
     assert unique_run_id(rid, [rid, rid + "_2"]) == rid + "_3"
     # 带后缀的编号也是合法目录名
     assert P.run_dir(MARKET, RISK_SCORING, D, rid + "_2").name == rid + "_2"
+
+
+def test_v20_research_dir_is_only_computed():
+    """M2 第一部分指令第二节第 8 小节：v20_research_dir 只计算路径，不读写、不建目录。"""
+    assert P.v20_research_dir == ROOT / "reports" / "research" / "wavewarn_v20"
+    assert P.v20_research_dir.parent.parent == P.reports_dir

@@ -372,7 +372,7 @@ def test_assemble_rejects_inconsistent_inputs() -> None:
 
 
 def test_price_parsing_only_happens_after_the_cutoff_check() -> None:
-    source = inspect.getsource(data_v20.parse_rows)
+    source = inspect.getsource(data_v20._scan_rows)
     stop = source.index("if day > cutoff:\n            break")
     assert source.index("parse_source(") > stop and source.index("parse_price(") > stop
     assert source.index("_date_field(line)") < stop and source.index(".decode(") > stop     # 截止日判断之前只取日期字段
@@ -696,3 +696,528 @@ def test_d16_source_comes_from_field_seven_before_the_price(tmp_path: Path) -> N
         read_lines(tmp_path, replaced(12, line8(DAYS[12], "100.00", "tiingo")))
     with pytest.raises(data_v20.DataInputError, match="来源标识不在允许清单内"):
         read_lines(tmp_path, replaced(12, line8(DAYS[12], "", "tiingo")))       # 先来源后价格
+
+
+# ---------------------------------------------------------------------------
+# 阶段四 M2 第一部分（修订二；补充二至补充五）：读取拆分的行为不变证明、结构化缺失证据、前缀诊断读取
+# 设计稿第三节第 1—3 小节；M2 指令第二节第 2 小节。以下只追加，不改上面的任何既有测试。
+# ---------------------------------------------------------------------------
+
+from market_risk.calendar import is_stock_trading_day  # noqa: E402
+
+# 开工版本参照实现：逐字复制开工提交 7123272 中 data_v20 的 parse_rows、check_trading_axis、read_until 函数体，
+# 只把模块内名称写成 data_v20.<名称>（这些被引用的函数在本批未改）。用于判定“与开工版本相同”。
+
+
+def start_parse_rows(raw: bytes, cutoff: dt.date) -> tuple[tuple[dt.date, Decimal, str], ...]:
+    lines = data_v20.physical_lines(raw)
+    data_v20._check_header(lines)
+    rows: list[tuple[dt.date, Decimal, str]] = []
+    pending_blank = False
+    for line in lines[1:]:
+        if data_v20.is_blank(line):
+            pending_blank = True
+            continue
+        day = data_v20._date_field(line)
+        if day > cutoff:
+            break
+        if pending_blank:
+            raise data_v20.DataInputError(f"数据记录之间出现空行：{day} 这一行之前")
+        if rows and day <= rows[-1][0]:
+            raise data_v20.DataInputError(f"日期重复或乱序：{rows[-1][0]} 之后是 {day}")
+        try:
+            fields = line.decode("utf-8").split(",")
+        except UnicodeDecodeError as error:
+            raise data_v20.DataInputError(f"{day} 这一行不是 UTF-8 文本") from error
+        if len(fields) != 8:
+            raise data_v20.DataInputError(f"{day} 这一行不是八个字段")
+        source = data_v20.parse_source(fields[7])
+        rows.append((day, data_v20.parse_price(fields[1]), source))
+        if day == cutoff:
+            break
+    return tuple(rows)
+
+
+def start_check_trading_axis(asset: str, first_day: dt.date, cutoff: dt.date, days) -> None:
+    expected = stock_trading_days(first_day, cutoff)
+    missing = sorted(set(expected) - set(days))
+    extra = sorted(set(days) - set(expected))
+    if missing or extra:
+        parts = []
+        if missing:
+            parts.append("缺少交易日 " + "、".join(str(day) for day in missing))
+        if extra:
+            parts.append("多出非交易日 " + "、".join(str(day) for day in extra))
+        message = f"{asset} 的日期与交易日轴不符：" + "；".join(parts)
+        if extra:
+            raise data_v20.DataInputError(message)
+        raise data_v20.MissingPriceEntryError(message)
+
+
+def start_read_until(path: Path, asset: str, cutoff: dt.date, registered: RegisteredFile, decisions) -> AssetSeries:
+    if registered.asset != asset:
+        raise data_v20.DataInputError(f"登记值属于 {registered.asset}，不是 {asset}")
+    if not is_stock_trading_day(cutoff):
+        raise data_v20.DataInputError(f"截止日 {cutoff} 不是 NYSE 交易日")
+    if cutoff < registered.first_date:
+        raise data_v20.DataInputError(f"截止日 {cutoff} 早于 {asset} 的登记数据覆盖首日 {registered.first_date}")
+    raw = data_v20.read_file_bytes(path)
+    data_v20.verify_registered(data_v20.file_metadata(raw), registered)
+    rows = start_parse_rows(raw, cutoff)
+    start_check_trading_axis(asset, registered.first_date, cutoff, [day for day, _, _ in rows])
+    data_v20.check_corrections(asset, cutoff, rows, decisions)
+    return AssetSeries(asset, registered.first_date, cutoff, {day: price for day, price, _ in rows},
+                       hashlib.sha256(raw).hexdigest())
+
+
+def outcome(function, *args) -> tuple:
+    """返回值逐字段，或异常的（类型、reason、消息）。"""
+    try:
+        value = function(*args)
+    except DataEntryError as error:
+        return ("异常", type(error), error.reason, str(error))
+    if isinstance(value, AssetSeries):
+        return ("返回", value.asset, value.first_date, value.cutoff, dict(value.closes), value.raw_sha256)
+    return ("返回", value)
+
+
+def chain(path: Path, asset: str, cutoff: dt.date, registered: RegisteredFile, decisions) -> AssetSeries:
+    """完整链（设计稿第三节第 1 小节证明第 2 条）：precheck_read → read_file_bytes → parse_until。"""
+    data_v20.precheck_read(asset, cutoff, registered)
+    raw = data_v20.read_file_bytes(path)
+    return data_v20.parse_until(raw, asset, cutoff, registered, decisions)
+
+
+# 等价用例（补充二第五节）：输入由本文件既有的构造函数复现；id 为对应的既有测试函数名（多个输入加序号后缀）。
+# 每个工厂返回（原始字节，资产，截止日，登记值，裁定条目）。
+FAKE = RegisteredFile("SPX", "0" * 64, "0" * 64, 31, DAYS[0], DAYS[30])
+Case = tuple[bytes, str, dt.date, RegisteredFile, tuple[DecisionEntry, ...]]
+
+
+def by_items(items: list[Row], cutoff: dt.date = CUTOFF, decisions: tuple[DecisionEntry, ...] = (),
+             asset: str = "SPX", **changes) -> Case:
+    """与既有的 read() 相同的构造方式。"""
+    raw = content(items)
+    return raw, asset, cutoff, registered(asset, raw, **changes), decisions
+
+
+def by_lines(lines: list[str], newline: str = "\n", end: bool = True) -> Case:
+    """与既有的 read_lines() 相同的构造方式。"""
+    raw = lines_file(lines, newline, end)
+    return raw, "SPX", CUTOFF, ruled_registered("SPX", raw), ()
+
+
+def by_raw(raw: bytes, reg: RegisteredFile = FAKE) -> Case:
+    return raw, "SPX", CUTOFF, reg, ()
+
+
+def _registered_changes() -> list:
+    return [{"raw_sha256": "0" * 64}, {"normalized_sha256": "0" * 64}, {"data_rows": 39}, {"first_date": DAYS[1]},
+            {"last_date": DAYS[38]}, {"raw_sha256": "0" * 64, "data_rows": 1, "last_date": DAYS[0]}]
+
+
+def _bad_header() -> Case:
+    raw = content(rows(40), header="date,close,source")
+    return raw, "SPX", CUTOFF, RegisteredFile("SPX", hashlib.sha256(raw).hexdigest(), hashlib.sha256(raw).hexdigest(),
+                                              40, DAYS[0], DAYS[39]), ()
+
+
+def _other_asset() -> Case:
+    return content(rows(40)), "QQQ", CUTOFF, registered("SPX", content(rows(40))), ()
+
+
+def _late_start() -> Case:
+    raw = content(rows(40))
+    return raw, "SPX", DAYS[19], registered("SPX", raw, first_date=DAYS[20]), ()
+
+
+# test_results_depend_only_on_content_up_to_the_cutoff_record 的两种换行 × 七种截止日之后的内容（既有参数化原样）。
+AFTER_VARIANTS = [(newline, after) for newline in ("\n", "\r\n") for after in (
+    [], [""], ["", " ", "\t", ""], FUTURE, ["", *FUTURE], [FUTURE[0], "", "  ", FUTURE[1], "", *FUTURE[2:]],
+    [FUTURE[0], "\t", "", "", FUTURE[1], *FUTURE[2:], "", ""])]
+PARSE_PRICE_ONLY = "只直接调用 parse_price，不构造行情文件、不调用 read_until"
+ASSET_SERIES_ONLY = "直接构造 AssetSeries，不构造行情文件、不调用 read_until"
+
+EQUIVALENCE: list[tuple[str, object]] = [
+    ("test_rows_after_the_cutoff_are_never_parsed", lambda: by_items(
+        [*rows(31), (DAYS[31], "abc", "yahoo"), (DAYS[33], "101.00", "tiingo"), ("not-a-date", "x", "y"),
+         (DAYS[32], "", "???")])),
+    ("test_metadata_does_not_parse_prices_or_sources",
+     lambda: by_items([(day, "不是数字", "任意来源") for day in DAYS[:10]])),
+    ("test_hash_conventions_for_crlf_and_lf-1", lambda: by_items(rows(12))),
+    ("test_hash_conventions_for_crlf_and_lf-2", lambda: (lambda raw: (raw, "SPX", CUTOFF, registered("SPX", raw), ()))(
+        content(rows(12), newline="\r\n"))),
+    *((f"test_registered_value_mismatch_stops_before_any_parsing-{index + 1}",
+       lambda changes=changes: by_items(rows(40), **changes)) for index, changes in enumerate(_registered_changes())),
+    ("test_registered_value_mismatch_stops_before_any_parsing-7", lambda: by_items(rows(40))),
+    ("test_missing_whole_rows_are_reported-1", lambda: by_items(without(rows(40), 10))),
+    ("test_missing_whole_rows_are_reported-2", lambda: by_items(without(rows(40), 5, 6, 7))),
+    ("test_missing_whole_rows_are_reported-3", lambda: by_items(without(rows(40), 30))),
+    ("test_missing_whole_rows_are_reported-4", lambda: by_items(
+        sorted([*rows(40), (D(2001, 1, 6), "100.00", "yahoo")], key=lambda item: item[0]))),
+    ("test_missing_whole_rows_are_reported-5", lambda: by_items(without(rows(40), 35, 36))),
+    ("test_other_input_checks-1", lambda: by_items([*rows(40)[:6], rows(40)[5], *rows(40)[6:]])),
+    ("test_other_input_checks-2", lambda: by_items([*rows(40)[:3], rows(40)[4], rows(40)[3], *rows(40)[5:]])),
+    ("test_other_input_checks-3", lambda: by_items([*rows(40)[:8], (DAYS[8], "", "yahoo"), *rows(40)[9:]])),
+    ("test_other_input_checks-4", lambda: by_items([*rows(40)[:8], (DAYS[8], "100.00", "tiingo"), *rows(40)[9:]])),
+    ("test_other_input_checks-5", lambda: by_items(rows(40), cutoff=D(2001, 1, 6))),
+    ("test_other_input_checks-6", lambda: by_items(rows(40), cutoff=D(2001, 1, 15))),
+    ("test_other_input_checks-7", _bad_header),
+    ("test_other_input_checks-8", _other_asset),
+    ("test_prices_are_read_with_two_decimals_half_up", lambda: by_items(
+        [(DAYS[0], "100.005", "yahoo"), (DAYS[1], "100.0049", "yahoo"), (DAYS[2], "43.305", "yahoo"),
+         *rows(28, start=3)])),
+    ("test_approved_correction_is_read_normally-1", lambda: by_items(
+        with_row(12, "43.31", "correct:yahoo"), decisions=(correct(DAYS[12], "43.31"),))),
+    ("test_approved_correction_is_read_normally-2", lambda: by_items(
+        with_row(12, "43.3051", "correct:yahoo"), decisions=(correct(DAYS[12], "43.3149"),))),
+    ("test_correction_mismatches_are_rejected-1", lambda: by_items(
+        with_row(12, "43.31", "correct:yahoo"), decisions=(correct(DAYS[12], "43.32"),))),
+    ("test_correction_mismatches_are_rejected-2", lambda: by_items(with_row(12, "43.31", "correct:yahoo"))),
+    ("test_correction_mismatches_are_rejected-3", lambda: by_items(
+        with_row(12, "43.31", "yahoo"), decisions=(correct(DAYS[12], "43.31"),))),
+    ("test_only_matching_correct_entries_apply-1", lambda: by_items(rows(40), decisions=(
+        correct(DAYS[12], "43.31", symbol="SPY"), correct(DAYS[13], "0", decision="exclude"),
+        correct(DAYS[14], "0", decision="keep"), correct(DAYS[15], "0", decision="invalid"),
+        correct(DAYS[35], "43.31")))),
+    ("test_only_matching_correct_entries_apply-2", lambda: by_items(with_row(12, "43.31", "correct:yahoo"), decisions=(
+        correct(DAYS[12], "43.31", symbol="SPY"), correct(DAYS[13], "0", decision="exclude"),
+        correct(DAYS[14], "0", decision="keep"), correct(DAYS[15], "0", decision="invalid"),
+        correct(DAYS[35], "43.31")))),
+    ("test_empty_filter_result_is_handled_normally-1", lambda: by_items(rows(40), decisions=(
+        correct(DAYS[5], "51.06", symbol="QQQ"), correct(DAYS[6], "0", decision="exclude")))),
+    ("test_empty_filter_result_is_handled_normally-2", lambda: by_items(
+        with_row(35, "43.31", "correct:yahoo"), decisions=(correct(DAYS[35], "99.99", symbol="QQQ"),), asset="QQQ")),
+    ("test_cutoff_invariance_across_file_versions-1", lambda: by_items(rows(35))),
+    ("test_cutoff_invariance_across_file_versions-2", lambda: by_items(
+        [*rows(35)[:31], *((day, "777.77", "yahoo") for day in DAYS[31:35]), *rows(10, start=35, price="88.88")])),
+    ("test_old_registered_values_must_fail_on_a_changed_file", lambda: (
+        content([*rows(35), *rows(10, start=35, price="88.88")]), "SPX", CUTOFF, registered("SPX", content(rows(35))),
+        ())),
+    ("test_hash_and_parsing_are_bound_to_the_same_bytes-1", lambda: by_items(rows(35))),
+    ("test_hash_and_parsing_are_bound_to_the_same_bytes-2", lambda: (
+        content(rows(35, price="55.55")), "SPX", CUTOFF, registered("SPX", content(rows(35))), ())),
+    ("test_assemble_two_assets-1", lambda: by_items(rows(40))),
+    ("test_assemble_two_assets-2", lambda: by_items(rows(20, start=20, price="50.00"), asset="QQQ")),
+    ("test_cutoff_checks_happen_before_the_file_is_opened-1", lambda: by_items(rows(40), cutoff=D(2001, 1, 6))),
+    ("test_cutoff_checks_happen_before_the_file_is_opened-2", _late_start),
+    *((f"test_blank_line_between_records_within_the_cutoff_is_rejected-{index * 3 + place + 1}",
+       lambda blank=blank, place=place: by_lines(
+           [[*BEFORE_CUTOFF[:12], blank, *BEFORE_CUTOFF[12:]], [*BEFORE_CUTOFF[:-1], blank, BEFORE_CUTOFF[-1]],
+            [HEADER_LINE, blank, *BEFORE_CUTOFF[1:]]][place]))
+      for index, blank in enumerate(["", " ", "\t", " \t "]) for place in range(3)),
+    *((f"test_results_depend_only_on_content_up_to_the_cutoff_record-{index + 1}",
+       lambda newline=newline, after=after: by_lines([*BEFORE_CUTOFF, *after], newline))
+      for index, (newline, after) in enumerate(AFTER_VARIANTS)),
+    ("test_trailing_newline_is_not_a_blank_record-1", lambda: by_lines(BEFORE_CUTOFF)),
+    ("test_trailing_newline_is_not_a_blank_record-2", lambda: by_lines(BEFORE_CUTOFF, end=False)),
+    ("test_trailing_newline_is_not_a_blank_record-3", lambda: by_lines(BEFORE_CUTOFF, "\r\n")),
+    *((f"test_vertical_tab_form_feed_and_double_cr_lines_are_not_blank-{index + 1}",
+       lambda odd=odd: by_lines([*BEFORE_CUTOFF[:12], odd, *BEFORE_CUTOFF[12:]]))
+      for index, odd in enumerate(["\x0b", "\x0c", "\r\r"])),
+    *((f"test_fields_with_odd_characters_are_rejected-{index + 1}",
+       lambda line=line: by_lines([*BEFORE_CUTOFF[:13], line, *BEFORE_CUTOFF[14:]]))
+      for index, line in enumerate([line8(DAYS[12], "100.00\x0b", "yahoo"), line8(DAYS[12], "100.00 ", "yahoo"),
+                                    line8(f"{DAYS[12]}\x0c", "100.00", "yahoo"),
+                                    line8(DAYS[12], "100.00", "yahoo\x0b")])),
+    *((f"test_dates_must_be_existing_ascii_yyyy_mm_dd-{index * 3 + place + 1}",
+       lambda bad=bad, place=place: (by_lines([*BEFORE_CUTOFF[:13], line8(bad, "100.00", "yahoo"), *BEFORE_CUTOFF[14:]])
+                                     if place == 0 else by_raw(lines_file(
+                                         [HEADER_LINE, line8(bad, "100.00", "yahoo"), *BEFORE_CUTOFF[2:]] if place == 1
+                                         else [*BEFORE_CUTOFF, line8(bad, "100.00", "yahoo")]))))
+      for index, bad in enumerate(BAD_DATES) for place in range(3)),
+    ("test_valid_dates_still_parse", lambda: by_lines(BEFORE_CUTOFF)),
+    *((f"test_header_must_be_the_first_physical_line-{index + 1}",
+       lambda prefix=prefix: by_raw(lines_file([*prefix, *BEFORE_CUTOFF])))
+      for index, prefix in enumerate([[""], [" "], ["# 注释"], [record(0)]])),
+    ("test_header_with_a_byte_order_mark_is_rejected-1", lambda: by_raw(b"\xef\xbb\xbf" + lines_file(BEFORE_CUTOFF))),
+    ("test_header_with_a_byte_order_mark_is_rejected-2", lambda: by_lines(BEFORE_CUTOFF, "\r\n")),
+    ("test_missing_rows_and_empty_prices_share_the_missing_price_reason-1",
+     lambda: by_items(without(rows(40), 10))),
+    ("test_missing_rows_and_empty_prices_share_the_missing_price_reason-2",
+     lambda: by_items([*rows(40)[:8], (DAYS[8], "", "yahoo"), *rows(40)[9:]])),
+    ("test_missing_rows_and_empty_prices_share_the_missing_price_reason-3", lambda: by_items(
+        sorted([*rows(40), (D(2001, 1, 6), "100.00", "yahoo")], key=lambda item: item[0]))),
+    ("test_missing_rows_and_empty_prices_share_the_missing_price_reason-4",
+     lambda: by_items([*rows(40)[:8], (DAYS[8], "100.00", "tiingo"), *rows(40)[9:]])),
+    ("test_d16_three_column_header_is_rejected", lambda: by_lines(["date,value,source", *BEFORE_CUTOFF[1:]])),
+    ("test_d16_seven_fields_within_the_cutoff_are_rejected",
+     lambda: by_lines(replaced(12, f"{DAYS[12]},100.00,IGN_OPEN,IGN_HIGH,IGN_LOW,IGN_CLOSE,yahoo"))),
+    ("test_d16_nine_fields_within_the_cutoff_are_rejected",
+     lambda: by_lines(replaced(12, f"{DAYS[12]},100.00,IGN_OPEN,IGN_HIGH,IGN_LOW,IGN_CLOSE,IGN_VOLUME,EXTRA,yahoo"))),
+    ("test_d16_trailing_comma_within_the_cutoff_is_rejected",
+     lambda: by_lines(replaced(12, line8(DAYS[12], "100.00", "yahoo") + ","))),
+    ("test_d16_empty_fields_two_to_six_are_accepted",
+     lambda: by_lines(replaced(12, f"{DAYS[12]},123.45,,,,,,yahoo"))),
+    ("test_d16_close_field_is_not_parsed_or_compared",
+     lambda: by_lines(replaced(12, f"{DAYS[12]},100.00,IGN_OPEN,IGN_HIGH,IGN_LOW,999.99,IGN_VOLUME,yahoo"))),
+    ("test_d16_empty_value_is_not_filled_from_close",
+     lambda: by_lines(replaced(12, f"{DAYS[12]},,IGN_OPEN,IGN_HIGH,IGN_LOW,100.00,IGN_VOLUME,yahoo"))),
+    ("test_d16_field_count_is_not_checked_after_the_cutoff",
+     lambda: by_lines([*BEFORE_CUTOFF, f"{DAYS[31]},88.88,yahoo"])),
+    ("test_d16_metadata_does_not_check_field_counts", lambda: by_lines(replaced(12, f"{DAYS[12]},100.00,yahoo"))),
+    ("test_d16_header_with_a_byte_order_mark_is_rejected", lambda: (lambda raw: (
+        raw, "SPX", CUTOFF, ruled_registered("SPX", raw), ()))(b"\xef\xbb\xbf" + lines_file(BEFORE_CUTOFF))),
+    ("test_d16_source_comes_from_field_seven_before_the_price-1",
+     lambda: by_lines(replaced(12, line8(DAYS[12], "100.00", "tiingo")))),
+    ("test_d16_source_comes_from_field_seven_before_the_price-2",
+     lambda: by_lines(replaced(12, line8(DAYS[12], "", "tiingo")))),
+    # 新增三类开读前非法输入（M2 指令第二节第 2 小节第 3 条；设计稿第三节第 1 小节证明第 2 条）。
+    ("新增-开读前非法-资产与登记值不符", _other_asset),
+    ("新增-开读前非法-截止日不是交易日", lambda: by_items(rows(40), cutoff=D(2001, 1, 13))),
+    ("新增-开读前非法-截止日早于登记首日", _late_start),
+]
+PRE_READ_ILLEGAL = ("新增-开读前非法-资产与登记值不符", "新增-开读前非法-截止日不是交易日",
+                    "新增-开读前非法-截止日早于登记首日")
+
+# 完整性守卫（补充二第五节第 2 条）：开工提交 712327273c8ab038a34d34b93fea50aa2152bf05 时本文件全部既有测试函数名，
+# 由 git show 7123272:tests/test_wavewarn_v20_data_entry.py 的 AST（模块顶层、以 test_ 开头的函数定义）取得。
+START_TESTS = (
+    "test_rows_after_the_cutoff_are_never_parsed", "test_metadata_does_not_parse_prices_or_sources",
+    "test_hash_conventions_for_crlf_and_lf", "test_registered_value_mismatch_stops_before_any_parsing",
+    "test_missing_whole_rows_are_reported", "test_other_input_checks", "test_prices_are_read_with_two_decimals_half_up",
+    "test_approved_correction_is_read_normally", "test_correction_mismatches_are_rejected",
+    "test_only_matching_correct_entries_apply", "test_empty_filter_result_is_handled_normally",
+    "test_cutoff_invariance_across_file_versions", "test_old_registered_values_must_fail_on_a_changed_file",
+    "test_hash_and_parsing_are_bound_to_the_same_bytes", "test_assemble_two_assets",
+    "test_assemble_reports_real_gaps_but_not_pre_listing_days", "test_assemble_rejects_inconsistent_inputs",
+    "test_price_parsing_only_happens_after_the_cutoff_check",
+    "test_data_entry_module_does_not_import_provenance_config_or_models",
+    "test_cutoff_checks_happen_before_the_file_is_opened",
+    "test_blank_line_between_records_within_the_cutoff_is_rejected",
+    "test_results_depend_only_on_content_up_to_the_cutoff_record", "test_trailing_newline_is_not_a_blank_record",
+    "test_vertical_tab_form_feed_and_double_cr_lines_are_not_blank", "test_fields_with_odd_characters_are_rejected",
+    "test_dates_must_be_existing_ascii_yyyy_mm_dd", "test_valid_dates_still_parse",
+    "test_prices_follow_the_lexical_rule",
+    "test_prices_without_a_fixed_number_of_decimals_are_accepted", "test_header_must_be_the_first_physical_line",
+    "test_header_with_a_byte_order_mark_is_rejected",
+    "test_missing_rows_and_empty_prices_share_the_missing_price_reason",
+    "test_d16_three_column_header_is_rejected", "test_d16_seven_fields_within_the_cutoff_are_rejected",
+    "test_d16_nine_fields_within_the_cutoff_are_rejected", "test_d16_trailing_comma_within_the_cutoff_is_rejected",
+    "test_d16_empty_fields_two_to_six_are_accepted", "test_d16_close_field_is_not_parsed_or_compared",
+    "test_d16_empty_value_is_not_filled_from_close", "test_d16_field_count_is_not_checked_after_the_cutoff",
+    "test_d16_metadata_does_not_check_field_counts", "test_d16_header_with_a_byte_order_mark_is_rejected",
+    "test_d16_source_comes_from_field_seven_before_the_price",
+)
+EXCLUDED = {
+    "test_assemble_reports_real_gaps_but_not_pre_listing_days": ASSET_SERIES_ONLY,
+    "test_assemble_rejects_inconsistent_inputs": ASSET_SERIES_ONLY,
+    "test_price_parsing_only_happens_after_the_cutoff_check": "源码文字的静态断言，不构造行情输入",
+    "test_data_entry_module_does_not_import_provenance_config_or_models":
+        "导入、签名与打开语句的静态断言，不构造行情输入",
+    "test_prices_follow_the_lexical_rule": PARSE_PRICE_ONLY,
+    "test_prices_without_a_fixed_number_of_decimals_are_accepted": PARSE_PRICE_ONLY,
+}
+
+
+def test_m2_equivalence_cases_cover_every_start_test() -> None:
+    """完整性守卫：开工版本的每个既有测试名，要么出现在等价用例 id 中，要么在排除表中；两边不重叠、不遗漏、不多出。"""
+    names = [case for case, _ in EQUIVALENCE]
+    assert len(names) == len(set(names))
+    covered = {name.rsplit("-", 1)[0] if name.rsplit("-", 1)[-1].isdigit() else name
+               for name in names if not name.startswith("新增-")}
+    assert len(START_TESTS) == 43 and len(set(START_TESTS)) == 43
+    assert covered | set(EXCLUDED) == set(START_TESTS) and not covered & set(EXCLUDED)
+    assert {name for name in names if name.startswith("新增-")} == set(PRE_READ_ILLEGAL)
+
+
+@pytest.mark.parametrize(("case", "factory"), EQUIVALENCE, ids=[case for case, _ in EQUIVALENCE])
+def test_m2_read_until_equals_the_full_chain_and_the_start_version(tmp_path: Path, case: str, factory) -> None:
+    """设计稿第三节第 1 小节证明第 2、4 条：read_until 与完整链（precheck_read → read_file_bytes → parse_until）
+    返回值逐字段相等，或抛同类型、同 reason、同消息的异常；二者又与开工版本 read_until 相同。
+    以原调用文字直接调用 parse_rows（不传 asset）的结果也与开工版本相同（补充二第三节、补充五第一节第 3 小节）。"""
+    raw, asset, cutoff, reg, decisions = factory()
+    path = put(tmp_path, "series.csv", raw)
+    new = outcome(read_until, path, asset, cutoff, reg, decisions)
+    assert outcome(chain, path, asset, cutoff, reg, decisions) == new
+    assert outcome(start_read_until, path, asset, cutoff, reg, decisions) == new
+    assert outcome(data_v20.parse_rows, raw, cutoff) == outcome(start_parse_rows, raw, cutoff)
+
+
+@pytest.mark.parametrize("case", ["test_registered_value_mismatch_stops_before_any_parsing-7", *PRE_READ_ILLEGAL])
+def test_m2_opening_behaviour_of_read_until_and_the_chain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                           case: str) -> None:
+    """设计稿第三节第 1 小节证明第 3 条（测试内同口径计数：记录 Path.open 的路径与模式）：合法输入时 read_until 与
+    完整链都恰打开行情文件一次、只读（"rb"）；开读前非法输入时两者都不打开。"""
+    raw, asset, cutoff, reg, decisions = dict(EQUIVALENCE)[case]()
+    path = put(tmp_path, "series.csv", raw)
+    opened: list[tuple[Path, tuple]] = []
+    real_open = Path.open
+
+    def recording_open(self: Path, *args, **kwargs):
+        opened.append((self, args))
+        return real_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", recording_open)
+    expected = [] if case in PRE_READ_ILLEGAL else [(path, ("rb",))]
+    for function in (read_until, chain):
+        opened.clear()
+        outcome(function, path, asset, cutoff, reg, decisions)
+        assert opened == expected
+
+
+def test_m2_read_until_signature_is_unchanged() -> None:
+    """设计稿第三节第 1 小节证明第 4 条：read_until 的参数与开工版本相同；新增函数的参数如设计稿所列。"""
+    assert list(inspect.signature(read_until).parameters) == ["path", "asset", "cutoff", "registered", "decisions"]
+    assert list(inspect.signature(data_v20.precheck_read).parameters) == ["asset", "cutoff", "registered"]
+    for name in ("parse_until", "diagnose_until"):
+        assert list(inspect.signature(getattr(data_v20, name)).parameters) == [
+            "raw", "asset", "cutoff", "registered", "decisions"]
+    parameters = inspect.signature(data_v20.parse_rows).parameters
+    assert list(parameters) == ["raw", "cutoff", "asset"] and parameters["asset"].kind is inspect.Parameter.KEYWORD_ONLY
+
+
+def caught(function, *args) -> DataEntryError:
+    with pytest.raises(DataEntryError) as info:
+        function(*args)
+    return info.value
+
+
+def test_m2_empty_value_exception_keeps_type_reason_and_message_and_carries_evidence(tmp_path: Path) -> None:
+    """补充四第一节第 3 小节第 1、2、6 条（补充五保留）：空 value 经 read_until 与 parse_until 抛出的异常，
+    类型、reason、消息与 parse_price("") 抛出的逐项相同；asset 为所读资产，missing_value_days 恰为该行日期，
+    其余为空元组。
+    直接调用 parse_price("") 的行为与开工版本相同（类型、reason、消息；属性为默认值）。"""
+    direct = caught(data_v20.parse_price, "")
+    assert (type(direct), direct.reason, str(direct)) == (data_v20.MissingPriceEntryError, "缺少必需价格", "价格为空")
+    assert (direct.asset, direct.missing_value_days, direct.missing_row_days, direct.extra_days) == (None, (), (), ())
+    for asset in ("SPX", "QQQ"):
+        raw, _, cutoff, reg, decisions = by_items([*rows(40)[:8], (DAYS[8], "", "yahoo"), *rows(40)[9:]], asset=asset)
+        path = put(tmp_path, f"{asset}.csv", raw)
+        for error in (caught(read_until, path, asset, cutoff, reg, decisions),
+                      caught(data_v20.parse_until, raw, asset, cutoff, reg, decisions)):
+            assert (type(error), error.reason, str(error)) == (type(direct), direct.reason, str(direct))
+            assert error.asset == asset and error.missing_value_days == (DAYS[8],)
+            assert error.missing_row_days == () and error.extra_days == ()
+    plain = caught(data_v20.parse_rows, content([*rows(40)[:8], (DAYS[8], "", "yahoo"), *rows(40)[9:]]), CUTOFF)
+    assert plain.asset is None and plain.missing_value_days == (DAYS[8],)          # 原调用方式不传 asset
+
+
+def test_m2_axis_errors_carry_structured_days() -> None:
+    """设计稿第三节第 2 小节：check_trading_axis 抛出的两种异常带 asset、missing_row_days、extra_days；
+    消息与 reason 不变。"""
+    days = [day for day in DAYS[:31] if day not in (DAYS[5], DAYS[6])]
+    missing = caught(data_v20.check_trading_axis, "QQQ", DAYS[0], CUTOFF, days)
+    assert type(missing) is data_v20.MissingPriceEntryError and missing.reason == "缺少必需价格"
+    assert (missing.asset, missing.missing_row_days, missing.missing_value_days, missing.extra_days) == (
+        "QQQ", (DAYS[5], DAYS[6]), (), ())
+    weekend = D(2001, 1, 6)
+    extra = caught(data_v20.check_trading_axis, "SPX", DAYS[0], CUTOFF, sorted([*days, weekend]))
+    assert type(extra) is data_v20.DataInputError and extra.reason == "输入校验失败"
+    assert (extra.asset, extra.missing_row_days, extra.extra_days) == ("SPX", (DAYS[5], DAYS[6]), (weekend,))
+    with pytest.raises(AttributeError):
+        missing.asset = "SPX"                                                          # type: ignore[misc]  # 只读
+
+
+def strict_and_diagnosis(case: Case) -> tuple[tuple, tuple]:
+    raw, asset, cutoff, reg, decisions = case
+    return (outcome(data_v20.parse_until, raw, asset, cutoff, reg, decisions),
+            outcome(data_v20.diagnose_until, raw, asset, cutoff, reg, decisions))
+
+
+def test_m2_diagnosis_collects_missing_days_and_verifies_strict_evidence() -> None:
+    """设计稿第三节第 3 小节；补充四第 3 小节第 5 条：诊断读取的序列不含缺价日；收集到的缺价日与严格读取异常的
+    已知日期逐日核实为“是”（严格异常只给首个空 value；只缺日时给全部整行缺失日）。"""
+    items = [*rows(40)[:8], (DAYS[8], "", "yahoo"), *rows(40)[9:20], (DAYS[20], "", "yahoo"), *rows(40)[21:]]
+    raw, asset, cutoff, reg, decisions = by_items(without(items, 25))
+    diagnosis = data_v20.diagnose_until(raw, asset, cutoff, reg, decisions)
+    assert diagnosis.missing_value_days == (DAYS[8], DAYS[20]) and diagnosis.missing_row_days == (DAYS[25],)
+    assert set(diagnosis.series.closes) == set(DAYS[:31]) - {DAYS[8], DAYS[20], DAYS[25]}
+    assert diagnosis.series.raw_sha256 == hashlib.sha256(raw).hexdigest()
+    strict = caught(data_v20.parse_until, raw, asset, cutoff, reg, decisions)
+    assert [day in diagnosis.missing_value_days for day in strict.missing_value_days] == [True]
+    # 只缺日：严格读取异常给出全部整行缺失日，逐日在诊断证据中。
+    raw, asset, cutoff, reg, decisions = by_items(without(rows(40), 5, 6, 7))
+    diagnosis = data_v20.diagnose_until(raw, asset, cutoff, reg, decisions)
+    strict = caught(data_v20.parse_until, raw, asset, cutoff, reg, decisions)
+    assert strict.missing_row_days == (DAYS[5], DAYS[6], DAYS[7]) == diagnosis.missing_row_days
+    assert [day in diagnosis.missing_row_days for day in strict.missing_row_days] == [True, True, True]
+    assert diagnosis.missing_value_days == ()
+    # 无缺失：诊断读取与严格读取的序列逐字段相同。
+    clean = by_items(rows(40))
+    strict_result, diagnosis_result = strict_and_diagnosis(clean)
+    assert diagnosis_result[0] == "返回"
+    full = data_v20.diagnose_until(*clean)
+    assert outcome(lambda: full.series) == strict_result and full.missing_value_days == full.missing_row_days == ()
+
+
+@pytest.mark.parametrize("case", [
+    "test_missing_whole_rows_are_reported-4",                          # 多出日
+    "test_other_input_checks-1", "test_other_input_checks-2",          # 重复、乱序
+    "test_other_input_checks-4",                                       # 来源非法
+    "test_fields_with_odd_characters_are_rejected-2",                  # 价格含空白
+    "test_dates_must_be_existing_ascii_yyyy_mm_dd-1",                  # 日期格式
+    "test_correction_mismatches_are_rejected-1", "test_correction_mismatches_are_rejected-2",   # 修正条目核对
+    "test_registered_value_mismatch_stops_before_any_parsing-1",       # 登记值不符
+    "test_d16_seven_fields_within_the_cutoff_are_rejected",            # 字段数
+])
+def test_m2_diagnosis_raises_the_same_input_errors_as_strict_reading(case: str) -> None:
+    """M2 指令第二节第 2 小节第 3 条：诊断读取对多出日、格式错误、修正条目等，
+    抛与严格读取相同类型、reason、消息的异常。"""
+    strict, diagnosis = strict_and_diagnosis(dict(EQUIVALENCE)[case]())
+    assert strict[0] == "异常" and strict[1] is data_v20.DataInputError and diagnosis == strict
+
+
+def test_m2_correction_on_a_day_without_a_row_is_an_input_error_in_both_readings() -> None:
+    """修正条目所在日在文件中没有这一行（条目日为非交易日、截止日以内）：两种读取都抛相同的 DataInputError。"""
+    case = by_items(rows(40), decisions=(correct(D(2001, 1, 6), "43.31"),))
+    strict, diagnosis = strict_and_diagnosis(case)
+    assert strict[:3] == ("异常", data_v20.DataInputError, "输入校验失败") and "没有这一行" in strict[3]
+    assert diagnosis == strict
+    # 修正条目所在日为空 value 行：严格读取先报缺价；诊断读取跳过该行后核对修正条目，报“没有这一行”。
+    case = by_items(with_row(12, "", "correct:yahoo"), decisions=(correct(DAYS[12], "43.31"),))
+    strict, diagnosis = strict_and_diagnosis(case)
+    assert strict[1] is data_v20.MissingPriceEntryError
+    assert diagnosis[:3] == ("异常", data_v20.DataInputError, "输入校验失败") and "没有这一行" in diagnosis[3]
+
+
+def test_m2_empty_value_with_an_illegal_source_reports_the_source_in_both_readings(tmp_path: Path) -> None:
+    """补充四第 3 小节第 3 条：空 value 行同时来源非法时，严格读取、诊断读取都抛与开工版本相同的来源错误。"""
+    raw, asset, cutoff, reg, decisions = by_lines(replaced(12, line8(DAYS[12], "", "tiingo")))
+    start = outcome(start_read_until, put(tmp_path, "s.csv", raw), asset, cutoff, reg, decisions)
+    assert start[:3] == ("异常", data_v20.DataInputError, "输入校验失败") and "来源标识" in start[3]
+    assert strict_and_diagnosis((raw, asset, cutoff, reg, decisions)) == (start, start)
+
+
+def test_m2_whitespace_value_is_an_input_error_in_both_readings() -> None:
+    """补充四第 3 小节第 4 条：含空白的 value 在两种读取下都抛 DataInputError（不当作空价格）。"""
+    for value in (" ", "\t", "100.00 "):
+        strict, diagnosis = strict_and_diagnosis(by_lines(replaced(12, line8(DAYS[12], value, "yahoo"))))
+        assert strict[1] is data_v20.DataInputError and diagnosis == strict
+
+
+def test_m2_order_checks_include_empty_value_rows() -> None:
+    """补充五第一节第 3 小节：重复、乱序比较的前一条记录包括空价格行。
+    - 空价格行在前（D1、D3 空价格、D2；D1、D2 空价格、D2）：严格读取在空价格行抛 MissingPriceEntryError（同一输入），
+      诊断读取在其后一行抛“日期重复或乱序”，与把该空价格补成合法价格后严格读取在同一位置抛出的异常类型、reason、消息相同；
+    - 空价格行在后（D1、D3、D2 空价格；D1、D2、D2 空价格）：两种读取抛完全相同的异常。"""
+    d1, d2, d3 = DAYS[10], DAYS[11], DAYS[12]
+    base = rows(40)
+    for first, second in ((d3, d2), (d2, d2)):
+        empty_first = [*base[:10], (d1, "100.00", "yahoo"), (first, "", "yahoo"), (second, "100.00", "yahoo"),
+                       *base[13:]]
+        filled = [*base[:10], (d1, "100.00", "yahoo"), (first, "100.00", "yahoo"), (second, "100.00", "yahoo"),
+                  *base[13:]]
+        strict, diagnosis = strict_and_diagnosis(by_items(empty_first))
+        assert strict[1] is data_v20.MissingPriceEntryError
+        reference, _ = strict_and_diagnosis(by_items(filled))
+        assert reference[:3] == ("异常", data_v20.DataInputError, "输入校验失败") and "重复或乱序" in reference[3]
+        assert diagnosis == reference
+        empty_second = [*base[:10], (d1, "100.00", "yahoo"), (first, "100.00", "yahoo"), (second, "", "yahoo"),
+                        *base[13:]]
+        strict, diagnosis = strict_and_diagnosis(by_items(empty_second))
+        assert strict == diagnosis == reference
+
+
+def test_m2_diagnosis_stops_at_the_cutoff_even_when_its_value_is_empty() -> None:
+    """补充五第一节第 3 小节：截止日当天为空价格行时，诊断读取不处理截止日之后的行；严格读取在同一输入上抛
+    MissingPriceEntryError。截止日之后放一行日期非法的记录与一行合法记录（元数据要读末日）。"""
+    lines = [*BEFORE_CUTOFF[:-1], line8(CUTOFF, "", "yahoo"), "not-a-date,x,y", record(31)]
+    case = by_raw(lines_file(lines))
+    raw, asset, cutoff, _, decisions = case
+    reg = RegisteredFile("SPX", hashlib.sha256(raw).hexdigest(), hashlib.sha256(raw).hexdigest(), 33, DAYS[0], DAYS[31])
+    diagnosis = data_v20.diagnose_until(raw, asset, cutoff, reg, decisions)
+    assert diagnosis.missing_value_days == (CUTOFF,) and diagnosis.missing_row_days == ()
+    assert list(diagnosis.series.closes) == DAYS[:30]
+    strict = caught(data_v20.parse_until, raw, asset, cutoff, reg, decisions)
+    assert type(strict) is data_v20.MissingPriceEntryError and strict.missing_value_days == (CUTOFF,)

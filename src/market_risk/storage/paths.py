@@ -289,6 +289,11 @@ class StoragePaths:
         return self.root / "reports"
 
     @property
+    def v20_research_dir(self) -> Path:
+        """波段预警 v2.0 阶段四研究输出的上级目录（M2 第一部分指令第二节第 8 小节）：只计算路径，不读写、不建目录。"""
+        return self.reports_dir / "research" / "wavewarn_v20"
+
+    @property
     def backtest_history_xlsx(self) -> Path:
         return self.reports_dir / "backtest_history.xlsx"
 

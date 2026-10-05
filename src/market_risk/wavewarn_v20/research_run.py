@@ -17,7 +17,7 @@ from __future__ import annotations
 import datetime as dt
 import traceback
 from bisect import bisect_right
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal, localcontext
 from enum import Enum
@@ -408,6 +408,31 @@ def candidate_key(candidate: Candidate) -> str:
     return f"K={candidate.k},θ_P={candidate.theta},h={candidate.h}"
 
 
+# ---------------------------------------------------------------------------
+# 信息状态的最小记录接口（阶段四字段级设计稿第四节第 2 小节；M2 第一部分指令第二节第 3 小节）
+# journal(event, object, field, stage) 在每个结果算出之后、存入或返回之前调用；journal=None 时不调用下面的私有调用函数。
+# ---------------------------------------------------------------------------
+
+Journal = Callable[[str, str, str, str], None]
+
+
+class _JournalFailure(Exception):
+    """journal 回调抛出的普通异常的私有包装（只携带原始异常对象）；run_window 在全部业务捕获之前把它还原为原始异常。"""
+
+    def __init__(self, error: Exception) -> None:
+        super().__init__()
+        self.error = error
+
+
+def _record(journal: Journal, event: str, item: str, field: str, stage: str) -> None:
+    """所有调用点只经这里调用 journal：回调抛出的 Exception 包装为私有类型后立即抛出；
+    BaseException 不捕获、原样传出。"""
+    try:
+        journal(event, item, field, stage)
+    except Exception as error:
+        raise _JournalFailure(error) from None
+
+
 def _check_call(snapshot: Snapshot, spec: WindowSpec, parameters: RunParameters,
                 candidates: tuple[Candidate, ...]) -> None:
     """调用方参数的一致性；不满足即 ResearchRunError（不记入 stop）。"""
@@ -468,18 +493,25 @@ def _require(condition: bool, message: str) -> None:
 
 def _object_outcome(days: tuple[dt.date, ...], signals: tuple[SignalRecord, ...],
                     closes: dict[str, Sequence[Decimal | None]], prefix: BasketPrefix,
-                    parameters: RunParameters) -> ObjectOutcome:
+                    parameters: RunParameters, note: Callable[[str], None] | None = None,
+                    fields: tuple[str, str, str] = ("计划目标", "信号模拟净值", "执行政策")) -> ObjectOutcome:
     """信号目标与切换照常生成；价格完整时信号模拟净值用 simulate_targets，有缺价时为 Unavailable（不把前缀传入）；
-    执行政策照常 simulate_policy_with_gaps。"""
+    执行政策照常 simulate_policy_with_gaps。note 不为 None 时，三项结果各自算出之后按 fields 的名称记录一次。"""
     targets = signal_targets(days, signals, parameters.positions)
     changes = switches(targets, parameters.positions)
+    if note is not None:
+        note(fields[0])
     if prefix.first_missing is None:
         signal_nav: NavResult | Unavailable = simulate_targets(targets, prefix.values, parameters.positions,
                                                                parameters.tolerance)
     else:
         signal_nav = Unavailable(prefix.missing, MISSING_PRICE, None, SOURCE_PREFIX)
+    if note is not None:
+        note(fields[1])
     policy = simulate_policy_with_gaps(days, signals, closes, parameters.positions, parameters.policy,
                                        parameters.tolerance)
+    if note is not None:
+        note(fields[2])
     return ObjectOutcome(signals, targets, changes, signal_nav, policy)
 
 
@@ -586,7 +618,13 @@ def _status(system: Sequence[SystemDay], days: Sequence[dt.date]) -> dict[dt.dat
 
 
 def _compute(snapshot: Snapshot, spec: WindowSpec, parameters: RunParameters, requested: tuple[Candidate, ...],
-             progress: _Progress) -> None:
+             progress: _Progress, journal: Journal | None = None) -> None:
+
+    def note(event: str, item: str, field: str) -> None:
+        """journal 为 None 时什么也不做（不调用私有调用函数 _record）。"""
+        if journal is not None:
+            _record(journal, event, item, field, progress.stage)
+
     axis = snapshot.days
     e_index = len(axis) - 1
     windows, average = parameters.windows, parameters.windows.average
@@ -594,19 +632,24 @@ def _compute(snapshot: Snapshot, spec: WindowSpec, parameters: RunParameters, re
     spx = snapshot_asset_days(snapshot, "SPX", windows)
     qqq = snapshot_asset_days(snapshot, "QQQ", windows)
     trend = snapshot_trend_days(snapshot, "SPX", windows)
+    note("derived", COMMON, "输入派生量")
     progress.spx, progress.qqq, progress.trend = spx, qqq, trend
     # 3. t0
     progress.stage = "t0"
     t0 = first_valid_index(spx, qqq, trend)
+    note("derived", COMMON, "t0")
     k = t0 + 1                                       # 系统序列第 0 项的全局行号
     # 4. 收敛（逐候选调用 candidate_convergence）
     progress.stage = "收敛"
     convergences: dict[Candidate, CandidateConvergence] = {}
     for candidate in requested:
         progress.object = candidate_key(candidate)
-        convergences[candidate] = candidate_convergence(spx, qqq, trend, t0, candidate, average)
+        convergence = candidate_convergence(spx, qqq, trend, t0, candidate, average)
+        note("performance", progress.object, "通道与系统收敛日（含状态路径）")
+        convergences[candidate] = convergence
     progress.object = REFERENCE
     reference_index = k + reference_convergence(trend[k:], average)
+    note("performance", REFERENCE, "收敛（含状态路径）")
     progress.object = COMMON
     # 5. 起点
     system_indices = [convergences[candidate].system_index for candidate in requested]
@@ -628,6 +671,7 @@ def _compute(snapshot: Snapshot, spec: WindowSpec, parameters: RunParameters, re
     hold: NavResult | Unavailable = (simulate_hold(days, prefix.values, parameters.positions, parameters.tolerance)
                                      if prefix.first_missing is None
                                      else Unavailable(prefix.missing, MISSING_PRICE, None, SOURCE_PREFIX))
+    note("performance", HOLD, "净值")
     # 8. 每资产标签史与 R2 事件
     progress.stage = "R2 事件"
     events: dict[str, tuple[R2Event, ...] | Unavailable] = {}
@@ -639,16 +683,22 @@ def _compute(snapshot: Snapshot, spec: WindowSpec, parameters: RunParameters, re
         except MissingPriceError as error:
             events[asset] = Unavailable(tuple((asset, day) for day, close in rows if close is None), error.reason,
                                         type(error).__name__, SOURCE_LABELS)
+    note("derived", COMMON, "R2 事件")
     progress.common = CommonOutcome(MappingProxyType(events), hold, prefix)
     # 9. 主参照：完整逐日记录与净值模拟信号两种切片
     progress.object, progress.stage = REFERENCE, "主参照"
     reference_days = run_reference(spec.initial.reference, trend[k:], average)
+    note("performance", REFERENCE, "逐日状态")
     valid = tuple(trend[index].close is not None and trend[index].complete for index in range(len(axis)))
     reference_full = reference_days[j0 - 2 - k:e_index - k + 1]
     _check_full_slice([item.day for item in reference_full], axis, j0, REFERENCE)
     reference_signals = reference_signal_records(reference_days[j0 - 1 - k:e_index - k], valid[j0 - 1:e_index])
     _check_signal_slice(reference_signals, axis, j0, days, REFERENCE)
-    reference_outcome = _object_outcome(days, reference_signals, closes, prefix, parameters)
+    note("performance", REFERENCE, "信号")
+    reference_outcome = _object_outcome(days, reference_signals, closes, prefix, parameters,
+                                        None if journal is None else lambda field: note("performance", REFERENCE,
+                                                                                        field),
+                                        ("计划目标", "净值", "执行政策"))
     progress.reference = ReferenceOutcome(reference_full, valid[j0 - 2:], reference_outcome)
     # 10. 每候选（登记顺序）；同一 (K, θ) 的通道路径与证据序列只算一次
     for order, candidate in enumerate(requested):
@@ -660,6 +710,7 @@ def _compute(snapshot: Snapshot, spec: WindowSpec, parameters: RunParameters, re
             progress.evidence[pair] = evidence_series(spx[k:], qqq[k:], trend[k:], paths)
         evidence = progress.evidence[pair]
         system = run_system(spec.initial.system, evidence, candidate.k, candidate.h)
+        note("performance", progress.object, "系统逐日记录")
         system_full = system[j0 - 2 - k:e_index - k + 1]
         _check_full_slice([item.day for item in system_full], axis, j0, progress.object)
         _require([item.day for item in evidence[j0 - 2 - k:e_index - k + 1]] == [item.day for item in system_full],
@@ -667,7 +718,10 @@ def _compute(snapshot: Snapshot, spec: WindowSpec, parameters: RunParameters, re
         progress.stage = "信号模拟与执行政策"
         signals = signal_records(system[j0 - 1 - k:e_index - k], evidence[j0 - 1 - k:e_index - k])
         _check_signal_slice(signals, axis, j0, days, progress.object)
-        outcome = _object_outcome(days, signals, closes, prefix, parameters)
+        key = progress.object
+        outcome = _object_outcome(days, signals, closes, prefix, parameters,
+                                  None if journal is None else lambda field, key=key: note("performance", key, field),
+                                  ("信号与计划目标", "信号模拟净值", "执行政策"))
         progress.stage = "R2"
         status = _status(system_full, axis[j0 - 2:])
         window = Window(axis, axis[j0 - 1], axis[e_index], MappingProxyType(status))
@@ -678,20 +732,27 @@ def _compute(snapshot: Snapshot, spec: WindowSpec, parameters: RunParameters, re
             if isinstance(asset_events, Unavailable):
                 results[asset], ledgers[asset] = None, None
             else:
-                results[asset] = r2_result(asset_events, window, parameters.r2_rule)
-                ledgers[asset] = segment_ledger(asset_events, window, parameters.r2_rule)
+                result = r2_result(asset_events, window, parameters.r2_rule)
+                note("performance", key, f"R2：{asset}")
+                results[asset] = result
+                ledger = segment_ledger(asset_events, window, parameters.r2_rule)
+                note("performance", key, f"段账：{asset}")
+                ledgers[asset] = ledger
         progress.stage = "R1"
         if isinstance(outcome.signal_nav, NavResult) and isinstance(hold, NavResult):
             r1 = r1_result(outcome.signal_nav.wealth, hold.wealth, parameters.r1_ratio)
         else:
             r1 = r1_result(None, None, parameters.r1_ratio)
+        note("performance", key, "R1")
         progress.stage = "分段"
         segments = tuple(_segment_report(segment, days, outcome.signal_nav, hold) for segment in parameters.segments)
+        note("performance", key, "分段")
         flags = {asset: (None if result is None or not result.computable else result.meets)
                  for asset, result in results.items()}
         record = CandidateRecord(candidate, order, False, r1.satisfied, MappingProxyType(flags),
                                  outcome.signal_nav.log_wealth if isinstance(outcome.signal_nav, NavResult) else None,
                                  len(outcome.switches))
+        note("performance", key, "候选记录")
         progress.candidates[candidate] = CandidateOutcome(system_full, outcome, MappingProxyType(status),
                                                           MappingProxyType(results), MappingProxyType(ledgers), r1,
                                                           segments, record)
@@ -707,13 +768,20 @@ def _stop(exit_: Exit, progress: _Progress, error: BaseException, detail: Mappin
 
 
 def run_window(snapshot: Snapshot, spec: WindowSpec, parameters: RunParameters,
-               candidates: Sequence[Candidate]) -> WindowResult:
-    """对显式给出的候选集合计算一个评价窗口的全部分层结果；不选择、不检验（设计第二、六节）。"""
+               candidates: Sequence[Candidate], journal: Journal | None = None) -> WindowResult:
+    """对显式给出的候选集合计算一个评价窗口的全部分层结果；不选择、不检验（设计第二、六节）。
+
+    journal（阶段四字段级设计稿第四节第 2 小节）：默认 None，此时行为与此前完全相同。回调自身抛出的普通异常不被分类为
+    任何出口：在全部业务捕获之前由私有类型的处理取出，原样抛出原始异常对象（同一对象；不生成 StopRecord）。
+    """
     requested = tuple(candidates)
     _check_call(snapshot, spec, parameters, requested)
     progress = _Progress()
+    failure: _JournalFailure | None = None
     try:
-        _compute(snapshot, spec, parameters, requested, progress)
+        _compute(snapshot, spec, parameters, requested, progress, journal)
+    except _JournalFailure as wrapped:              # journal 回调自身的异常：只取出原始异常，在本 try 之后原样抛出
+        failure = wrapped
     except ResearchRunError:
         raise
     except NoStartError as error:
@@ -743,12 +811,20 @@ def run_window(snapshot: Snapshot, spec: WindowSpec, parameters: RunParameters,
         progress.stop = _stop(Exit.INVALID_INPUT, progress, error)
     except Exception as error:
         progress.stop = _stop(Exit.UNEXPECTED, progress, error, trace=traceback.format_exc())
+    if failure is not None:
+        raise failure.error
     records = tuple(outcome.record for outcome in progress.candidates.values())
     result = WindowResult(spec, parameters, requested, progress.window, progress.common, progress.reference,
                           MappingProxyType(dict(progress.candidates)), records, progress.stop, None)
     if parameters.diagnostics and progress.stop is None:
+        try:
+            diagnostics = _diagnostics(result, progress, parameters, journal)
+        except _JournalFailure as wrapped:          # 诊断阶段的回调异常：同样还原为原始异常
+            failure = wrapped
+        if failure is not None:
+            raise failure.error
         result = WindowResult(spec, parameters, requested, result.window, result.common, result.reference,
-                              result.candidates, records, None, _diagnostics(result, progress, parameters))
+                              result.candidates, records, None, diagnostics)
     return result
 
 
@@ -855,17 +931,28 @@ def _same_risk_different_counters(days: Sequence[dt.date], runs: tuple[Enumerate
     return tuple(result)
 
 
-def _diagnostics(result: WindowResult, progress: _Progress, parameters: RunParameters) -> Diagnostics:
+def _diagnostics(result: WindowResult, progress: _Progress, parameters: RunParameters,
+                 journal: Journal | None = None) -> Diagnostics:
+
+    def note(item: str, field: str) -> None:
+        """journal 为 None 时什么也不做（不调用私有调用函数 _record）。"""
+        if journal is not None:
+            _record(journal, "performance", item, field, "诊断")
+
     window, common, reference = result.window, result.common, result.reference
     if window is None or common is None or reference is None:
         raise ResearchRunError("诊断只对完整的窗口结果计算")
     t0, average = window.t0, parameters.windows.average
     k = t0 + 1
     spx, qqq, trend = progress.spx[k:], progress.qqq[k:], progress.trend[k:]
-    leverage = {"reference": _leverage(reference.outcome, common.prefix, parameters.positions)}
+    reference_leverage = _leverage(reference.outcome, common.prefix, parameters.positions)
+    note(REFERENCE, "杠杆因子")
+    leverage = {"reference": reference_leverage}
     convergence: dict[Candidate, ConvergenceDiag] = {}
     for candidate, outcome in result.candidates.items():
-        leverage[repr(candidate)] = _leverage(outcome.outcome, common.prefix, parameters.positions)
+        candidate_leverage = _leverage(outcome.outcome, common.prefix, parameters.positions)
+        note(candidate_key(candidate), "杠杆因子")
+        leverage[repr(candidate)] = candidate_leverage
         theta = candidate.theta
         channels = {"P_SPX": _pullback_runs(spx, candidate.k, theta), "P_QQQ": _pullback_runs(qqq, candidate.k, theta),
                     "PR_SPX": _pullback_runs(spx, candidate.k, 2 * theta),
@@ -874,11 +961,16 @@ def _diagnostics(result: WindowResult, progress: _Progress, parameters: RunParam
         evidence = progress.evidence[(candidate.k, theta)][kappa - t0:]
         system_runs = _system_runs(evidence, candidate.k, candidate.h)
         system = _enumerated("系统", kappa + 1, system_runs)
-        convergence[candidate] = ConvergenceDiag(
+        diagnosis = ConvergenceDiag(
             MappingProxyType({name: _enumerated(name, k, channels[name]) for name in CHANNEL_NAMES}), system,
             _same_risk_different_counters([item.day for item in evidence], system_runs, system.first_common_local))
+        note(candidate_key(candidate), "收敛枚举")
+        convergence[candidate] = diagnosis
     reference_runs = tuple(EnumeratedRun(initial, tuple(item.risk for item in run_reference(initial, trend, average)))
                            for initial in reference_initial_states())
-    return Diagnostics(MappingProxyType({"SPX": _drawdowns(progress.spx), "QQQ": _drawdowns(progress.qqq)}),
-                       MappingProxyType(leverage), MappingProxyType(convergence),
-                       _enumerated(REFERENCE, k, reference_runs))
+    reference_enumerated = _enumerated(REFERENCE, k, reference_runs)
+    note(REFERENCE, "收敛枚举")
+    drawdowns = {"SPX": _drawdowns(progress.spx), "QQQ": _drawdowns(progress.qqq)}
+    note("SPX、QQQ", "回撤")
+    return Diagnostics(MappingProxyType(drawdowns), MappingProxyType(leverage), MappingProxyType(convergence),
+                       reference_enumerated)

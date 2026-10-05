@@ -64,15 +64,68 @@ class DataEntryError(ValueError):
 
 
 class MissingPriceEntryError(DataEntryError):
-    """缺少必需价格：截止日以内的交易日整行缺失，或某行的价格为空。"""
+    """缺少必需价格：截止日以内的交易日整行缺失，或某行的价格为空。
+
+    结构化只读属性（阶段四字段级设计稿第三节第 2 小节；构造时一次写定，未涉及的为空元组，资产未知时为 None）：
+    asset、missing_value_days（行存在、value 为空）、missing_row_days（交易日整行缺失）、extra_days。
+    能提供的证据范围随抛出位置不同：parse_rows 在首个空 value 处抛出时只有该行一日；check_trading_axis 只缺日时
+    为全部整行缺失日。消息与 reason 不变。
+    """
 
     reason = REASON_MISSING_PRICE
 
+    def __init__(self, message: str, *, asset: str | None = None, missing_value_days: Sequence[dt.date] = (),
+                 missing_row_days: Sequence[dt.date] = (), extra_days: Sequence[dt.date] = ()) -> None:
+        super().__init__(message)
+        self._asset = asset
+        self._missing_value_days = tuple(missing_value_days)
+        self._missing_row_days = tuple(missing_row_days)
+        self._extra_days = tuple(extra_days)
+
+    @property
+    def asset(self) -> str | None:
+        return self._asset
+
+    @property
+    def missing_value_days(self) -> tuple[dt.date, ...]:
+        return self._missing_value_days
+
+    @property
+    def missing_row_days(self) -> tuple[dt.date, ...]:
+        return self._missing_row_days
+
+    @property
+    def extra_days(self) -> tuple[dt.date, ...]:
+        return self._extra_days
+
 
 class DataInputError(DataEntryError):
-    """输入校验失败：格式、表头、日期、来源、价格词法、登记值、修正条目、截止日等不符合要求。"""
+    """输入校验失败：格式、表头、日期、来源、价格词法、登记值、修正条目、截止日等不符合要求。
+
+    结构化只读属性（设计稿第三节第 2 小节；只在 check_trading_axis 抛出时填写，其他位置为 None 与空元组）：
+    asset、missing_row_days、extra_days。消息与 reason 不变。
+    """
 
     reason = REASON_INVALID_INPUT
+
+    def __init__(self, message: str, *, asset: str | None = None, missing_row_days: Sequence[dt.date] = (),
+                 extra_days: Sequence[dt.date] = ()) -> None:
+        super().__init__(message)
+        self._asset = asset
+        self._missing_row_days = tuple(missing_row_days)
+        self._extra_days = tuple(extra_days)
+
+    @property
+    def asset(self) -> str | None:
+        return self._asset
+
+    @property
+    def missing_row_days(self) -> tuple[dt.date, ...]:
+        return self._missing_row_days
+
+    @property
+    def extra_days(self) -> tuple[dt.date, ...]:
+        return self._extra_days
 
 
 def read_file_bytes(path: Path) -> bytes:
@@ -176,19 +229,19 @@ def parse_price(text: str) -> Decimal:
     return price
 
 
-def parse_rows(raw: bytes, cutoff: dt.date) -> tuple[tuple[dt.date, Decimal, str], ...]:
-    """截止日以内各行的（日期，收盘价，来源）（补充裁决第四节第 3 部分）。
+def _scan_rows(raw: bytes, cutoff: dt.date):  # noqa: ANN202 —— 生成器；本模块不新增导入，故不写 Iterator 注解
+    """逐行解析的循环体（原 parse_rows 的循环原文搬入；设计稿第三节第 3 小节；补充五第一节第 2 小节第 1 条）。
 
+    按原顺序产出截止日以内的“合格行”（日期，价格，来源）或“空价格行”（日期，None，来源）；其他错误抛与原来相同的异常。
     遇到空行只记下“有待定的空行”，不向后扫描；遇到非空行先只取日期字段：
     日期晚于截止日即停止（待定的空行不作判断）；不晚于截止日而此前有待定的空行，报错；
-    处理完日期等于截止日的那条记录后立即停止，不再处理其后的任何行。到达文件末尾时，待定的空行不作判断。
-
-    八列口径（负责人裁决 D16（2026-10-04），取代补充裁决第二节第 2 小节表头口径）：截止日以内每行恰 8 个字段；
-    来源取下标 7、价格取下标 1，先来源后价格；下标 2—6 不解析、不校验；value 为空不以 close 回填。
+    处理完日期等于截止日的那条记录（含空价格行）后立即停止，不再处理其后的任何行。到达文件末尾时，待定的空行不作判断。
+    每条记录（含空价格行）只做一次日期格式、重复、乱序、截止日、字段数、来源校验；重复与乱序比较的前一条记录包括空价格行。
+    唯一区分在来源校验之后、价格解析之前：value 恰为空串即产出空价格行，不解析价格。
     """
     lines = physical_lines(raw)
     _check_header(lines)
-    rows: list[tuple[dt.date, Decimal, str]] = []
+    last: dt.date | None = None
     pending_blank = False
     for line in lines[1:]:
         if is_blank(line):
@@ -199,8 +252,8 @@ def parse_rows(raw: bytes, cutoff: dt.date) -> tuple[tuple[dt.date, Decimal, str
             break
         if pending_blank:
             raise DataInputError(f"数据记录之间出现空行：{day} 这一行之前")
-        if rows and day <= rows[-1][0]:
-            raise DataInputError(f"日期重复或乱序：{rows[-1][0]} 之后是 {day}")
+        if last is not None and day <= last:
+            raise DataInputError(f"日期重复或乱序：{last} 之后是 {day}")
         try:
             fields = line.decode("utf-8").split(",")
         except UnicodeDecodeError as error:
@@ -208,10 +261,35 @@ def parse_rows(raw: bytes, cutoff: dt.date) -> tuple[tuple[dt.date, Decimal, str
         if len(fields) != 8:
             raise DataInputError(f"{day} 这一行不是八个字段")
         source = parse_source(fields[7])
-        rows.append((day, parse_price(fields[1]), source))
+        last = day
+        yield day, (None if fields[1] == "" else parse_price(fields[1])), source
         if day == cutoff:
             break
+
+
+def parse_rows(raw: bytes, cutoff: dt.date, *, asset: str | None = None) -> tuple[tuple[dt.date, Decimal, str], ...]:
+    """截止日以内各行的（日期，收盘价，来源）（补充裁决第四节第 3 部分）。逐行规则见 _scan_rows。
+
+    八列口径（负责人裁决 D16（2026-10-04），取代补充裁决第二节第 2 小节表头口径）：截止日以内每行恰 8 个字段；
+    来源取下标 7、价格取下标 1，先来源后价格；下标 2—6 不解析、不校验；value 为空不以 close 回填。
+
+    遇首个空价格行即抛 MissingPriceEntryError：类型、reason、消息（“价格为空”）与原来经价格解析抛出的相同；构造时写定
+    asset 与 missing_value_days =（该行日期,)，missing_row_days、extra_days 为空元组（补充四、补充五）。
+    asset（仅限关键字，补充二第三节）只用于填写该属性，不参与任何校验、计算或返回值；原调用方式不传，为 None。
+    """
+    rows: list[tuple[dt.date, Decimal, str]] = []
+    for day, price, source in _scan_rows(raw, cutoff):
+        if price is None:
+            raise MissingPriceEntryError("价格为空", asset=asset, missing_value_days=(day,))
+        rows.append((day, price, source))
     return tuple(rows)
+
+
+def _axis_gaps(first_day: dt.date, cutoff: dt.date, days: Sequence[dt.date]
+               ) -> tuple[tuple[dt.date, ...], tuple[dt.date, ...]]:
+    """（整行缺失的交易日，多出的非交易日），各自升序（原 check_trading_axis 的比较原文搬移）。"""
+    expected = stock_trading_days(first_day, cutoff)
+    return tuple(sorted(set(expected) - set(days))), tuple(sorted(set(days) - set(expected)))
 
 
 def check_trading_axis(asset: str, first_day: dt.date, cutoff: dt.date, days: Sequence[dt.date]) -> None:
@@ -220,10 +298,9 @@ def check_trading_axis(asset: str, first_day: dt.date, cutoff: dt.date, days: Se
     整行缺失、多出非交易日都报错，并列出全部日期。
     原因分类（补充裁决 Q5）：只有整行缺失时为“缺少必需价格”；出现多出的非交易日时文件本身不合格式，
     记为“输入校验失败”（同时列出缺少的交易日）。
+    两种异常都带 asset、missing_row_days、extra_days（设计稿第三节第 2 小节）。
     """
-    expected = stock_trading_days(first_day, cutoff)
-    missing = sorted(set(expected) - set(days))
-    extra = sorted(set(days) - set(expected))
+    missing, extra = _axis_gaps(first_day, cutoff, days)
     if missing or extra:
         parts = []
         if missing:
@@ -232,8 +309,8 @@ def check_trading_axis(asset: str, first_day: dt.date, cutoff: dt.date, days: Se
             parts.append("多出非交易日 " + "、".join(str(day) for day in extra))
         message = f"{asset} 的日期与交易日轴不符：" + "；".join(parts)
         if extra:
-            raise DataInputError(message)
-        raise MissingPriceEntryError(message)
+            raise DataInputError(message, asset=asset, missing_row_days=missing, extra_days=extra)
+        raise MissingPriceEntryError(message, asset=asset, missing_row_days=missing)
 
 
 def check_corrections(asset: str, cutoff: dt.date, rows: Sequence[tuple[dt.date, Decimal, str]],
@@ -264,26 +341,77 @@ def check_corrections(asset: str, cutoff: dt.date, rows: Sequence[tuple[dt.date,
         raise DataInputError(f"{asset} 的修正条目核对不符：" + "；".join(problems))
 
 
-def read_until(path: Path, asset: str, cutoff: dt.date, registered: RegisteredFile,
-               decisions: Sequence[DecisionEntry]) -> AssetSeries:
-    """读取某资产截至截止日的收盘价。整个过程只打开文件一次。
-
-    打开文件之前依次检查：登记值属于该资产；截止日是 NYSE 交易日；截止日不早于该资产的登记数据覆盖首日
-    （取自 registered，不读文件）。任一不符即报错，不打开行情文件（补充裁决第二节第 6 条）。
-    """
+def precheck_read(asset: str, cutoff: dt.date, registered: RegisteredFile) -> None:
+    """开读前检查（原 read_until 打开文件之前的三项，原文搬移；设计稿第三节第 1 小节）：登记值属于该资产；
+    截止日是 NYSE 交易日；截止日不早于该资产的登记数据覆盖首日（取自 registered，不读文件）。
+    任一不符即报错，调用方不得打开行情文件（补充裁决第二节第 6 条）。"""
     if registered.asset != asset:
         raise DataInputError(f"登记值属于 {registered.asset}，不是 {asset}")
     if not is_stock_trading_day(cutoff):
         raise DataInputError(f"截止日 {cutoff} 不是 NYSE 交易日")
     if cutoff < registered.first_date:
         raise DataInputError(f"截止日 {cutoff} 早于 {asset} 的登记数据覆盖首日 {registered.first_date}")
-    raw = read_file_bytes(path)
+
+
+def parse_until(raw: bytes, asset: str, cutoff: dt.date, registered: RegisteredFile,
+                decisions: Sequence[DecisionEntry]) -> AssetSeries:
+    """严格读取：原 read_until 读入字节之后的全部步骤，原文搬移（设计稿第三节第 1 小节）；只作用于给定的同一份字节。
+    parse_rows 传入 asset（补充二第三节）。"""
     verify_registered(file_metadata(raw), registered)
-    rows = parse_rows(raw, cutoff)
+    rows = parse_rows(raw, cutoff, asset=asset)
     check_trading_axis(asset, registered.first_date, cutoff, [day for day, _, _ in rows])
     check_corrections(asset, cutoff, rows, decisions)
     return AssetSeries(asset, registered.first_date, cutoff, {day: price for day, price, _ in rows},
                        hashlib.sha256(raw).hexdigest())
+
+
+def read_until(path: Path, asset: str, cutoff: dt.date, registered: RegisteredFile,
+               decisions: Sequence[DecisionEntry]) -> AssetSeries:
+    """读取某资产截至截止日的收盘价。整个过程只打开文件一次。
+
+    打开文件之前依次检查：登记值属于该资产；截止日是 NYSE 交易日；截止日不早于该资产的登记数据覆盖首日
+    （取自 registered，不读文件）。任一不符即报错，不打开行情文件（补充裁决第二节第 6 条）。
+    阶段四拆分（设计稿第三节第 1 小节）：precheck_read → read_file_bytes → parse_until；对外签名与行为不变。
+    """
+    precheck_read(asset, cutoff, registered)
+    raw = read_file_bytes(path)
+    return parse_until(raw, asset, cutoff, registered, decisions)
+
+
+@dataclass(frozen=True)
+class DiagnosisSeries:
+    """前缀诊断读取的结果（设计稿第三节第 3 小节）：series.closes 不含缺价日；两类缺失日各自升序。"""
+
+    series: AssetSeries
+    missing_value_days: tuple[dt.date, ...]      # 行存在、value 为空
+    missing_row_days: tuple[dt.date, ...]        # 交易日整行缺失
+
+
+def diagnose_until(raw: bytes, asset: str, cutoff: dt.date, registered: RegisteredFile,
+                   decisions: Sequence[DecisionEntry]) -> DiagnosisSeries:
+    """前缀诊断读取（设计稿第三节第 3 小节）：输入与严格读取同一份字节，不打开任何文件。
+
+    登记值核对与逐行校验同严格读取（日期格式、重复、乱序、截止日停止、8 字段、来源先于价格、价格词法）；唯一区别：
+    空 value 不抛出，记入 missing_value_days 并继续；交易日轴只缺日时不抛出，记入 missing_row_days；有多出日仍抛
+    与严格读取相同的 DataInputError；修正条目照常核对（修正条目所在日缺行或空值即抛 DataInputError）。
+    """
+    verify_registered(file_metadata(raw), registered)
+    rows: list[tuple[dt.date, Decimal, str]] = []
+    empty: list[dt.date] = []
+    present: list[dt.date] = []
+    for day, price, source in _scan_rows(raw, cutoff):            # 与严格读取同一个逐行校验（补充五）
+        present.append(day)
+        if price is None:
+            empty.append(day)
+        else:
+            rows.append((day, price, source))
+    missing, extra = _axis_gaps(registered.first_date, cutoff, present)
+    if extra:
+        check_trading_axis(asset, registered.first_date, cutoff, present)       # 抛出与严格读取相同的异常
+    check_corrections(asset, cutoff, rows, decisions)
+    series = AssetSeries(asset, registered.first_date, cutoff, {day: price for day, price, _ in rows},
+                         hashlib.sha256(raw).hexdigest())
+    return DiagnosisSeries(series, tuple(empty), missing)
 
 
 @dataclass(frozen=True)

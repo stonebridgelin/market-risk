@@ -37,12 +37,16 @@ PURE = ("snapshot", "inputs", "channels", "state_machine", "convergence", "refer
 STAGE_TWO = ("labels_r2", "r2", "r1", "selection", "confirmatory")
 # 阶段四新增的纯计算模块（研究组合层实现指令第六节）。
 STAGE_FOUR = ("research_run",)
+# 阶段四实施（M2 第一部分指令第一节第 9 小节第 1 条）：算法侧两个新模块（并入 ALGORITHM，例外为空）；
+# 边界侧两个新模块另成一组（不并入 BOUNDARY，既有按行登记的 BOUNDARY_EXCEPTIONS 不改）。
+STAGE_FOUR_OUTER = ("registered_v20", "development_compare")
+BOUNDARY_STAGE_FOUR = ("development_output", "development_run")
 
 # ---------------------------------------------------------------------------
 # 模块职责表（定稿第一节第 1 部分）
 # ---------------------------------------------------------------------------
 
-ALGORITHM = (*PURE, *STAGE_TWO, *STAGE_FOUR, "dataset_v20", "provenance_v20")
+ALGORITHM = (*PURE, *STAGE_TWO, *STAGE_FOUR, "dataset_v20", "provenance_v20", *STAGE_FOUR_OUTER)
 BOUNDARY = ("data_v20", "config_v20", "verify_dataset")
 INITIALIZERS = (ROOT / "src" / "market_risk" / "__init__.py", PACKAGE / "__init__.py")
 
@@ -55,6 +59,11 @@ OUTSIDE: dict[str, frozenset[str]] = {
     "config_v20": frozenset({"market_risk", "market_risk.config"}),
     "verify_dataset": frozenset({"market_risk"}),
     "research_run": frozenset({"market_risk"}),
+    # 阶段四实施（第 9 小节第 2 条；以实现后的实际导入为准，待负责人核对）。
+    "registered_v20": frozenset({"market_risk", "market_risk.precision"}),
+    "development_compare": frozenset({"market_risk"}),
+    "development_output": frozenset({"market_risk", "market_risk.storage", "market_risk.storage.paths"}),
+    "development_run": frozenset({"market_risk"}),
 }
 # 实际加载的本包模块（不含包本身；每个集合都包含被检查模块自己）。
 INSIDE: dict[str, frozenset[str]] = {name: frozenset(items.split()) for name, items in {
@@ -78,6 +87,14 @@ INSIDE: dict[str, frozenset[str]] = {name: frozenset(items.split()) for name, it
     "verify_dataset": "verify_dataset",
     "research_run": "channels confirmatory convergence execution inputs labels_r2 nav r1 r2 reference research_run "
                     "selection snapshot state_machine",
+    # 阶段四实施（第 9 小节第 2 条；以实现后的实际导入为准，待负责人核对）。
+    "registered_v20": "channels confirmatory convergence execution inputs labels_r2 nav provenance_v20 r1 r2 "
+                      "reference registered_v20 research_run selection snapshot state_machine",
+    "development_compare": "channels confirmatory convergence development_compare execution inputs labels_r2 nav r1 "
+                           "r2 reference research_run selection snapshot state_machine",
+    "development_output": "channels confirmatory convergence development_compare development_output execution "
+                          "inputs labels_r2 nav r1 r2 reference research_run selection snapshot state_machine",
+    "development_run": "development_run",
 }.items()}
 
 # ---------------------------------------------------------------------------
@@ -87,13 +104,15 @@ INSIDE: dict[str, frozenset[str]] = {name: frozenset(items.split()) for name, it
 
 PURE_TESTS = tuple(f"test_wavewarn_v20_{name}.py" for name in (
     "snapshot", "inputs", "channels", "state_machine", "convergence", "boundaries", "reference", "execution", "nav",
-    "labels_r2", "r2", "r1_selection", "confirmatory", "provenance", "research_run"))
+    "labels_r2", "r2", "r1_selection", "confirmatory", "provenance", "research_run",
+    "development_compare", "registered"))
 # test_wavewarn_v20_research_run.py：纯算法测试，导入 NYSE 日历库生成构造轴。
 TEST_DUTIES: dict[str, tuple[str, ...]] = {
     "纯算法测试": PURE_TESTS,
     "辅助文件": ("wavewarn_v20_helpers.py",),
-    "构造文件读写测试": ("test_wavewarn_v20_data_entry.py", "test_wavewarn_v20_config_entry.py"),
-    "子进程测试": ("test_wavewarn_v20_verify_dataset.py",),
+    "构造文件读写测试": ("test_wavewarn_v20_data_entry.py", "test_wavewarn_v20_config_entry.py",
+                   "test_wavewarn_v20_development_output.py"),
+    "子进程测试": ("test_wavewarn_v20_verify_dataset.py", "test_wavewarn_v20_development_run.py"),
     "隔离检查": ("test_v20_isolation.py",),
     "插件自测": ("test_v20_data_guard.py",),
     # 定稿的测试职责表没有列出拦截插件本身；这里登记为“照旧”，不适用静态检查（待负责人确认）。
@@ -402,6 +421,59 @@ TEST_EXCEPTIONS: frozenset[Allowed] = frozenset({
             "比对须读取场景、manifest 与工具输出，并核对其 SHA-256（A 定稿第四、八节）",
             "只读两份 manifest 所在目录中的场景与 manifest、工具检出目录中的 audit_v20.py（只算哈希）、"
             "比对输出目录与构造目录中的文件、tests/ 下的接线源码（只算哈希）", 1, 1),
+    # 阶段四实施（M2 第一部分指令第一节第 9 小节第 5 条）：逐处登记，待负责人核对。
+    Allowed("test_wavewarn_v20_development_output.py", "put", "path.write_bytes(data)", "write_bytes",
+            WRITE_REASON, "只写 tmp_path 下的构造文件（独占写入与改名“目标已存在”的前置文件）", 1, 1),
+    Allowed("test_wavewarn_v20_development_output.py", "get", "return path.read_bytes()", "read_bytes",
+            "须读回被测函数写出的文件，核对格式、清单与“正式目录逐字节不变”（M2 指令第一节第 5 小节第 5 条）",
+            "只读 tmp_path 下由被测函数或本文件 put 写出的文件", 1, 1),
+    Allowed("test_wavewarn_v20_development_run.py", "<module>", "import subprocess", "subprocess",
+            "入口的演习必须在新的解释器里执行（钩子安装不可撤销；M2 指令第三节）",
+            "只供本文件的 run_process 使用", 1, 1),
+    Allowed("test_wavewarn_v20_development_run.py", "put", "path.write_bytes(data)", "write_bytes",
+            WRITE_REASON, "只写 tmp_path 下按仓库布局放置的构造源码占位、构造配置与构造行情", 1, 1),
+    Allowed("test_wavewarn_v20_development_run.py", "get", "return path.read_bytes()", "read_bytes",
+            "须读取演习输出，经外部判定函数核对工程完成状态与确定性（M2 指令第二节第 7 小节第 7 条、第三节）",
+            "只读 tmp_path 构造根下 reports/research/wavewarn_v20 中的演习输出", 1, 1),
+    Allowed("test_wavewarn_v20_development_run.py", "present", "return path.exists()", "exists",
+            "外部判定与失败处置断言须检查正式目录、失败目录与包外文件是否存在",
+            "只检查 tmp_path 构造根下 reports/research/wavewarn_v20 中的路径", 1, 1),
+    Allowed("test_wavewarn_v20_development_run.py", "run_process",
+            "return subprocess.run(arguments, cwd=cwd, env=environment, capture_output=True, text=True, "
+            "encoding=\"utf-8\",\n                          errors=\"replace\", check=False)",
+            "subprocess.run", "入口的演习必须在新的解释器里执行；构造根须以 git 建立并提交（M2 指令第三节）",
+            "只启动 git（构造根内的 init、add、commit、rm）与 sys.executable（-m 入口或 -c 注入脚本），"
+            "工作目录均为 tmp_path 下的构造根", 1, 1),
+})
+
+# 阶段四边界侧（M2 第一部分指令第一节第 9 小节第 4 条）：完整源码片段规则；网络导入与受保护目录字面路径没有例外。
+STAGE_FOUR_BOUNDARY_RULES = Rules(("subprocess", "ctypes", "multiprocessing", *NETWORK),
+                                  (*CALLS.values(), "mkdir", "makedirs", "rename", "replace", "unlink", "remove",
+                                   "rmdir", "rmtree", "touch", "fdopen", "popen"), True, PATH_FRAGMENTS)
+OUTPUT_REASON = "设计稿第八节：输出、清单、发布与失败证据的文件操作只经六个基本函数"
+STAGE_FOUR_BOUNDARY_EXCEPTIONS: frozenset[Allowed] = frozenset({
+    Allowed("development_output.py", "make_directory", "path.mkdir(parents=True, exist_ok=False)", "mkdir",
+            OUTPUT_REASON, "只建本次暂存目录（研究目录下 .staging_evaluation_development_<UTC>_<短提交>）", 1, 1),
+    Allowed("development_output.py", "write_new", 'path.open("xb")', "open", OUTPUT_REASON,
+            "独占新建写入；对象为本次暂存、失败目录中的文件与两个包外文件（审计钩子另行限制）", 1, 1),
+    Allowed("development_output.py", "read_back", "return path.read_bytes()", "read_bytes", OUTPUT_REASON,
+            "只读 allowed 列出的本次暂存、失败、正式目录与两个包外文件（函数内先检查）", 1, 1),
+    Allowed("development_output.py", "rename_directory", "source.rename(target)", "rename", OUTPUT_REASON,
+            "只改名本次暂存目录为正式目录或失败目录；目标已存在即失败", 1, 1),
+    Allowed("development_output.py", "path_exists", "return path.exists()", "exists", OUTPUT_REASON,
+            "只检查本次输出位置、正式目录与研究目录下的包外文件是否存在", 1, 1),
+    Allowed("development_output.py", "read_preflight_file", "content = path.read_bytes()", "read_bytes",
+            "设计稿第八节与 M2 指令第一节第 5 小节第 6 条：预检只读入口",
+            "只读 PREFLIGHT_FILES 中的相对路径（规范化后位于 root 之下、不位于 root/data 之下）；只在第 1 步", 1, 1),
+    Allowed("development_run.py", "_git", "import subprocess", "subprocess",
+            "M2 指令第一节第 6 小节第 4 条：预检中的 git 集中在一个函数", "只供 _git 使用", 1, 1),
+    Allowed("development_run.py", "_git",
+            'done = subprocess.run(["git", *arguments], cwd=root, capture_output=True, check=False)',
+            "subprocess.run", "M2 指令第一节第 6 小节第 4 条：预检中的 git 集中在一个函数",
+            "只调用 git rev-parse HEAD、git status --porcelain --untracked-files=all、git diff --cached --name-only",
+            1, 1),
+    Allowed("development_run.py", "main", "sys.addaudithook(audit := Audit())", "addaudithook",
+            "设计稿第七节：读取审计钩子在入口函数的第一条语句安装", "development_run.main 中唯一一处", 1, 1),
 })
 
 
@@ -420,6 +492,10 @@ def algorithm_files() -> list[Path]:
 
 def boundary_files() -> list[Path]:
     return [module_file(name) for name in BOUNDARY]
+
+
+def boundary_stage_four_files() -> list[Path]:
+    return [module_file(name) for name in BOUNDARY_STAGE_FOUR]
 
 
 def constructed_test_files() -> list[Path]:
@@ -479,12 +555,13 @@ def text_scan(paths: list[Path], banned: tuple[str, ...]) -> list[tuple[str, str
 def test_static_check_covers_the_expected_files() -> None:
     """检查范围由模块职责表与测试职责表确定，两表覆盖包内全部模块与 tests/ 下全部含 v20 的文件。"""
     stems = {path.stem for path in PACKAGE.glob("*.py")}
-    assert stems == {*ALGORITHM, *BOUNDARY, "__init__"}
-    assert not set(ALGORITHM) & set(BOUNDARY) and set(OUTSIDE) == set(INSIDE) == {*ALGORITHM, *BOUNDARY}
+    assert stems == {*ALGORITHM, *BOUNDARY, *BOUNDARY_STAGE_FOUR, "__init__"}
+    assert not set(ALGORITHM) & set(BOUNDARY) and set(OUTSIDE) == set(INSIDE) == {*ALGORITHM, *BOUNDARY,
+                                                                                  *BOUNDARY_STAGE_FOUR}
     registered = [name for names in TEST_DUTIES.values() for name in names]
     assert len(registered) == len(set(registered))                                # 每个文件恰好登记一次
     assert set(registered) == {path.name for path in TESTS.glob("*.py") if "v20" in path.name}
-    assert "wavewarn_v20_helpers.py" in registered and len(PURE_TESTS) == 15
+    assert "wavewarn_v20_helpers.py" in registered and len(PURE_TESTS) == 17
     for path in (*algorithm_files(), *boundary_files(), *constructed_test_files()):
         assert path.is_file(), path.name
 
@@ -527,6 +604,13 @@ def test_banned_list_is_the_registered_one() -> None:
         ("test_v20_independent_compare.py", "run_tool", "subprocess.run", 1, 1),
         ("test_wavewarn_v20_config_entry.py", "write", "write_text", 1, 1),
         ("test_wavewarn_v20_data_entry.py", "put", "write_bytes", 1, 1),
+        ("test_wavewarn_v20_development_output.py", "get", "read_bytes", 1, 1),
+        ("test_wavewarn_v20_development_output.py", "put", "write_bytes", 1, 1),
+        ("test_wavewarn_v20_development_run.py", "<module>", "subprocess", 1, 1),
+        ("test_wavewarn_v20_development_run.py", "get", "read_bytes", 1, 1),
+        ("test_wavewarn_v20_development_run.py", "present", "exists", 1, 1),
+        ("test_wavewarn_v20_development_run.py", "put", "write_bytes", 1, 1),
+        ("test_wavewarn_v20_development_run.py", "run_process", "subprocess.run", 1, 1),
         ("test_wavewarn_v20_verify_dataset.py", "<module>", "subprocess", 1, 1),
         ("test_wavewarn_v20_verify_dataset.py", "put", "write_bytes", 1, 1),
         ("test_wavewarn_v20_verify_dataset.py", "run", "subprocess.run", 1, 1),
@@ -534,6 +618,24 @@ def test_banned_list_is_the_registered_one() -> None:
         ("v20_compare_support.py", "put_bytes", "write_bytes", 1, 1),
     ]
     assert not {item.item for item in TEST_EXCEPTIONS} & set(TEST_NEVER)
+    # 阶段四边界侧规则与例外逐项清单（M2 指令第一节第 9 小节第 4 条第 6 项；待负责人核对）。
+    assert STAGE_FOUR_BOUNDARY_RULES == Rules(
+        ("subprocess", "ctypes", "multiprocessing", "urllib", "requests", "socket", "http"),
+        ("system", "open", "read_text", "read_bytes", "read_csv", "loadtxt", "stat", "exists", "write_text",
+         "write_bytes", "addaudithook", "mkdir", "makedirs", "rename", "replace", "unlink", "remove", "rmdir",
+         "rmtree", "touch", "fdopen", "popen"), True, ("data/market", "data" + chr(92) + "market"))
+    assert sorted((item.file, item.function, item.item, item.in_function, item.in_file)
+                  for item in STAGE_FOUR_BOUNDARY_EXCEPTIONS) == [
+        ("development_output.py", "make_directory", "mkdir", 1, 1),
+        ("development_output.py", "path_exists", "exists", 1, 1),
+        ("development_output.py", "read_back", "read_bytes", 1, 1),
+        ("development_output.py", "read_preflight_file", "read_bytes", 1, 1),
+        ("development_output.py", "rename_directory", "rename", 1, 1),
+        ("development_output.py", "write_new", "open", 1, 1),
+        ("development_run.py", "_git", "subprocess", 1, 1),
+        ("development_run.py", "_git", "subprocess.run", 1, 1),
+        ("development_run.py", "main", "addaudithook", 1, 1),
+    ]
 
 
 def test_stage_two_modules_import_only_this_package() -> None:
@@ -659,7 +761,7 @@ def test_addaudithook_is_called_only_in_the_entry_function() -> None:
         found += [(path.stem, scope.get(id(node))) for node in ast.walk(tree)
                   if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                   and node.func.attr == "addaudithook"]
-    assert found == [("verify_dataset", "main")]
+    assert found == [("development_run", "main"), ("verify_dataset", "main")]      # 阶段四实施（第 9 小节第 6 条）
 
 
 GUARD = TESTS / "v20_data_guard.py"
@@ -906,3 +1008,96 @@ def test_the_config_exception_is_the_only_read_yaml_call_in_this_file() -> None:
     mentions = [scope.get(id(node)) for node in ast.walk(tree)
                 if isinstance(node, ast.Constant) and node.value == "pyproject" + ".toml"]   # 拼接，避免计入本句
     assert mentions == ["test_guard_plugin_is_loaded_only_explicitly"]
+
+
+# ---------------------------------------------------------------------------
+# 阶段四实施新增（M2 第一部分指令第一节第 9 小节第 1、4 条）
+# ---------------------------------------------------------------------------
+
+
+def snippet_span(source: str, hit: Hit) -> tuple[int, int]:
+    """命中的完整片段在源码中所跨的行（含首尾行）。"""
+    extra = hit.text.count("\n")
+    lines = source.splitlines()
+    for start in range(max(1, hit.line - extra), hit.line + 1):
+        if hit.text in "\n".join(lines[start - 1:start + extra]):
+            return start, start + extra
+    raise AssertionError(f"片段不在源码中：{hit.text}")
+
+
+def stage_four_problems(name: str, source: str, allowed: frozenset[Allowed]) -> list[str]:
+    """阶段四边界文件的两层检查：按 AST 找出全部命中并以完整片段规则对应登记例外（网络导入与受保护目录字面路径
+    没有例外）；再以 BOUNDARY_BANNED 做文本扫描，每处文本命中所在行须落在某条已登记命中的完整片段所跨行内。"""
+    hits = ast_hits(name, source, STAGE_FOUR_BOUNDARY_RULES)
+    own = frozenset(item for item in allowed if item.file == name)
+    problems = [f"没有例外的写法：{hit.file}:{hit.line} {hit.item!r}" for hit in hits if hit.item in TEST_NEVER]
+    problems += exception_problems(hits, own)
+    keys = {(item.file, item.function, item.text, item.item) for item in own}
+    spans = [snippet_span(source, hit) for hit in hits if (hit.file, hit.function, hit.text, hit.item) in keys]
+    for _, scope, text, number, banned_item in text_hits(name, source, BOUNDARY_BANNED):
+        if not any(start <= number <= end for start, end in spans):
+            problems.append(f"登记片段以外的文本命中：{name}:{number} {scope} {banned_item!r} {text}")
+    return problems
+
+
+def test_stage_four_boundary_files_have_only_registered_hits() -> None:
+    for path in boundary_stage_four_files():
+        assert stage_four_problems(path.name, source_of(path), STAGE_FOUR_BOUNDARY_EXCEPTIONS) == [], path.name
+    # 每条登记都属于这两个文件之一（登记了却没有命中，由上面逐文件检查）。
+    assert {item.file for item in STAGE_FOUR_BOUNDARY_EXCEPTIONS} == {path.name for path in boundary_stage_four_files()}
+
+
+def test_algorithm_modules_do_not_import_stage_four_boundary_modules() -> None:
+    for name in ALGORITHM:
+        assert boundary_reference(imported_names(module_file(name)), BOUNDARY_STAGE_FOUR) == [], name
+
+
+STAGE_FOUR_SAMPLE = (
+    "import sys\n"
+    "def make(path):\n"
+    "    path.mkdir(parents=True,\n"
+    "               exist_ok=False)\n"
+    "def main():\n"
+    "    sys.addaudithook(print)\n"
+)
+STAGE_FOUR_SAMPLE_ALLOWED = frozenset({
+    Allowed("s.py", "make", "path.mkdir(parents=True,\n               exist_ok=False)", "mkdir", "构造", "构造", 1, 1),
+    Allowed("s.py", "main", "sys.addaudithook(print)", "addaudithook", "构造", "构造", 1, 1),
+})
+
+
+def test_stage_four_checker_fails_on_each_constructed_violation() -> None:
+    """检查器自测（构造源码，不读文件）：完全匹配时通过；未登记命中、登记未命中、同函数重复命中、同文件其他函数
+    出现相同原文、多行参数与登记片段不同、注释中出现禁用写法，各使检查失败。"""
+    def problems(source: str, allowed: frozenset[Allowed] = STAGE_FOUR_SAMPLE_ALLOWED) -> list[str]:
+        return stage_four_problems("s.py", source, allowed)
+
+    assert problems(STAGE_FOUR_SAMPLE) == []
+    unregistered = problems(STAGE_FOUR_SAMPLE + "def other(path):\n    path.unlink()\n")
+    assert any("未登记的命中" in item for item in unregistered)
+    missing = STAGE_FOUR_SAMPLE_ALLOWED | {Allowed("s.py", "make", "path.touch()", "touch", "构造", "构造", 1, 1)}
+    assert any("登记了却没有命中" in item for item in problems(STAGE_FOUR_SAMPLE, missing))
+    doubled = STAGE_FOUR_SAMPLE.replace("def main", "    path.mkdir(parents=True,\n               exist_ok=False)\n"
+                                        "def main")
+    assert any("命中次数不符" in item for item in problems(doubled))
+    elsewhere = STAGE_FOUR_SAMPLE + "def other(path):\n    path.mkdir(parents=True,\n               exist_ok=False)\n"
+    assert any("未登记的命中" in item for item in problems(elsewhere))
+    assert any("命中次数不符" in item for item in problems(elsewhere))
+    changed = STAGE_FOUR_SAMPLE.replace("exist_ok=False", "exist_ok=True")
+    assert any("未登记的命中" in item for item in problems(changed))
+    commented = STAGE_FOUR_SAMPLE + "# 这里不调用 subprocess\n"
+    assert any("登记片段以外的文本命中" in item for item in problems(commented))
+    documented = STAGE_FOUR_SAMPLE + 'def other():\n    """只读 data/market 下的文件。"""\n'
+    assert problems(documented) != []
+    network = STAGE_FOUR_SAMPLE + "import socket\n"
+    assert any("没有例外的写法" in item for item in problems(network))
+    replaced = STAGE_FOUR_SAMPLE + "TEXT = 'a'.replace('a', 'b')\n"                   # 名称相同的非文件调用同样命中
+    assert any("未登记的命中" in item for item in problems(replaced))
+
+
+def test_stage_four_registration_consistency() -> None:
+    """阶段四登记的一致性（补充六第一节第 1 小节第 2 条第 4 项：自两个既有测试原样移入，检查内容不变）。"""
+    assert not set(BOUNDARY_STAGE_FOUR) & {*ALGORITHM, *BOUNDARY}
+    for path in boundary_stage_four_files():
+        assert path.is_file(), path.name
+    assert not {item.item for item in STAGE_FOUR_BOUNDARY_EXCEPTIONS} & set(TEST_NEVER)

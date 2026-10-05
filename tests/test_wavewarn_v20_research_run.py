@@ -635,3 +635,139 @@ def test_l1_d14_segment_from_f_uses_actual_previous_state(axis: tuple[dt.date, .
             assert segment.pre_window and category is SegmentClass.PRE_WINDOW           # 窗口前已启动
     # 两组分别覆盖 S_{f−1} 为非提示与提示两种情形。
     assert previous_states[D14_SUBSET[0]] is Risk.NORMAL and previous_states[D14_SUBSET[1]] is not Risk.NORMAL
+
+
+# ---------------------------------------------------------------------------
+# 阶段四 M2 第一部分：journal（阶段四字段级设计稿第四节第 2 小节；M2 指令第二节第 3 小节第 4 条）。只追加。
+# ---------------------------------------------------------------------------
+
+from market_risk.wavewarn_v20.labels_r2 import MissingPriceError  # noqa: E402
+from market_risk.wavewarn_v20.r1 import R1Error  # noqa: E402
+
+
+class Recorder:
+    """列表记录器：只做追加。"""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, str, str, str]] = []
+
+    def __call__(self, event: str, item: str, field: str, stage: str) -> None:
+        self.events.append((event, item, field, stage))
+
+
+# 设计稿第四节第 2 小节表中每一行（事件，对象，字段）；对象以“候选键”“诊断对象”表示一类。
+JOURNAL_ROWS = (
+    ("derived", "公共", "输入派生量"), ("derived", "公共", "t0"), ("derived", "公共", "R2 事件"),
+    ("performance", "候选键", "通道与系统收敛日（含状态路径）"), ("performance", "主参照", "收敛（含状态路径）"),
+    ("performance", "一直持有", "净值"),
+    ("performance", "主参照", "逐日状态"), ("performance", "主参照", "信号"), ("performance", "主参照", "计划目标"),
+    ("performance", "主参照", "净值"), ("performance", "主参照", "执行政策"),
+    ("performance", "候选键", "系统逐日记录"), ("performance", "候选键", "信号与计划目标"),
+    ("performance", "候选键", "信号模拟净值"), ("performance", "候选键", "执行政策"), ("performance", "候选键", "R2"),
+    ("performance", "候选键", "段账"), ("performance", "候选键", "R1"), ("performance", "候选键", "分段"),
+    ("performance", "候选键", "候选记录"),
+    ("performance", "诊断对象", "回撤"), ("performance", "诊断对象", "杠杆因子"),
+    ("performance", "诊断对象", "收敛枚举"),
+)
+
+
+def journal_row(event: str, item: str, field: str, stage: str) -> tuple[str, str, str]:
+    """把一条记录归到表中的一行：候选键归“候选键”；诊断阶段的对象归“诊断对象”；“R2：SPX”等去掉资产后缀。"""
+    if stage == "诊断":
+        item = "诊断对象"
+    elif item.startswith("K="):
+        item = "候选键"
+    return event, item, field.split("：")[0]
+
+
+def test_m2_journal_none_and_recorder_give_equal_results(axis: tuple[dt.date, ...], snapshot: Snapshot) -> None:
+    """journal=None 与传入列表记录器两次运行的 WindowResult 完全相等；记录覆盖设计稿表中每一行至少一次；
+    表现信息事件都在 derived 事件之后，记录的阶段字段取当时的阶段。"""
+    plain = run_window(snapshot, spec(axis), parameters(diagnostics=True), SUBSET)
+    recorder = Recorder()
+    recorded = run_window(snapshot, spec(axis), parameters(diagnostics=True), SUBSET, journal=recorder)
+    assert recorded == plain and plain.stop is None and plain.diagnostics is not None
+    rows = {journal_row(*event) for event in recorder.events}
+    assert rows == set(JOURNAL_ROWS)
+    assert {event for event, _, _, _ in recorder.events} == {"derived", "performance"}
+    assert recorder.events[0] == ("derived", "公共", "输入派生量", "输入派生量")
+    keys = {item for _, item, _, _ in recorder.events if item.startswith("K=")}
+    assert keys == {research_run.candidate_key(candidate) for candidate in SUBSET}
+    assert any(stage == "诊断" for *_, stage in recorder.events) and recorder.events[-1][3] == "诊断"
+
+
+class NavErrorLookalike(Exception):
+    """与 NavError 同名的测试类（不是 nav.NavError）。"""
+
+
+NavErrorLookalike.__name__ = "NavError"
+
+
+@pytest.mark.parametrize("factory", [
+    lambda: RuntimeError("构造：回调失败"),
+    lambda: NavError("构造：与组合层捕获的业务异常同类型"),
+    lambda: NoStartError("构造：同类型"),
+    lambda: R1Error("构造：同类型"),
+    lambda: MissingPriceError("构造：同类型"),
+    lambda: NavErrorLookalike("构造：同名的测试类"),
+], ids=["RuntimeError", "NavError", "NoStartError", "R1Error", "MissingPriceError", "同名NavError"])
+@pytest.mark.parametrize("when", ["首个记录", "表现信息之中", "诊断阶段"])
+def test_m2_journal_exceptions_pass_through_unchanged(axis: tuple[dt.date, ...], snapshot: Snapshot,
+                                                     factory, when: str) -> None:
+    """回调抛出的普通异常（含与组合层业务捕获同一类型、以及同名的测试类）原样传出：run_window 抛出的正是该对象，
+    不返回停止结果、不被分类为任何出口；诊断阶段（_diagnostics，位于业务 try 之外）同样原样传出。"""
+    error = factory()
+    calls: list[str] = []
+
+    def failing(event: str, item: str, field: str, stage: str) -> None:
+        calls.append(field)
+        trigger = {"首个记录": len(calls) == 1, "表现信息之中": field == "信号模拟净值",
+                   "诊断阶段": stage == "诊断"}[when]
+        if trigger:
+            raise error
+
+    with pytest.raises(BaseException) as caught:
+        run_window(snapshot, spec(axis), parameters(diagnostics=True), SUBSET, journal=failing)
+    assert caught.value is error
+
+
+def test_m2_journal_base_exception_is_not_caught(axis: tuple[dt.date, ...], snapshot: Snapshot) -> None:
+    """回调抛 KeyboardInterrupt（BaseException，非 Exception）：不捕获，原样传出。"""
+    interrupt = KeyboardInterrupt()
+
+    def interrupting(*_: str) -> None:
+        raise interrupt
+
+    with pytest.raises(KeyboardInterrupt) as caught:
+        run_window(snapshot, spec(axis), parameters(), SUBSET, journal=interrupting)
+    assert caught.value is interrupt
+
+
+def test_m2_business_stop_is_unchanged_with_and_without_journal(axis: tuple[dt.date, ...],
+                                                                closes: dict[str, list[Decimal | None]],
+                                                                base: WindowResult) -> None:
+    """同一构造窗口由真实业务异常触发的停止结果（出口、阶段、异常类名、reason）在 journal=None 下与改动前相同
+    （期望值按开工版本源码的停止路径写出），传入记录器时也相同；改动前后停止记录的其余字段同样相等。"""
+    assert base.window is not None
+    cases = ((150, (Exit.NO_START, "t0", "NoStartError", "无法确定 t0")),
+             (base.window.j0, (Exit.EMPTY_WINDOW, "起点", "EmptyWindowError", "评价窗口为空")))
+    for last, expected in cases:
+        days = axis[:last + 1]
+        short = build(days, {asset: values[:last + 1] for asset, values in closes.items()})
+        plain = run_window(short, spec(days), parameters(), SUBSET)
+        recorder = Recorder()
+        recorded = run_window(short, spec(days), parameters(), SUBSET, journal=recorder)
+        assert plain.stop is not None
+        assert (plain.stop.exit, plain.stop.stage, plain.stop.exception_type, plain.stop.reason_code) == expected
+        assert recorded == plain
+        assert all(event == "derived" for event, *_ in recorder.events) or expected[0] is Exit.EMPTY_WINDOW
+
+
+def test_m2_journal_none_does_not_call_the_private_caller(axis: tuple[dt.date, ...], snapshot: Snapshot,
+                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    """journal=None 时不调用私有调用函数（M2 指令第二节第 3 小节第 3 条）。"""
+    def forbidden(*_: object) -> None:
+        raise AssertionError("journal=None 时调用了私有调用函数")
+
+    monkeypatch.setattr(research_run, "_record", forbidden)
+    assert run_window(snapshot, spec(axis), parameters(diagnostics=True), SUBSET).stop is None
