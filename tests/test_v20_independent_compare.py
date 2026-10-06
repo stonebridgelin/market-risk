@@ -1568,3 +1568,227 @@ def test_wiring_b_own_loss_text() -> None:
     record = support.Recorder()
     support.compare_b_own_loss(record, None, tool, "项目文字", "项目文字")
     assert record.summary()["检验层"]["own_loss_text 是否为 null"] == {"不一致": 1}
+
+
+# ---------------------------------------------------------------------------
+# 真实序列接线模式（阶段四 M2 第二部分指令修订六第五节第 3 小节；M1）：只追加。
+# 既有测试、cases/collect_cases、run_tool 一字不改。V20_COMPARE_SEQUENCE 与 V20_COMPARE_SEQUENCE_OUT 至少设置一个时
+# 参数化为一个序列场景（只设置一个即测试失败）；两者都未设置时参数化为空，不读取任何外部材料。
+# 序列模式不读也不设 V20_COMPARE_OUT；工具子进程时限取 V20_COMPARE_TOOL_TIMEOUT（秒，必填）。
+# ---------------------------------------------------------------------------
+
+import gzip  # noqa: E402  只追加：导入放在追加段内，既有导入段不改
+import json  # noqa: E402
+
+import v20_sequence_wiring as sequence  # noqa: E402
+
+SEQUENCE_ENV, SEQUENCE_OUT_ENV, TOOL_TIMEOUT_ENV = ("V20_COMPARE_SEQUENCE", "V20_COMPARE_SEQUENCE_OUT",
+                                                    "V20_COMPARE_TOOL_TIMEOUT")
+SEQUENCE_FORBIDDEN_ENVS = (OUT_ENV, FROM_ENV, ONLY_ENV, A2_ENV, TOOL_FROM_ENV, B_ENV)
+SEQUENCE_TIMEOUT_TEXT = "未完成（超时）"
+
+
+def sequence_cases() -> list[str]:
+    """两个序列变量都未设置时为空；至少设置一个时为 ["sequence"]（只设置一个由测试本身判失败）。"""
+    return ["sequence"] if os.environ.get(SEQUENCE_ENV) or os.environ.get(SEQUENCE_OUT_ENV) else []
+
+
+SEQUENCE_CASES = sequence_cases()
+
+
+def run_tool_timed(scenario: Path, tool_out: Path, timeout: float) -> tuple[int, float, str]:
+    """与 run_tool 第 189—193 行相同的命令、工作目录与环境变量（工具绑定固定为 NEW_TOOL），另加 timeout；
+    超时时 subprocess.run 终止子进程并抛 TimeoutExpired，由调用处记录“未完成（超时）”，不重试。"""
+    environment = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONDONTWRITEBYTECODE": "1"}
+    started = time.perf_counter()
+    done = subprocess.run([sys.executable, str(NEW_AUDIT), str(scenario), str(tool_out)],
+                          cwd=Path(support.NEW_TOOL.root), env=environment, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", check=False, timeout=timeout)
+    return done.returncode, time.perf_counter() - started, done.stderr[-4000:]
+
+
+def sequence_settings() -> tuple[Path, Path, float]:
+    """序列模式的三个变量：两个目录须同时设置；其他比对变量须未设置；时限须为有限正数。"""
+    folder, out = os.environ.get(SEQUENCE_ENV), os.environ.get(SEQUENCE_OUT_ENV)
+    assert folder and out, f"{SEQUENCE_ENV} 与 {SEQUENCE_OUT_ENV} 须同时设置"
+    for variable in SEQUENCE_FORBIDDEN_ENVS:
+        assert variable not in os.environ, f"序列模式中 {variable} 必须未设置"
+    text = os.environ.get(TOOL_TIMEOUT_ENV)
+    assert text, f"未设置 {TOOL_TIMEOUT_ENV}（序列模式必填）"
+    seconds = float(text)
+    assert 0 < seconds < float("inf"), f"{TOOL_TIMEOUT_ENV} 须为有限正数：{text}"
+    return Path(folder), Path(out), seconds
+
+
+def sequence_project(record: support.Recorder, out: Path, name: str, data: dict, tool: dict) -> tuple[dict, dict]:
+    """项目侧：构造输入（out/构造输入/<场景名>）→ CSV 入口与快照适配路径（make_snapshot）→ 输入层 →
+    project_full 与算法层 → 组合层（沿用 research_round）。逐层比对与状态分类全部沿用既有函数。"""
+    cutoff_text = support.scenario_cutoff(data)
+    cutoff = dt.date.fromisoformat(cutoff_text)
+    assert_decision_dates(data, cutoff)
+    root = out / "构造输入" / name
+    constructed = support.construct(data, root)
+    entry = support.csv_entry(constructed, cutoff)
+    adaptation = support.adapt(data, constructed, cutoff_text)
+    entry_info = {"CSV 入口实际结果": {"class": entry.stop_class, "reason": entry.stop_reason,
+                                     "message": entry.message, "decision_hits": dict(entry.decision_hits)},
+                  "适配路径验证": dict(adaptation.checks), "适配路径缺价日": dict(adaptation.missing),
+                  "构造文件哈希": dict(constructed.hashes)}
+    evidence = (support.axis_evidence(*support.constructed_axis_inputs(root), cutoff)
+                if needs_axis_evidence(tool) else None)
+    whole_row = support.compare_input_layer(record, tool, support.input_facts(entry, adaptation), cutoff_text,
+                                            evidence)
+    if whole_row is not None:
+        entry_info["整行缺失三项核对"] = whole_row
+    assert adaptation.snapshot is not None, f"{name} 快照适配路径未构造出快照：{dict(adaptation.checks)}"
+    project_fields = support.project_full(adaptation.snapshot)
+    support.compare_full(record, tool, project_fields)
+    entry_info["第二轮"] = research_round(record, out, name, data, cutoff_text, entry_info, tool, project_fields)
+    return project_fields, entry_info
+
+
+def sequence_summary(out: Path, payload: dict) -> None:
+    counts = payload["counts"]
+    lines = ["# 序列构造比对汇总（构造序列；列明范围内的构造比对结果，不是真实数据比对或算法资格通过）", "",
+             f"- 场景：{payload['name']}；工具退出码：{payload['tool_exit_code']}；状态：{payload['状态']}",
+             f"- 计数：{counts}", f"- 序列字段：{json.dumps(payload['sequence'], ensure_ascii=False, default=str)}", ""]
+    support.put_bytes(out / "汇总.md", ("\n".join(lines) + "\n").encode("utf-8"))
+
+
+@pytest.mark.parametrize("case", SEQUENCE_CASES, ids=SEQUENCE_CASES)
+def test_sequence_compare(case: str) -> None:
+    """序列模式：生成场景 → 工具子进程（限时）→ 项目各层 → 逐层比对 → 写出记录；普通不一致即停。"""
+    folder, out, seconds = sequence_settings()
+    source = support.sequence_scenario_source(folder, out, sequence.REGISTERED)
+    name = source.name
+    tool_out = out / "工具输出" / f"{name}.json"
+    tool_out.parent.mkdir(parents=True, exist_ok=True)
+    record_path = out / "逐场景比对" / f"{name}.json"
+    started = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    try:
+        exit_code, tool_seconds, stderr = run_tool_timed(source.scenario, tool_out, seconds)
+    except subprocess.TimeoutExpired as expired:
+        partial = expired.stderr if isinstance(expired.stderr, str) else repr(expired.stderr)
+        payload = {"name": name, "状态": SEQUENCE_TIMEOUT_TEXT, "started": started, "时限秒": seconds,
+                   "工具标准错误（已产生部分）": partial[-4000:] if partial else None,
+                   "sequence": support.sequence_record_fields(source, None, None, None)}
+        support.put_bytes(record_path, support.dump_json(payload))
+        pytest.fail(f"{name} 工具子进程{SEQUENCE_TIMEOUT_TEXT}（时限 {seconds} 秒），不重试；见 {record_path}")
+    tool_bytes = support.get_bytes(tool_out)
+    assert exit_code == 0, f"{name} 工具退出码 {exit_code}：{stderr}"
+    tool = support.parse_json(tool_bytes)
+    record = support.Recorder()
+    project_started = time.perf_counter()
+    project_fields, entry_info = sequence_project(record, out, name, dict(source.data), tool)
+    project_seconds = time.perf_counter() - project_started
+    support.put_bytes(out / "项目字段" / f"{name}.json", support.dump_json(project_fields))
+    counts = {status: record.total(status) for status in support.STATUSES}
+    counts["窗口末日边界"] = record.window_end()
+    research = entry_info["第二轮"]
+    payload = {"name": name, "kind": "sequence", "状态": "完成", "started": started, "tool_exit_code": exit_code,
+               "counts": counts, "by_layer": {layer: items for layer, items in record.summary().items()},
+               "details": record.details, "evidence": entry_info, "alignment": project_fields.get("alignment"),
+               "sequence": support.sequence_record_fields(source, tool_seconds, project_seconds, tool_bytes)}
+    support.put_bytes(record_path, support.dump_json(payload))
+    sequence_summary(out, payload)
+    support.assert_self_consistent(research.get("自洽检查") or {}, name)
+    stop = research.get("stop") or {}
+    assert stop.get("exit") not in ("未预期异常", "计算失败"), f"{name} run_window 停止：{stop}"
+    assert counts["不一致"] == 0, f"{name} 有 {counts['不一致']} 处不一致，见 {record_path}"
+
+
+def test_wiring_sequence_cases_follow_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """两个序列变量都未设置 → 参数化为空；设置任一 → 一个序列场景；序列模式不使用 V20_COMPARE_OUT。"""
+    for variable in (SEQUENCE_ENV, SEQUENCE_OUT_ENV):
+        monkeypatch.delenv(variable, raising=False)
+    assert sequence_cases() == []
+    monkeypatch.setenv(SEQUENCE_ENV, "unused")
+    assert sequence_cases() == ["sequence"]
+    assert OUT_ENV in SEQUENCE_FORBIDDEN_ENVS
+
+
+def test_wiring_sequence_settings_require_both_and_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    for variable in (SEQUENCE_ENV, SEQUENCE_OUT_ENV, TOOL_TIMEOUT_ENV, *SEQUENCE_FORBIDDEN_ENVS):
+        monkeypatch.delenv(variable, raising=False)
+    monkeypatch.setenv(SEQUENCE_ENV, "a")
+    with pytest.raises(AssertionError, match="须同时设置"):
+        sequence_settings()
+    monkeypatch.setenv(SEQUENCE_OUT_ENV, "b")
+    with pytest.raises(AssertionError, match="必填"):
+        sequence_settings()
+    for bad in ("0", "-1", "inf", "nan"):
+        monkeypatch.setenv(TOOL_TIMEOUT_ENV, bad)
+        with pytest.raises(AssertionError, match="有限正数"):
+            sequence_settings()
+    monkeypatch.setenv(TOOL_TIMEOUT_ENV, "3300")
+    assert sequence_settings() == (Path("a"), Path("b"), 3300.0)
+    monkeypatch.setenv(OUT_ENV, "c")
+    with pytest.raises(AssertionError, match="必须未设置"):
+        sequence_settings()
+
+
+def sequence_folder(tmp_path: Path, days: list[dt.date], origin_patch: dict | None = None) -> tuple[Path, bytes]:
+    """tmp_path 下的构造序列目录：快照、运行记录与 来源.json（K4 第 4 条六键）三个文件。"""
+    rows = ["date,spx_close,qqq_close", *(f"{day},{100 + index % 5}.25,{50 + index % 3}.50"
+                                          for index, day in enumerate(days))]
+    data = gzip.compress(("\n".join(rows) + "\n").encode("utf-8"), mtime=0)
+    folder = tmp_path / "输入"
+    support.put_bytes(folder / sequence.SNAPSHOT_FILE, data)
+    commit = "b" * 40
+    support.put_bytes(folder / sequence.RUN_RECORD_FILE,
+                      json.dumps({"cutoff": days[-1].isoformat(), "commit": commit}).encode("utf-8"))
+    origin = {"source_dir": "构造", "manifest_sha256": "c" * 64, "copied_at": "2026-10-05T00:00:00+00:00",
+              "commit": commit, "input_snapshot_sha256": support.sha256(data), "input_snapshot_bytes": len(data),
+              **(origin_patch or {})}
+    support.put_bytes(folder / support.SEQUENCE_ORIGIN_FILE, json.dumps(origin, ensure_ascii=False).encode("utf-8"))
+    return folder, data
+
+
+def test_wiring_sequence_scenario_source(tmp_path: Path) -> None:
+    """测试登记下的构造序列目录：生成场景并记录哈希、字节数、提交与登记来源；文件集合多一个即停；
+    快照哈希、字节数、提交不符（K4 第 5 条）抛 SequenceError。"""
+    days = [dt.date(2020, 1, 2) + dt.timedelta(days=offset) for offset in range(20)]
+    days = [day for day in days if day.weekday() < 5]
+    registration = sequence.Registration((("构造段", days[2], days[8]),), (("SPX", days[0]), ("QQQ", days[0])),
+                                         days[-1], "测试登记:接线自检")
+    folder, data = sequence_folder(tmp_path, days)
+    source = support.sequence_scenario_source(folder, tmp_path / "输出", registration)
+    assert source.name == "sequence_bbbbbbb" and source.scenario.is_file()
+    assert source.fields["快照 SHA-256"] == support.sha256(data) and source.fields["快照字节数"] == len(data)
+    assert source.fields["运行记录提交"] == "b" * 40
+    assert source.fields["场景 SHA-256"] == support.sha256(support.get_bytes(source.scenario))
+    assert source.data["meta"]["登记来源"] == "测试登记:接线自检" and source.data["axis"][-1] == days[-1].isoformat()
+    fields = support.sequence_record_fields(source, 1.23456, 2.0, b"xyz")
+    assert (fields["工具运行秒数"], fields["工具输出字节数"]) == (1.235, 3)
+    with pytest.raises(sequence.SequenceError, match="已存在"):
+        support.sequence_scenario_source(folder, tmp_path / "输出", registration)
+    for label, patch, text in (("哈希", {"input_snapshot_sha256": "d" * 64}, "快照 SHA-256 不符"),
+                               ("字节数", {"input_snapshot_bytes": len(data) + 1}, "快照字节数不符"),
+                               ("提交", {"commit": "e" * 40}, "commit 与 来源.json 不符")):
+        bad, _ = sequence_folder(tmp_path / label, days, patch)
+        with pytest.raises(sequence.SequenceError, match=text):
+            support.sequence_scenario_source(bad, tmp_path / f"输出_{label}", registration)
+    extra, _ = sequence_folder(tmp_path / "多文件", days)
+    support.put_bytes(extra / "多余.txt", b"x")
+    with pytest.raises(AssertionError, match="恰有"):
+        support.sequence_scenario_source(extra, tmp_path / "输出_多文件", registration)
+
+
+def test_wiring_sequence_origin_keys_and_types() -> None:
+    """K4 第 4 条：来源.json 恰六键；两哈希为 64 位小写十六进制字符串；字节数为 JSON 整数 ≥ 1（不接受字符串、浮点、
+    布尔、null）；commit 为 40 位小写十六进制；copied_at 为 ISO 8601；任一不符抛 SequenceError，不取默认值。"""
+    good = {"source_dir": "构造", "manifest_sha256": "c" * 64, "copied_at": "2026-10-05T00:00:00+00:00",
+            "commit": "b" * 40, "input_snapshot_sha256": "a" * 64, "input_snapshot_bytes": 47060}
+    assert support.sequence_origin_fields(dict(good)) == good
+    for key in good:
+        with pytest.raises(sequence.SequenceError, match="须恰有"):
+            support.sequence_origin_fields({name: value for name, value in good.items() if name != key})
+    with pytest.raises(sequence.SequenceError, match="须恰有"):
+        support.sequence_origin_fields({**good, "MANIFEST所列快照SHA256": "a" * 64})
+    bad_values = [("input_snapshot_bytes", value) for value in ("47060", 47060.0, True, None, 0, -1)]
+    bad_values += [("input_snapshot_sha256", value) for value in ("A" * 64, "a" * 63, " " + "a" * 64, 1, None)]
+    bad_values += [("manifest_sha256", "c" * 65), ("commit", "b" * 39), ("commit", "B" * 40),
+                   ("copied_at", "2026-13-05"), ("copied_at", 20261005), ("source_dir", ""), ("source_dir", None)]
+    for key, value in bad_values:
+        with pytest.raises(sequence.SequenceError, match="类型或格式不符"):
+            support.sequence_origin_fields({**good, key: value})

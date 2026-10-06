@@ -119,6 +119,11 @@ TEST_DUTIES: dict[str, tuple[str, ...]] = {
     "拦截插件": ("v20_data_guard.py",),
     # 构造比对接线（A 定稿第三节）：适用与“子进程测试”相同的静态检查规则。独立工具自身的测试在工具分支，不在本仓库。
     "比对接线": ("test_v20_independent_compare.py", "v20_compare_support.py"),
+    # 阶段四 M2 第二部分（指令修订六第三节 M3、第七节）：适用与“子进程测试”相同的静态检查规则；待负责人核对。
+    # N4 tests/test_v20_recompute.py 由回算脚本会话交付，集成时追加到“回算脚本测试”。
+    # 集成 N1—N4（可集成通知第三次交付第三节第 2 条）：N4 追加到“回算脚本测试”；待负责人核对。
+    "回算脚本测试": ("test_v20_recompute_integration.py", "test_v20_recompute.py"),
+    "序列接线测试": ("v20_sequence_wiring.py", "test_v20_sequence_wiring.py", "test_v20_prerun_check.py"),
 }
 
 
@@ -387,6 +392,13 @@ def exception_problems(hits: list[Hit], allowed: frozenset[Allowed]) -> list[str
 
 
 WRITE_REASON = "构造文件读写测试必须先把构造的字节或文本写进临时目录，才能用被测函数读取"
+TOOL_REASON_M2B = "序列接线须以子进程运行工具 1709880 与替身脚本，验证场景格式层与超时终止（指令修订六第六节第 2 小节）"
+PRE_REASON_M2B = ("运行前检查能力 N8 须在新的解释器中运行，构造仓库与工具工作树须以 git 建立"
+                  "（指令修订六第十节、第六节第 3 小节）")
+REC_REASON_M2B = "联检须以子进程运行冻结后的两层回算脚本（指令修订六第三节 N4b、第六节第 1 小节）"
+SEQ_REASON_M2B = "真实序列接线：快照与运行记录须读入、场景须写出后才能交给工具（指令修订六第五节第 3 小节）"
+N4_REASON_M2B = ("两层回算脚本的独立构造验收须在 tmp_path 写构造结果目录、以子进程运行 N1、N2 并读回报告"
+                 "（指令修订六第三节 N4、第六节第 1 小节）")
 TEST_EXCEPTIONS: frozenset[Allowed] = frozenset({
     Allowed("test_wavewarn_v20_data_entry.py", "put", "path.write_bytes(data)", "write_bytes",
             WRITE_REASON, "只写 tmp_path 下的构造行情文件（path = tmp_path / name）", 1, 1),
@@ -444,6 +456,110 @@ TEST_EXCEPTIONS: frozenset[Allowed] = frozenset({
             "subprocess.run", "入口的演习必须在新的解释器里执行；构造根须以 git 建立并提交（M2 指令第三节）",
             "只启动 git（构造根内的 init、add、commit、rm）与 sys.executable（-m 入口或 -c 注入脚本），"
             "工作目录均为 tmp_path 下的构造根", 1, 1),
+    # 集成 N1—N4：N4 tests/test_v20_recompute.py（回算脚本会话编写，本会话不改其字节）的实际命中逐条登记，待负责人核对。
+    # N4 以 importlib.util.spec_from_file_location 按路径加载 N1、N2，不在测试侧规则内、不产生命中，见 N4 自身的
+    # TEST_EXCEPTIONS 与实施记录第十四节。第五次交付起 N4 直接 import hashlib（负责人裁决 P3，用途限定为构造夹具
+    # MANIFEST.sha256 行的 SHA-256），不再经 N2 模块属性取用（第二轮订正此前注释）。
+    Allowed("test_v20_recompute.py", "<module>", "import subprocess", "subprocess", N4_REASON_M2B,
+            "只供本文件的 run_raw 使用", 1, 1),
+    Allowed("test_v20_recompute.py", "run_raw",
+            "completed = subprocess.run(command, capture_output=True, timeout=SUBPROCESS_TIMEOUT, check=False)",
+            "subprocess.run", N4_REASON_M2B,
+            "只以 sys.executable 运行仓库中的 recompute_a.py、recompute_b.py；参数为 tmp_path 下的构造结果目录与报告；"
+            "带 timeout", 1, 1),
+    Allowed("test_v20_recompute.py", "run_script",
+            'report = json.loads(out.read_text(encoding="utf-8")) if out.exists() else None', "exists", N4_REASON_M2B,
+            "只检查 tmp_path 下脚本报告是否写出", 1, 1),
+    Allowed("test_v20_recompute.py", "run_script",
+            'report = json.loads(out.read_text(encoding="utf-8")) if out.exists() else None', "read_text",
+            N4_REASON_M2B, "只读 tmp_path 下脚本写出的报告 JSON", 1, 1),
+    Allowed("test_v20_recompute.py", "write_project", "(root / name).write_bytes(data)", "write_bytes", WRITE_REASON,
+            "只写 tmp_path 下程序化生成的构造结果目录文件", 1, 1),
+    Allowed("test_v20_recompute.py", "write_project",
+            '(root / "MANIFEST.sha256").write_bytes("".join(lines).encode("utf-8"))',
+            "write_bytes", WRITE_REASON, "只写 tmp_path 下构造结果目录的 MANIFEST.sha256", 1, 1),
+    Allowed("test_v20_recompute.py", "edit_manifest",
+            'path.write_bytes(transform(path.read_text(encoding="utf-8")).encode("utf-8"))', "read_text",
+            N4_REASON_M2B, "只读 tmp_path 下构造结果目录的 MANIFEST.sha256（故障注入）", 1, 1),
+    Allowed("test_v20_recompute.py", "edit_manifest",
+            'path.write_bytes(transform(path.read_text(encoding="utf-8")).encode("utf-8"))', "write_bytes",
+            WRITE_REASON, "只改写 tmp_path 下构造结果目录的 MANIFEST.sha256（故障注入）", 1, 1),
+    Allowed("test_v20_recompute.py", "report_write_failure", 'blocker.write_bytes(b"x")', "write_bytes", WRITE_REASON,
+            "只在 tmp_path 下建普通文件作为不可写的父路径", 1, 1),
+    Allowed("test_v20_recompute.py", "report_write_failure",
+            'assert code == 2 and blocker.read_bytes() == b"x"', "read_bytes",
+            N4_REASON_M2B, "只读回 tmp_path 下该普通文件，核对 --out 已存在时原文件不变", 1, 1),
+    Allowed("test_v20_recompute.py", "report_write_failure",
+            "assert not target.exists() and list(target.parent.iterdir()) == []", "exists", N4_REASON_M2B,
+            "只检查 tmp_path 下写入中断后不留目标文件", 1, 1),
+    Allowed("test_v20_recompute.py", "test_scripts_import_whitelist_and_write_sites",
+            'tree = ast.parse(script.read_text(encoding="utf-8"))', "read_text", N4_REASON_M2B,
+            "只读仓库中的 recompute_a.py、recompute_b.py 源码做 AST 检查", 1, 1),
+    # 第五次交付新增：N4 读取自身源码，核对 N4 的直接导入白名单与 hashlib 使用位置（第二轮登记，待负责人核对）。
+    Allowed("test_v20_recompute.py", "test_scripts_import_whitelist_and_write_sites",
+            'own = ast.parse(Path(__file__).read_text(encoding="utf-8"))', "read_text", N4_REASON_M2B,
+            "只读 N4 自身源码（tests/test_v20_recompute.py）做 AST 检查", 1, 1),
+    # 阶段四 M2 第二部分（指令修订六第七节第 2 条）：逐处登记，待负责人核对。
+    # 另：v20_compare_support.py 既有 get_bytes、put_bytes 两条登记的对象，自本次起另含 V20_COMPARE_SEQUENCE 与
+    # V20_COMPARE_SEQUENCE_OUT 给出的目录（序列模式；两条登记原文不改，范围扩展在此注明，待负责人核对）。
+    Allowed("v20_sequence_wiring.py", "read_snapshot_csv", "return path.read_bytes()", "read_bytes", SEQ_REASON_M2B,
+            "只读 V20_COMPARE_SEQUENCE 目录或 tmp_path 中的 input_snapshot.csv.gz（一次读全部字节）", 1, 1),
+    Allowed("v20_sequence_wiring.py", "read_run_record", 'path.open("rb")', "open", SEQ_REASON_M2B,
+            "只读 V20_COMPARE_SEQUENCE 目录或 tmp_path 中的 run_record.json（只取 cutoff 与 commit）", 1, 1),
+    Allowed("v20_sequence_wiring.py", "write_scenario", "path.exists()", "exists", SEQ_REASON_M2B,
+            "目标场景文件已存在即失败（V20_COMPARE_SEQUENCE_OUT 下 构造输入/sequence_<短提交>/ 或 tmp_path）", 1, 1),
+    Allowed("v20_sequence_wiring.py", "write_scenario", 'partial.open("xb")', "open", SEQ_REASON_M2B,
+            "独占新建同目录临时文件 <场景>.partial，写完后 os.replace 改名为场景文件（replace 不在测试侧规则内，"
+            "此处一并注明）", 1, 1),
+    Allowed("v20_sequence_wiring.py", "write_scenario", "partial.exists()", "exists", SEQ_REASON_M2B,
+            "写入或改名失败时检查并删除临时文件（unlink 不在测试侧规则内，此处一并注明）", 1, 1),
+    Allowed("test_v20_sequence_wiring.py", "<module>", "import subprocess", "subprocess", TOOL_REASON_M2B,
+            "只供本文件的 run_command 使用", 1, 1),
+    Allowed("test_v20_sequence_wiring.py", "put", "path.write_bytes(data)", "write_bytes", WRITE_REASON,
+            "只写 tmp_path 下的构造快照、运行记录、场景副本与替身脚本", 1, 1),
+    Allowed("test_v20_sequence_wiring.py", "get", "return path.read_bytes()", "read_bytes",
+            "须读回工具输出、场景文件、替身脚本写出的 PID，并核对 audit_v20.py 的 SHA-256",
+            "只读 tmp_path 下的文件与工具检出目录中的 audit_v20.py（只算哈希）", 1, 1),
+    Allowed("test_v20_sequence_wiring.py", "run_command",
+            "return subprocess.run(arguments, cwd=cwd, env=environment, capture_output=True, text=True, "
+            "encoding=\"utf-8\",\n                          errors=\"replace\", check=False, timeout=timeout)",
+            "subprocess.run", TOOL_REASON_M2B,
+            "只启动 sys.executable（工具检出目录中哈希已核对的 audit_v20.py，或 tmp_path 下的替身脚本）与 tasklist；"
+            "均带 timeout", 1, 1),
+    Allowed("test_v20_prerun_check.py", "<module>", "import subprocess", "subprocess", PRE_REASON_M2B,
+            "只供本文件的 run 使用", 1, 1),
+    Allowed("test_v20_prerun_check.py", "put", "path.write_bytes(data)", "write_bytes", WRITE_REASON,
+            "只写 tmp_path 下的构造仓库、工具工作树、备份根占位文件与清单 JSON", 1, 1),
+    Allowed("test_v20_prerun_check.py", "get", "return path.read_bytes()", "read_bytes",
+            "须读回 N8 报告与审计钩子记录，计算构造文件哈希，并对 N8 源码做 AST 检查",
+            "只读 tmp_path 下的文件与仓库中的 docs/audit/运行前检查/v20_prerun_check.py", 1, 1),
+    Allowed("test_v20_prerun_check.py", "run",
+            "return subprocess.run(arguments, cwd=cwd, env=environment, capture_output=True, text=True, "
+            "encoding=\"utf-8\",\n                          errors=\"replace\", check=False, timeout=TIMEOUT)",
+            "subprocess.run", PRE_REASON_M2B,
+            "只启动 git（构造根内 init、add、commit、rev-parse）、cmd /c mklink /J（tmp_path 内目录联接）与 "
+            "sys.executable（N8 或带审计钩子的 -c 包装）；均带 timeout，工作目录在 tmp_path 下", 1, 1),
+    Allowed("test_v20_recompute_integration.py", "<module>", "import subprocess", "subprocess", REC_REASON_M2B,
+            "只供本文件的 run_script 使用", 1, 1),
+    Allowed("test_v20_recompute_integration.py", "get", "return path.read_bytes()", "read_bytes",
+            "须核对两脚本 SHA-256 等于冻结清单，并读取脚本报告与正式目录 MANIFEST.sha256",
+            "只读 docs/audit/独立回算/v20/ 下两脚本与冻结清单，以及 tmp_path 下的演习正式目录与脚本报告", 1, 1),
+    Allowed("test_v20_recompute_integration.py", "run_script",
+            "return subprocess.run(script_command(script, formal, out), cwd=out.parent, capture_output=True, "
+            "text=True,\n                          encoding=\"utf-8\", errors=\"replace\", check=False, "
+            "timeout=TIMEOUT)",
+            "subprocess.run", REC_REASON_M2B,
+            "只以 sys.executable 运行哈希已核对的 recompute_a.py、recompute_b.py；参数为 tmp_path 下的正式目录与报告；"
+            "带 timeout", 1, 1),
+    Allowed("test_v20_independent_compare.py", "run_tool_timed",
+            "done = subprocess.run([sys.executable, str(NEW_AUDIT), str(scenario), str(tool_out)],\n"
+            "                          cwd=Path(support.NEW_TOOL.root), env=environment, capture_output=True, "
+            "text=True,\n                          encoding=\"utf-8\", errors=\"replace\", check=False, "
+            "timeout=timeout)",
+            "subprocess.run", "序列模式须在子进程中运行独立工具 1709880，并以 V20_COMPARE_TOOL_TIMEOUT 限时"
+            "（指令修订六第五节第 3 小节）",
+            "只以 sys.executable 运行 NEW_TOOL 检出目录中哈希已核对的 audit_v20.py；参数为序列场景文件与 "
+            "V20_COMPARE_SEQUENCE_OUT 下的工具输出文件；带 timeout", 1, 1),
 })
 
 # 阶段四边界侧（M2 第一部分指令第一节第 9 小节第 4 条）：完整源码片段规则；网络导入与受保护目录字面路径没有例外。
@@ -499,7 +615,9 @@ def boundary_stage_four_files() -> list[Path]:
 
 
 def constructed_test_files() -> list[Path]:
-    return [*duty_files("构造文件读写测试"), *duty_files("子进程测试"), *duty_files("比对接线")]
+    return [*duty_files("构造文件读写测试"), *duty_files("子进程测试"), *duty_files("比对接线"),
+            # 阶段四 M2 第二部分（指令修订六第三节 M3）：两个新职责同样适用测试侧检查（收紧；待负责人核对）。
+            *duty_files("回算脚本测试"), *duty_files("序列接线测试")]
 
 
 def source_of(path: Path) -> str:
@@ -602,6 +720,32 @@ def test_banned_list_is_the_registered_one() -> None:
     assert registered == [
         ("test_v20_independent_compare.py", "<module>", "subprocess", 1, 1),
         ("test_v20_independent_compare.py", "run_tool", "subprocess.run", 1, 1),
+        # 阶段四 M2 第二部分（指令修订六第七节第 2 条）新增条目，待负责人核对：
+        ("test_v20_independent_compare.py", "run_tool_timed", "subprocess.run", 1, 1),
+        ("test_v20_prerun_check.py", "<module>", "subprocess", 1, 1),
+        ("test_v20_prerun_check.py", "get", "read_bytes", 1, 1),
+        ("test_v20_prerun_check.py", "put", "write_bytes", 1, 1),
+        ("test_v20_prerun_check.py", "run", "subprocess.run", 1, 1),
+        ("test_v20_recompute.py", "<module>", "subprocess", 1, 1),
+        ("test_v20_recompute.py", "edit_manifest", "read_text", 1, 1),
+        ("test_v20_recompute.py", "edit_manifest", "write_bytes", 1, 1),
+        ("test_v20_recompute.py", "report_write_failure", "exists", 1, 1),
+        ("test_v20_recompute.py", "report_write_failure", "read_bytes", 1, 1),
+        ("test_v20_recompute.py", "report_write_failure", "write_bytes", 1, 1),
+        ("test_v20_recompute.py", "run_raw", "subprocess.run", 1, 1),
+        ("test_v20_recompute.py", "run_script", "exists", 1, 1),
+        ("test_v20_recompute.py", "run_script", "read_text", 1, 1),
+        ("test_v20_recompute.py", "test_scripts_import_whitelist_and_write_sites", "read_text", 1, 1),
+        ("test_v20_recompute.py", "test_scripts_import_whitelist_and_write_sites", "read_text", 1, 1),
+        ("test_v20_recompute.py", "write_project", "write_bytes", 1, 1),
+        ("test_v20_recompute.py", "write_project", "write_bytes", 1, 1),
+        ("test_v20_recompute_integration.py", "<module>", "subprocess", 1, 1),
+        ("test_v20_recompute_integration.py", "get", "read_bytes", 1, 1),
+        ("test_v20_recompute_integration.py", "run_script", "subprocess.run", 1, 1),
+        ("test_v20_sequence_wiring.py", "<module>", "subprocess", 1, 1),
+        ("test_v20_sequence_wiring.py", "get", "read_bytes", 1, 1),
+        ("test_v20_sequence_wiring.py", "put", "write_bytes", 1, 1),
+        ("test_v20_sequence_wiring.py", "run_command", "subprocess.run", 1, 1),
         ("test_wavewarn_v20_config_entry.py", "write", "write_text", 1, 1),
         ("test_wavewarn_v20_data_entry.py", "put", "write_bytes", 1, 1),
         ("test_wavewarn_v20_development_output.py", "get", "read_bytes", 1, 1),
@@ -616,6 +760,11 @@ def test_banned_list_is_the_registered_one() -> None:
         ("test_wavewarn_v20_verify_dataset.py", "run", "subprocess.run", 1, 1),
         ("v20_compare_support.py", "get_bytes", "read_bytes", 1, 1),
         ("v20_compare_support.py", "put_bytes", "write_bytes", 1, 1),
+        ("v20_sequence_wiring.py", "read_run_record", "open", 1, 1),
+        ("v20_sequence_wiring.py", "read_snapshot_csv", "read_bytes", 1, 1),
+        ("v20_sequence_wiring.py", "write_scenario", "exists", 1, 1),
+        ("v20_sequence_wiring.py", "write_scenario", "exists", 1, 1),
+        ("v20_sequence_wiring.py", "write_scenario", "open", 1, 1),
     ]
     assert not {item.item for item in TEST_EXCEPTIONS} & set(TEST_NEVER)
     # 阶段四边界侧规则与例外逐项清单（M2 指令第一节第 9 小节第 4 条第 6 项；待负责人核对）。

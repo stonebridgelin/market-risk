@@ -2663,3 +2663,116 @@ def compare_b_r2(record: Recorder, key: str, tool: Mapping, results: Mapping, pr
             record.add("R2 判定", path, "未比较", key, None, None, B_ABSENT.format(key=path))
         return
     compare_r2_judgements(record, key, {"r2": tool_r2}, results, premise)
+
+
+# ---------------------------------------------------------------------------
+# 真实序列接线模式（阶段四 M2 第二部分指令修订六第五节第 3 小节；M2）：只追加。
+# 既有函数、映射、容差、状态分类一字不改；场景生成交给 tests/v20_sequence_wiring.py（依赖方向 support → 该模块）。
+# ---------------------------------------------------------------------------
+
+import v20_sequence_wiring as sequence_wiring  # noqa: E402  只追加：导入放在追加段内，既有导入段不改
+
+SEQUENCE_ORIGIN_FILE = "来源.json"
+SEQUENCE_FILES = (sequence_wiring.SNAPSHOT_FILE, sequence_wiring.RUN_RECORD_FILE, SEQUENCE_ORIGIN_FILE)
+# 来源.json 的完整字段集合（勘误及权限补充单定稿 K4 第 4 条）：恰六键，不多不少；类型与格式严格，不符抛 SequenceError。
+SEQUENCE_ORIGIN_KEYS = ("source_dir", "manifest_sha256", "copied_at", "commit", "input_snapshot_sha256",
+                        "input_snapshot_bytes")
+SEQUENCE_AUDIT = Path(NEW_TOOL.root) / "docs" / "audit" / "独立复核" / "v20" / "audit_v20.py"
+
+
+@dataclass(frozen=True)
+class SequenceSource:
+    """序列模式的一个场景：场景文件、场景名、场景内容与记录字段。"""
+
+    scenario: Path
+    name: str
+    data: Mapping
+    fields: Mapping[str, object]
+
+
+def iso_moment(value: object) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    try:
+        dt.datetime.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
+def sequence_origin_fields(origin: object) -> dict:
+    """来源.json 的键集与类型（K4 第 4 条）：source_dir 非空字符串；manifest_sha256、input_snapshot_sha256 为 64 位小写
+    十六进制字符串；copied_at 为 ISO 8601 字符串；commit 为 40 位小写十六进制字符串；input_snapshot_bytes 为 JSON 整数
+    且 ≥ 1（不接受字符串、浮点、布尔、null）。"""
+    if not isinstance(origin, dict) or sorted(origin) != sorted(SEQUENCE_ORIGIN_KEYS):
+        keys = sorted(origin) if isinstance(origin, dict) else type(origin).__name__
+        raise sequence_wiring.SequenceError(f"来源.json 须恰有 {list(SEQUENCE_ORIGIN_KEYS)}：{keys}")
+
+    def hexed(value: object, length: int) -> bool:
+        return isinstance(value, str) and re.fullmatch(f"[0-9a-f]{{{length}}}", value) is not None
+
+    size = origin["input_snapshot_bytes"]
+    checks = {"source_dir": isinstance(origin["source_dir"], str) and bool(origin["source_dir"]),
+              "manifest_sha256": hexed(origin["manifest_sha256"], 64), "copied_at": iso_moment(origin["copied_at"]),
+              "commit": hexed(origin["commit"], 40),
+              "input_snapshot_sha256": hexed(origin["input_snapshot_sha256"], 64),
+              "input_snapshot_bytes": type(size) is int and size >= 1}
+    bad = [key for key, ok in checks.items() if not ok]
+    if bad:
+        raise sequence_wiring.SequenceError(f"来源.json 的字段类型或格式不符：{bad}")
+    return dict(origin)
+
+
+def sequence_origin(folder: Path) -> dict:
+    """序列目录须恰有三个文件；来源.json 按 K4 第 4 条核验。"""
+    names = sorted(item.name for item in folder.iterdir())
+    assert names == sorted(SEQUENCE_FILES), f"序列目录须恰有 {sorted(SEQUENCE_FILES)}：{names}"
+    return sequence_origin_fields(parse_json(get_bytes(folder / SEQUENCE_ORIGIN_FILE)))
+
+
+def run_record_commit(path: Path) -> object:
+    """K4 第 5 条：只为核对“run_record.commit 与 来源.json 的 commit 一致”取 run_record.json 的 commit。"""
+    record = parse_json(get_bytes(path))
+    return record.get("commit") if isinstance(record, dict) else None
+
+
+def sequence_scenario_source(folder: Path, out: Path, registration: sequence_wiring.Registration) -> SequenceSource:
+    """读序列目录 → 按 K4 第 5 条核对快照 SHA-256 与字节数等于 来源.json、run_record.commit 等于 来源.json 的 commit →
+    以给定登记生成场景 JSON，写入 out/构造输入/sequence_<短提交>/；工具绑定固定为 NEW_TOOL（1709880），
+    audit_v20.py 的 SHA-256 现算并断言等于登记值。"""
+    origin = sequence_origin(folder)
+    data = sequence_wiring.read_snapshot_csv(folder / sequence_wiring.SNAPSHOT_FILE)
+    digest = sequence_wiring.check_snapshot_hash(data, origin["input_snapshot_sha256"])
+    if len(data) != origin["input_snapshot_bytes"]:
+        raise sequence_wiring.SequenceError(
+            f"快照字节数不符：实际 {len(data)}，来源.json {origin['input_snapshot_bytes']}")
+    commit = run_record_commit(folder / sequence_wiring.RUN_RECORD_FILE)
+    if commit != origin["commit"]:
+        raise sequence_wiring.SequenceError(f"run_record 的 commit 与 来源.json 不符：{commit!r}，{origin['commit']}")
+    cutoff = sequence_wiring.read_run_record(folder / sequence_wiring.RUN_RECORD_FILE)
+    name = f"sequence_{origin['commit'][:7]}"
+    rows = sequence_wiring.rows_from_bytes(data)
+    scenario = sequence_wiring.scenario_from_rows(rows, cutoff, digest, name, registration,
+                                                  sequence_wiring.parse_price)
+    target = out / "构造输入" / name / f"{name}.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    payload = sequence_wiring.scenario_bytes(scenario)
+    sequence_wiring.write_scenario(target, payload, None)
+    audit_sha256 = sha256(get_bytes(SEQUENCE_AUDIT))
+    assert audit_sha256 == NEW_TOOL.audit_sha256 == (
+        "8ff8081828c94134bc0d3e000ea77f3442564241438c8d444c601003bb19ca3d"), "audit_v20.py 哈希不符"
+    fields = {"序列来源": str(folder), "来源.json": origin, "快照 SHA-256": digest, "快照字节数": len(data),
+              "运行记录提交": origin["commit"], "截止日": cutoff.isoformat(), "场景 SHA-256": sha256(payload),
+              "登记来源": registration.source,
+              "工具": {"commit": NEW_TOOL.commit, "root": NEW_TOOL.root, "audit_sha256": audit_sha256}}
+    return SequenceSource(target, name, parse_json(payload), fields)
+
+
+def sequence_record_fields(source: SequenceSource, tool_seconds: float | None, project_seconds: float | None,
+                           tool_output: bytes | None) -> dict:
+    """逐场景记录的新增字段（第五节第 3 小节第 4 条）；工具输出本身不进导出包，只记字节数与 SHA-256。"""
+    return {**source.fields,
+            "工具运行秒数": None if tool_seconds is None else round(tool_seconds, 3),
+            "项目重建秒数": None if project_seconds is None else round(project_seconds, 3),
+            "工具输出字节数": None if tool_output is None else len(tool_output),
+            "工具输出 SHA-256": None if tool_output is None else sha256(tool_output)}
