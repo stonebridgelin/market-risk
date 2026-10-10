@@ -132,6 +132,21 @@ ENV_HAND = ("完整年度分类不可得",) * 4 + ("熊市",) * 2
 # 熊市一：i1 = bisect_right(days, 03-24) = 5、i2 = 6 → a = 4、b = 6、部分覆盖（段末 2002-10-09 晚于 days[6]）；
 # 熊市二：无收益区间。
 SEGMENT_MAP_HAND = (("部分覆盖", 0, 6), ("无收益区间", None, None), ("部分覆盖", 4, 6), ("无收益区间", None, None))
+# 晚窗口变体（修正批第一道门）：全部窗口日期由 2000-03-xx 改为 2005-03-xx，
+# first_day 2005-03-20 晚于 2000-03-24 → 覆盖判定不满足。
+# 市场环境：起点均在 2005 年、不在任何熊市内，2005 年末 2005-12-30 晚于轴末日 → 6 个区间全部“完整年度分类不可得”。
+# 分段：1999—2009 仍为 a = 0、b = 6、部分覆盖；2010—2016、熊市二仍为无收益区间；熊市一 (2000-03-24, 2002-10-09]：
+# i1 = max(bisect_right(days, 2000-03-24), 1) = 1，i2 = bisect_right(days, 2002-10-09) − 1 = −1 < i1 → 无收益区间。
+# 暴露替换：无熊市起点，全部候选 intervals 0。
+ENV_LATE_HAND = ("完整年度分类不可得",) * 6
+SEGMENT_MAP_LATE_HAND = (
+    ("部分覆盖", 0, 6),
+    ("无收益区间", None, None),
+    ("无收益区间", None, None),
+    ("无收益区间", None, None),
+)
+PREFIX_LIMIT = "前缀诊断运行（严格读取未通过：缺少必需价格）"
+COVERAGE_LIMIT = "开发窗口未覆盖登记区间（axis[j₀] 晚于 2000-03-24）"
 # 暴露替换：c = 1（t4 = 2000-03-24 为一级且在熊市）的候选有一个区间 2000-03-24/2000-03-27，U5 = 0.03125：
 # registered = log1p(0.6·0.03125) = log1p(0.01875)，substituted = log1p(0.3·0.03125) = log1p(0.009375)。
 SUBSTITUTION_HAND = (math.log1p(0.01875), math.log1p(0.009375), math.log1p(0.009375) - math.log1p(0.01875))
@@ -273,6 +288,15 @@ def gen_r2(order: int, asset: str, passing: bool) -> list[str]:
     return [table[(start + j) % len(table)] for j in range(5)]
 
 
+def model_categories(v: dict[str, object], order: int, asset: str) -> list[str] | None:
+    """某候选某资产的事件类别；资产 R2 事件不可得时为 None（无判定行）；r2_left 指定的候选 SPX 全部左截断。"""
+    if asset in v["r2_missing"]:
+        return None
+    if asset == "SPX" and v["r2_left"] == order:
+        return ["左截断"] * 5
+    return gen_r2(order, asset, v["r2_pass"])
+
+
 def gen_r2_counts(categories: list[str]) -> tuple[bool, int, int, int, bool | None]:
     """R2 计数（生成规则）。"""
     denominator = len(categories) - categories.count("左截断")
@@ -324,7 +348,17 @@ def gen_states(obj: str, positions: tuple[str, ...]) -> dict[str, object]:
 
 def variant(**changes: object) -> dict[str, object]:
     """构造变体参数。"""
-    base = {"evaluable2": True, "r2_pass": True, "missing_qqq": None, "history_gap": False, "usage": None}
+    base = {
+        "evaluable2": True,
+        "r2_pass": True,
+        "missing_qqq": None,
+        "history_gap": False,
+        "usage": [],
+        "late": False,
+        "r2_missing": (),  # R2 事件不可得的资产（裁决 F-1 项目表示：无判定行、五列空、records r2 为 null）
+        "r2_left": None,  # 该序号候选的 SPX 五个事件全部左截断（合法零分母）
+        "flat5": False,  # d5 收盘与 d4 相同（U5 = 0）：候选 6、7、8 只在区间 5 不同，ln W 精确相等而并列
+    }
     assert set(changes) <= set(base)
     base.update(changes)
     return base
@@ -352,6 +386,8 @@ def text(value: object) -> str:
 def build_model(v: dict[str, object]) -> dict[str, object]:
     """所有对象的路径与汇总（生成规则）。"""
     spx, qqq = list(SPX_TEXT), list(QQQ_TEXT)
+    if v["flat5"]:
+        spx[len(HISTORY) + 5], qqq[len(HISTORY) + 5] = spx[len(HISTORY) + 4], qqq[len(HISTORY) + 4]
     known = v["missing_qqq"]
     if known is not None:
         qqq[len(HISTORY) + known] = ""
@@ -396,7 +432,10 @@ def add_selection(model: dict[str, object]) -> None:
     hold_mdd = gen_mdd(gen_wealth(paths[(HOLD, "一直持有")])) if model["structure"] == "A" else None
     records = []
     for order, key in enumerate(KEYS):
-        r2 = {asset: gen_r2_counts(gen_r2(order, asset, model["v"]["r2_pass"])) for asset in ("SPX", "QQQ")}
+        r2 = {}
+        for asset in ("SPX", "QQQ"):
+            categories = model_categories(model["v"], order, asset)
+            r2[asset] = (None,) * 5 if categories is None else gen_r2_counts(categories)
         if model["structure"] == "A":
             wealth = gen_wealth(paths[(key, "信号模拟")])
             mdd = gen_mdd(wealth)
@@ -415,7 +454,8 @@ def add_selection(model: dict[str, object]) -> None:
             }
         )
     model["records"] = records
-    if model["structure"] == "B":
+    missing_r2 = any(r["r2"][asset][4] is None for r in records for asset in ("SPX", "QQQ"))
+    if model["structure"] == "B" or missing_r2:  # r1、log_wealth 或 r2 任一为空 → 缺值无法评价
         model["selection"] = ("缺值无法评价", [], None, [], None)
         return
     feasible = [r for r in records if r["r1"][3] and r["r2"]["SPX"][4] and r["r2"]["QQQ"][4]]
@@ -429,20 +469,19 @@ def add_selection(model: dict[str, object]) -> None:
 
 
 def add_constants(model: dict[str, object]) -> None:
-    """恒定仓位：主参照（总是）与选定候选（只在出口为选定时）；结构 B 下均不计算。"""
+    """恒定仓位：主参照（总是）与选定候选（只在出口为选定时）。平均权重只依赖计划目标，两种结构都算（答复单第 14 项
+    订正 (b)）；净值路径只在结构 A 下生成（结构 B 不计算净值，computed 为假）。"""
     sources = [REF] + ([model["selection"][4]] if model["selection"][0] == "选定" else [])
+    model["averages"] = {}
     model["constants"] = {}
-    if model["structure"] == "B":
-        return
     for source in sources:
         weights = [weights_of(p) for p in positions_of(source)[:N]]
         core = math.fsum(w[0] for w in weights) / N
         leverage = math.fsum(w[1] for w in weights) / N
-        model["constants"][source] = (core, leverage, core + 2.0 * leverage)
-        model["paths"][("恒定仓位：" + source, "恒定仓位")] = gen_returns([(core, leverage)] * N, model["us"])
-
-
-# ---------------------------------------------------------------- 生成：逐日表
+        model["averages"][source] = (core, leverage, core + 2.0 * leverage)
+        if model["structure"] == "A":
+            model["constants"][source] = model["averages"][source]
+            model["paths"][("恒定仓位：" + source, "恒定仓位")] = gen_returns([(core, leverage)] * N, model["us"])
 
 
 def daily_tables(model: dict[str, object]) -> dict[str, object]:
@@ -495,7 +534,7 @@ def judgement_tables(model: dict[str, object]) -> dict[str, object]:
     judgements, ledgers = [], []
     for order, key in enumerate(KEYS):
         for asset in ("SPX", "QQQ"):
-            for j, category in enumerate(gen_r2(order, asset, model["v"]["r2_pass"])):
+            for j, category in enumerate(model_categories(model["v"], order, asset) or []):
                 judgements.append([key, asset, f"1999-0{j + 1}-15", category, None, None, None, False])
             for j in range(3):
                 ledgers.append(
@@ -603,7 +642,8 @@ def segments_table(model: dict[str, object]) -> dict[str, object]:
     hold = model["paths"].get((HOLD, "一直持有"))
     for key in KEYS:
         signal = model["paths"].get((key, "信号模拟"))
-        for (name, start, end), (coverage, a, b) in zip(SEGMENT_BOUNDS, SEGMENT_MAP_HAND, strict=True):
+        mapping = SEGMENT_MAP_LATE_HAND if model["v"]["late"] else SEGMENT_MAP_HAND
+        for (name, start, end), (coverage, a, b) in zip(SEGMENT_BOUNDS, mapping, strict=True):
             if a is None:
                 rows.append([key, name, start, end, coverage, None, None, 0, None, False])
                 continue
@@ -622,11 +662,12 @@ def environment_files(model: dict[str, object]) -> tuple[dict[str, object], dict
     """environments.csv 与 descriptive.environment_summary（分类取人工表 ENV_HAND；summary 键恰为五个环境名，
     log_return_sums 键恰为 27 候选 + 主参照 + 一直持有；结构 A 为各分类区间 log1p(R) 之和，空分类为 0.0；
     结构 B 全为 null）。"""
-    rows = [[i + 1, DAYS[i], ENV_HAND[i], None] for i in range(N)]
+    env = ENV_LATE_HAND if model["v"]["late"] else ENV_HAND
+    rows = [[i + 1, DAYS[i], env[i], None] for i in range(N)]
     summary: dict[str, object] = {}
     members = [(key, "信号模拟") for key in KEYS] + [(REF, "信号模拟"), (HOLD, "一直持有")]
     for category in ENVIRONMENT_NAMES:
-        indexes = [i for i in range(N) if ENV_HAND[i] == category]
+        indexes = [i for i in range(N) if env[i] == category]
         sums: dict[str, object] = {}
         for obj, path in members:
             if model["structure"] == "A":
@@ -643,7 +684,7 @@ def substitution_table(model: dict[str, object]) -> dict[str, object]:
     for order, key in enumerate(KEYS):
         if model["structure"] == "B":
             rows.append([key, False, "净值不可计算", 0, None, None, None, None])
-        elif order % 3 == 1:
+        elif order % 3 == 1 and not model["v"]["late"]:
             u = model["us"][4]
             registered = math.fsum([math.log1p(0.6 * u + 0.0 * 2.0 * u)])
             substituted = math.fsum([math.log1p(0.3 * u + 0.0 * 2.0 * u)])
@@ -747,22 +788,23 @@ def average_blocks(model: dict[str, object]) -> list[dict[str, object]]:
 
 
 def descriptive_doc(model: dict[str, object], environment_summary: dict[str, object]) -> dict[str, object]:
-    """descriptive.json（constants 未计算者 core、leverage、exposure、nav 为 null；
+    """descriptive.json（constants：选定候选四项 null；主参照与候选键三项为计划目标平均，结构 B 下 computed 假、
+    nav null；
     state_statistics 只含 27 候选 + 主参照；
     policy_minus_signal 键为 27 候选 + 主参照 + 两条均线对照）。"""
     constants = []
     selected = model["selection"][4]
     for source in (REF, selected if selected is not None else "选定候选"):
-        weights = model["constants"].get(source)
-        computed = weights is not None
+        averages = model["averages"].get(source)  # 选定候选（占位）无平均：四项 null
+        computed = source in model["constants"]
         constants.append(
             {
                 "object": source,
                 "computed": computed,
                 "note": None,
-                "core": weights[0] if computed else None,
-                "leverage": weights[1] if computed else None,
-                "exposure": weights[2] if computed else None,
+                "core": None if averages is None else averages[0],
+                "leverage": None if averages is None else averages[1],
+                "exposure": None if averages is None else averages[2],
                 "nav": nav_block(model, "恒定仓位：" + source, "恒定仓位") if computed else None,
             }
         )
@@ -823,7 +865,7 @@ def make_project(v: dict[str, object]) -> dict[str, object]:
                 },
             },
             "run_record.json": {
-                "usage_restriction": v["usage"],
+                "usage_restriction": None,  # 由 finish_run_record 写入
                 "cutoff": "2016-12-30",
                 "data_files": {
                     "SPX": {"bytes": 0, "raw_sha256": "构造样本无原始文件"},
@@ -833,7 +875,37 @@ def make_project(v: dict[str, object]) -> dict[str, object]:
             },
         }
     )
+    if v["late"]:
+        files = late_dates(files)
+        for row in files["segments.csv"]["rows"]:  # 分段申请边界是冻结登记常量，不随窗口改写
+            row[2], row[3] = next((start, end) for name, start, end in SEGMENT_BOUNDS if name == row[1])
+    finish_run_record(files["run_record.json"], v)
     return files
+
+
+def late_dates(value: object) -> object:
+    """晚窗口变体：把所有含“2000-03-”的字符串改为“2005-03-”（窗口与历史日期；分段边界、R2 峰日等不含此前缀）。"""
+    if isinstance(value, dict):
+        return {key: late_dates(inner) for key, inner in value.items()}
+    if isinstance(value, list):
+        return [late_dates(inner) for inner in value]
+    if isinstance(value, str):
+        return value.replace("2000-03-", "2005-03-")
+    return value
+
+
+def finish_run_record(record: dict[str, object], v: dict[str, object]) -> None:
+    """usage_restriction 为字符串数组（变体给出的前缀限制在前，晚窗口时追加覆盖限制）；window_coverage 恰四键：
+    first_day 为首个执行日，satisfied = first_day 不晚于 2000-03-24（主变体 2000-03-20 → 真；
+    晚窗口 2005-03-20 → 假）。"""
+    first_day = ("2005-" if v["late"] else "2000-") + DAYS[0][5:]
+    record["usage_restriction"] = [*v["usage"], *([COVERAGE_LIMIT] if v["late"] else [])]
+    record["window_coverage"] = {
+        "condition": "axis[j0] <= 2000-03-24",
+        "first_day": first_day,
+        "satisfied": not v["late"],
+        "status": "已判定",
+    }
 
 
 def csv_bytes(header: list[str], rows: list[list[object]]) -> bytes:
@@ -1458,17 +1530,17 @@ def test_a_computable_without_hold_path_stops(tmp_path: Path) -> None:
 
 def test_a_usage_restriction_does_not_change_structure_a(tmp_path: Path) -> None:
     """用途限制非空（历史缺价在评价窗口之前）而 r1_computable 全真、daily_nav 完整 → 按 A 核对，照录用途限制。"""
-    files = make_project(variant(history_gap=True, usage="历史读取缺价，不得形成正式选定结论"))
+    files = make_project(variant(history_gap=True, usage=[PREFIX_LIMIT]))
     code, report, err = run_one(SCRIPT_A, tmp_path, files, "usage")
     assert code == 0, (err, problems(report)[:3])
-    assert report["structure"] == "A" and report["usage_restriction"] == "历史读取缺价，不得形成正式选定结论"
+    assert report["structure"] == "A" and report["usage_restriction"] == [PREFIX_LIMIT]
 
 
 def test_a_structure_b_without_usage_restriction(tmp_path: Path) -> None:
     """用途限制为空而 r1_computable 全假、daily_nav 无行 → 按 B 核对。"""
-    code, report, err = run_one(SCRIPT_A, tmp_path, make_project(variant(missing_qqq=2, usage=None)), "b_nousage")
+    code, report, err = run_one(SCRIPT_A, tmp_path, make_project(variant(missing_qqq=2, usage=[])), "b_nousage")
     assert code == 0, err
-    assert report["structure"] == "B" and report["usage_restriction"] is None
+    assert report["structure"] == "B" and report["usage_restriction"] == []
 
 
 def test_a_structure_fields_must_be_boolean(tmp_path: Path) -> None:
@@ -1899,6 +1971,411 @@ def test_b_year_return_and_substitution_empty_fields(tmp_path: Path) -> None:
     row[3], row[4] = 1, 0.0
     code, report, _ = run_one(SCRIPT_B, tmp_path, files, "subst_b")
     assert code == 1 and len(items_where(report, object=KEYS[4], status="不一致")) == 2
+
+
+def test_ab_late_window_full_cli(tmp_path: Path) -> None:
+    """晚窗口变体（first_day 2005-03-20 晚于 2000-03-24）：覆盖判定不满足、usage_restriction = [覆盖限制]；
+    环境 6 区间不可得、
+    熊市一无收益区间、无替换区间（人工表 ENV_LATE_HAND、SEGMENT_MAP_LATE_HAND）→ 两脚本退出码 0。"""
+    (code_a, report_a, err_a), (code_b, report_b, err_b) = run_both(tmp_path, make_project(variant(late=True)), "late")
+    assert (code_a, code_b) == (0, 0), (err_a, err_b, problems(report_a)[:3], problems(report_b)[:3])
+    assert report_a["usage_restriction"] == [COVERAGE_LIMIT] and report_b["usage_restriction"] == [COVERAGE_LIMIT]
+    satisfied = items_where(report_a, item="window_coverage.satisfied")[0]
+    assert (satisfied["script"], satisfied["project"], satisfied["status"]) == (False, False, "一致")
+    assert [e["category"] for e in report_b["environments"]] == list(ENV_LATE_HAND)
+
+
+def test_ab_usage_restriction_array(tmp_path: Path) -> None:
+    """接口 E1（人工期望见人工期望说明第 11 节）：[]、[前缀]、[覆盖]（晚窗口）、
+    [前缀, 覆盖]（晚窗口）→ 两脚本照录原顺序、退出码 0；
+    值为字符串、null、对象，数组含数字元素、含 null 元素 → 两脚本退出码 2（输入错误，不转换）。"""
+    legal = (
+        ("e1_empty", variant(), []),
+        ("e1_prefix", variant(usage=[PREFIX_LIMIT]), [PREFIX_LIMIT]),
+        ("e1_cover", variant(late=True), [COVERAGE_LIMIT]),
+        ("e1_both", variant(late=True, usage=[PREFIX_LIMIT]), [PREFIX_LIMIT, COVERAGE_LIMIT]),
+    )
+    for tag, v, expected in legal:
+        files = make_project(v)
+        assert files["run_record.json"]["usage_restriction"] == expected
+        (code_a, report_a, _), (code_b, report_b, _) = run_both(tmp_path, files, tag)
+        assert (code_a, code_b) == (0, 0), (tag, problems(report_a)[:2], problems(report_b)[:2])
+        assert report_a["usage_restriction"] == expected and report_b["usage_restriction"] == expected, tag
+    illegal = (("e1_str", PREFIX_LIMIT), ("e1_null", None), ("e1_obj", {}), ("e1_num", [1]), ("e1_nullelem", [None]))
+    for tag, value in illegal:
+        files = make_project(variant())
+        files["run_record.json"]["usage_restriction"] = value
+        (code_a, report_a, _), (code_b, report_b, _) = run_both(tmp_path, files, tag)
+        assert (code_a, code_b) == (2, 2), tag
+        for report in (report_a, report_b):
+            assert "usage_restriction" in report["error"]["location"], tag
+
+
+def test_ab_usage_restriction_undefined_cases_recorded(tmp_path: Path) -> None:
+    """接口 E1 第 4 条的未定义情况按项目负责人裁决 R-1（2026-10-06）照录、不作判定（人工期望见人工期望说明第 14 节）：
+    (i) ["其他未登记文字"]，满足窗口；(ii) [覆盖, 前缀]，不满足窗口；(iii) [覆盖, 覆盖]，不满足窗口
+    → 两脚本照录原数组、退出码 0，N1 (e) 一致（只看覆盖文字的有无）；
+    (iv) 覆盖文字以 j0 代替 j₀，不满足窗口 → N1 (e) 不一致、退出码 1，N2 照录、退出码 0。"""
+    variant_text = "开发窗口未覆盖登记区间（axis[j0] 晚于 2000-03-24）"
+    cases = (
+        ("r1_unknown", False, ["其他未登记文字"], 0, "一致"),
+        ("r1_reversed", True, [COVERAGE_LIMIT, PREFIX_LIMIT], 0, "一致"),
+        ("r1_duplicate", True, [COVERAGE_LIMIT, COVERAGE_LIMIT], 0, "一致"),
+        ("r1_variant", True, [variant_text], 1, "不一致：值不同"),
+    )
+    for tag, late, usage, code_expected, status in cases:
+        files = make_project(variant(late=late))
+        files["run_record.json"]["usage_restriction"] = usage
+        (code_a, report_a, _), (code_b, report_b, _) = run_both(tmp_path, files, tag)
+        assert (code_a, code_b) == (code_expected, 0), (tag, problems(report_a)[:2], problems(report_b)[:2])
+        assert report_a["usage_restriction"] == usage and report_b["usage_restriction"] == usage, tag
+        item = items_where(report_a, item="usage_restriction 含开发窗口覆盖限制")[0]
+        assert item["status"] == status, tag
+        assert (item["script"], item["project"]) == (late, late and usage != [variant_text]), tag
+
+
+R2_UNAVAILABLE = "照录：R2 事件不可得（项目表示；原因未独立核对）"
+
+
+def r2_unavailable_items(report: object, prefix: str) -> list[dict[str, object]]:
+    """某资产 R2 五列中状态为“照录：R2 事件不可得……”的项。"""
+    return [i for i in report["items"] if i["item"].startswith(f"{prefix}_r2_") and i["status"] == R2_UNAVAILABLE]
+
+
+def run_a(tmp_path: Path, files: dict[str, object], tag: str) -> tuple[int, object]:
+    """只运行甲层。"""
+    code, report, _ = run_one(SCRIPT_A, tmp_path, files, tag)
+    return code, report
+
+
+def b_spx_missing() -> dict[str, object]:
+    """(i) 的构造：结构 B（QQQ 在 d2 缺价），SPX R2 事件不可得，usage_restriction = [前缀诊断限制]。"""
+    return make_project(variant(missing_qqq=2, usage=[PREFIX_LIMIT], r2_missing=("SPX",)))
+
+
+def test_a_r2_unavailable_branch(tmp_path: Path) -> None:
+    """裁决 F-1 (i)：结构 B、SPX 不可得、前提齐备 → N1 退出码 0；SPX 27 × 5 = 135 项照录；
+    unchecked_or_recorded = 原有 38 + 135 = 173
+    （原有 = 28 条 start_note 照录 + 10 条首信号日依赖未核对，人工期望见人工期望说明第 15 节）；
+    QQQ 五列 135 项照常逐字段一致；
+    N2 在同一夹具与不含该变化的夹具上结果相同（N2 不读 R2）。"""
+    base = make_project(variant(missing_qqq=2, usage=[PREFIX_LIMIT]))
+    code, base_report = run_a(tmp_path, base, "f1_base")
+    assert code == 0 and base_report["summary"]["unchecked_or_recorded"] == 38
+    code, report = run_a(tmp_path, b_spx_missing(), "f1_i")
+    assert code == 0, problems(report)[:3]
+    assert len(r2_unavailable_items(report, "spx")) == 135 and report["r2_unavailable_assets"] == ["SPX"]
+    assert report["summary"]["unchecked_or_recorded"] == 38 + 135
+    assert (report["summary"]["mismatches"], report["summary"]["failures"]) == (0, 0)
+    qqq = [i for i in report["items"] if i["item"].startswith("qqq_r2_")]
+    assert len(qqq) == 135 and all(i["status"].startswith("一致") for i in qqq)
+    code_b0, report_b0, _ = run_one(SCRIPT_B, tmp_path, base, "f1_n2_base")
+    code_b1, report_b1, _ = run_one(SCRIPT_B, tmp_path, b_spx_missing(), "f1_n2_i")
+    assert (code_b0, code_b1) == (0, 0) and report_b0["summary"] == report_b1["summary"]
+
+
+def test_a_r2_unavailable_preconditions(tmp_path: Path) -> None:
+    """(ii)—(vi)：任一前提不满足或五列非全空 → 不进入特殊分支，按既有规则逐字段比对，退出码 1；不一致项数人工推算：
+    (ii) usage = []：27 行 × computable、denominator、achieved、new_only 4 项（脚本 false/0/0/0 对项目空；
+    meets 两者皆空）= 108；
+    (iii) 留一行 KEYS[0] 的 SPX 判定（漏报）：
+    KEYS[0] 脚本 true/1/0/0/false 对空 5 项 + 其余 26 行 × 4 = 104 + records[0].r2.SPX 1 = 110；
+    (iv) records[5].r2.SPX 写 false：108 + 该记录 1 = 109；
+    (v) SPX 可得、仅第 1 行 SPX 五列置空：该行 5 项（脚本 true/4/3/1/true）；
+    (vi) 仅第 1 行 SPX denominator 置空：1 项。"""
+    files = b_spx_missing()
+    files["run_record.json"]["usage_restriction"] = []
+    code, report = run_a(tmp_path, files, "f1_ii")
+    assert (code, report["summary"]["mismatches"], len(r2_unavailable_items(report, "spx"))) == (1, 108, 0)
+    files = b_spx_missing()
+    files["r2_judgements.csv.gz"]["rows"].append([KEYS[0], "SPX", "1999-01-15", "漏报", None, None, None, False])
+    code, report = run_a(tmp_path, files, "f1_iii")
+    assert (code, report["summary"]["mismatches"], len(r2_unavailable_items(report, "spx"))) == (1, 110, 0)
+    files = b_spx_missing()
+    files["selection.json"]["records"][5]["r2"]["SPX"] = False
+    code, report = run_a(tmp_path, files, "f1_iv")
+    assert (code, report["summary"]["mismatches"], len(r2_unavailable_items(report, "spx"))) == (1, 109, 0)
+    spx_columns = [
+        column(make_project(variant()), "candidates_summary.csv", f"spx_r2_{n}")
+        for n in ("computable", "denominator", "achieved", "new_only", "meets")
+    ]
+    files = make_project(variant(missing_qqq=2, usage=[PREFIX_LIMIT]))
+    for index in spx_columns:
+        files["candidates_summary.csv"]["rows"][0][index] = None
+    code, report = run_a(tmp_path, files, "f1_v")
+    assert (code, report["summary"]["mismatches"]) == (1, 5)
+    assert {i["object"] for i in problems(report)} == {KEYS[0]}
+    files = make_project(variant(missing_qqq=2, usage=[PREFIX_LIMIT]))
+    files["candidates_summary.csv"]["rows"][0][spx_columns[1]] = None
+    code, report = run_a(tmp_path, files, "f1_vi")
+    assert code == 1 and [i["item"] for i in problems(report)] == ["spx_r2_denominator"]
+
+
+def test_a_r2_unavailable_other_cases(tmp_path: Path) -> None:
+    """(vii) 合法零分母：结构 A、候选 0 的 SPX 全部左截断 → false/0/0/0/空，出口按既有规则为“缺值无法评价”，
+    两脚本退出码 0、全部一致；
+    (viii) 结构 B 两资产均不可得 → 270 项照录、退出码 0；(ix) 结构 A 下 QQQ 不可得 → 135 项照录、
+    出口“缺值无法评价”、退出码 0；
+    (x) 同 (i) 另把候选 9 首行 core 写为 inf（其唯一一次切换的调仓幅度为 inf）→ 计算失败优先，退出码 3，
+    SPX 照录项仍为 135。"""
+    files = make_project(variant(r2_left=0))
+    row = rows_of(files, "candidates_summary.csv", object=KEYS[0])[0]
+    assert [
+        row[column(files, "candidates_summary.csv", f"spx_r2_{n}")]
+        for n in ("computable", "denominator", "achieved", "new_only", "meets")
+    ] == [False, 0, 0, 0, None]
+    assert files["selection.json"]["outcome"] == "缺值无法评价"
+    (code_a, report_a, _), (code_b, report_b, _) = run_both(tmp_path, files, "f1_vii")
+    assert (code_a, code_b) == (0, 0), (problems(report_a)[:3], problems(report_b)[:3])
+    assert not r2_unavailable_items(report_a, "spx")
+    code, report = run_a(
+        tmp_path, make_project(variant(missing_qqq=2, usage=[PREFIX_LIMIT], r2_missing=("SPX", "QQQ"))), "f1_viii"
+    )
+    assert code == 0 and len(r2_unavailable_items(report, "spx")) + len(r2_unavailable_items(report, "qqq")) == 270
+    assert report["summary"]["unchecked_or_recorded"] == 38 + 270
+    files = make_project(variant(usage=[PREFIX_LIMIT], r2_missing=("QQQ",)))
+    (code_a, report_a, _), (code_b, report_b, _) = run_both(tmp_path, files, "f1_ix")
+    assert (code_a, code_b) == (0, 0), (problems(report_a)[:3], problems(report_b)[:3])
+    assert len(r2_unavailable_items(report_a, "qqq")) == 135
+    assert items_where(report_a, item="outcome")[0]["script"] == "缺值无法评价"
+    files = b_spx_missing()
+    rows_of(files, "daily_targets.csv.gz", object=KEYS[9], date=DAYS[0])[0][3] = "inf"
+    code, report = run_a(tmp_path, files, "f1_x")
+    assert code == 3 and report["summary"]["failures"] >= 1 and len(r2_unavailable_items(report, "spx")) == 135
+
+
+def nonfinite_files(changes: tuple[tuple[int, str], ...], structure_b: bool) -> dict[str, object]:
+    """候选 1（t3 正常 → t4 一级 → t5 正常，相邻两次切换）在 d4 行改写 core（列 3）或 leverage（列 4）。"""
+    files = make_project(variant(missing_qqq=2) if structure_b else variant())
+    row = rows_of(files, "daily_targets.csv.gz", object=KEYS[1], date=DAYS[4])[0]
+    for index, value in changes:
+        row[index] = value
+    return files
+
+
+def nonfinite_items(report: object) -> list[dict[str, object]]:
+    """状态为“计算失败：非有限值”的项。"""
+    return [i for i in report["items"] if i["status"] == "计算失败：非有限值"]
+
+
+def test_a_nonfinite_exposure_inputs(tmp_path: Path) -> None:
+    """裁决 F-2 第 1 条（人工期望见人工期望说明第 16 节）：(i) 候选 1 在 d4 的 core = inf（相邻两次切换）、
+    (ii) leverage = nan →
+    N1 退出码 3、写出报告，恰一项“计算失败：非有限值”，位置为 daily_targets、候选 1、2000-03-24、对应字段；
+    (iii) 有限输入运算后非有限：core = leverage = 1e308 → e = 1e308 + 2·1e308 溢出为 inf（字段 e）；
+    core = 1.5e308、leverage = 0（d4 一级）与 d5 core = −1.5e308 → e 有限、
+    Δe = −1.5e308 − 1.5e308 溢出为 −inf（字段 Δe）。"""
+    cases = (
+        ("nf_core", ((3, "inf"),), "暴露输入", "字段=core", DAYS[4]),
+        ("nf_lev", ((4, "nan"),), "暴露输入", "字段=leverage", DAYS[4]),
+        ("nf_e", ((3, "1e+308"), (4, "1e+308")), "暴露", "字段=e", DAYS[4]),
+    )
+    for tag, changes, item, field, day in cases:
+        code, report = run_a(tmp_path, nonfinite_files(changes, False), tag)
+        assert code == 3 and report is not None and report["error"] is None, tag
+        failed = nonfinite_items(report)
+        assert len(failed) == 1 and failed[0]["item"] == item and failed[0]["object"] == KEYS[1], (tag, failed)
+        assert (
+            "daily_targets.csv.gz" in failed[0]["position"]
+            and day in failed[0]["position"]
+            and field in failed[0]["position"]
+        )
+    files = nonfinite_files(((3, "1.5e+308"), (4, "0.0")), False)
+    rows_of(files, "daily_targets.csv.gz", object=KEYS[1], date=DAYS[5])[0][3] = "-1.5e+308"
+    code, report = run_a(tmp_path, files, "nf_delta")
+    failed = nonfinite_items(report)
+    assert code == 3 and [i["item"] for i in failed] == ["暴露变化"] and "字段=Δe" in failed[0]["position"]
+
+
+def test_b_nonfinite_exposure_inputs(tmp_path: Path) -> None:
+    """裁决 F-2 第 2 条观察结论（未修改 N2）：结构 A 下同一输入（core = inf、
+    leverage = nan）→ N2 计算组合收益时得非有限值，
+    退出码 3，写出报告，error 为“计算失败：非有限值”、位置为候选 1 区间 5（d4 → d5）；
+    结构 B 下 N2 不用该候选的计划目标作任何计算
+    （不计算组合收益；恒定仓位平均只取主参照），无非有限计算 → 退出码 0。两者均符合规格第二节。"""
+    for tag, changes in (("n2_core", ((3, "inf"),)), ("n2_lev", ((4, "nan"),))):
+        code, report, _ = run_one(SCRIPT_B, tmp_path, nonfinite_files(changes, False), tag + "_a")
+        assert code == 3 and report["error"]["message"] == "计算失败：非有限值", tag
+        assert KEYS[1] in report["error"]["location"] and "区间 5" in report["error"]["location"]
+        code, report, _ = run_one(SCRIPT_B, tmp_path, nonfinite_files(changes, True), tag + "_b")
+        assert code == 0 and report["summary"]["failures"] == 0, tag
+
+
+def test_ab_unexpected_exception_fallback(mod_a: object, mod_b: object, tmp_path: Path, monkeypatch: object) -> None:
+    """裁决 F-2 第 3 条：测试内注入未预期异常（核对阶段 evaluate、
+    读入阶段 read_inputs 抛 RuntimeError）→ 两脚本退出码 3、
+    报告写出、error 记异常类型与信息。"""
+    result = write_project(tmp_path / "dir_fallback", make_project(variant()))
+    for module, tag in ((mod_a, "a"), (mod_b, "b")):
+        for target in ("evaluate", "read_inputs"):
+
+            def boom(*args: object, **kwargs: object) -> object:
+                raise RuntimeError("注入的未预期异常")
+
+            monkeypatch.setattr(module, target, boom)
+            out = tmp_path / f"fallback_{tag}_{target}.json"
+            code = module.main(["--result-dir", str(result), "--out", str(out)])
+            monkeypatch.undo()
+            report = json.loads(out.read_text(encoding="utf-8"))
+            assert code == 3 and report["exit_code"] == 3, (tag, target)
+            assert report["error"]["kind"] == "未预期异常" and "RuntimeError" in report["error"]["message"], (
+                tag,
+                target,
+            )
+
+
+def test_ab_exit_code_regression(tmp_path: Path) -> None:
+    """裁决 F-2 第 3 条回归：既有分类不变——表头不符仍为 2；
+    普通不一致仍为 1（写入失败规则见 test_a/b_report_write_failure）。"""
+    files = make_project(variant())
+    files["environments.csv"]["header"][3] = "annual_return"
+    files["candidates_summary.csv"]["header"][0] = "序号"
+    (code_a, report_a, _), (code_b, report_b, _) = run_both(tmp_path, files, "reg_header")
+    assert (code_a, code_b) == (2, 2) and report_a["error"]["kind"] == report_b["error"]["kind"] == "参数或输入错误"
+    files = make_project(variant())
+    rows_of(files, "candidates_summary.csv", object=KEYS[0])[0][
+        column(files, "candidates_summary.csv", "signal_log_wealth")
+    ] += 1e-6
+    (code_a, _, _), (code_b, _, _) = run_both(tmp_path, files, "reg_mismatch")
+    assert (code_a, code_b) == (1, 1)
+
+
+def tie_files(flat5: bool, inf_orders: tuple[int, ...], selected_null: bool) -> dict[str, object]:
+    """并列组构造：flat5 时可行的候选 6、7、8 并列（切换 2、4、4）；
+    inf_orders 的候选在 d4 行 core 写 inf（切换次数为空）；
+    selected_null 时项目 selected 改为 null。"""
+    files = make_project(variant(flat5=flat5))
+    for order in inf_orders:
+        rows_of(files, "daily_targets.csv.gz", object=KEYS[order], date=DAYS[4])[0][3] = "inf"
+    if selected_null:
+        files["selection.json"]["selected"] = None
+    return files
+
+
+def failure_statuses(report: object) -> list[tuple[str, str]]:
+    """全部计算失败项的（项、状态）。"""
+    return [(i["item"], i["status"]) for i in report["items"] if i["status"].startswith("计算失败")]
+
+
+def test_a_tied_group_switches_uncomputable(tmp_path: Path) -> None:
+    """项目负责人裁决 F-4（人工期望见人工期望说明第 17 节）：
+    (i) 并列组 {6, 7, 8} 中候选 7 切换次数为空（d4 core = inf）、项目 selected = 候选 6 → 退出码 3、
+    error 为 null，失败项为候选 7 的
+    “计算失败：非有限值”与“计算失败：并列组切换次数不可计算”（成员 [候选 7]），selected 为“不一致：一方缺值”；
+    (ii) 同 (i) 但项目 selected 为 null → selected 两者均为空（既有结果），失败项同 (i)，退出码 3；
+    (iii) 并列组三名切换次数全部为空 → 三项非有限值失败 + 一项并列组失败（成员 [6, 7, 8]），退出码 3，无兜底 error；
+    (iv) 切换次数为空的候选 5 不在并列组 → 照常选定候选 6，失败项只有一项非有限值；
+    (v) 主变体（并列组只有候选 6）且候选 6 切换次数为空 → 照常选定候选 6，失败项只有一项非有限值；
+    (vi) flat5 正常输入：并列组 [6, 7, 8]、按（切换 2、4、4，顺序）选定候选 6，退出码 0。"""
+    nonfinite = ("暴露输入", "计算失败：非有限值")
+    tie_failure = ("并列组切换次数", "计算失败：并列组切换次数不可计算")
+    for tag, selected_null, expected_selected in (
+        ("tie_i", False, "不一致：一方缺值"),
+        ("tie_ii", True, "一致（两者均为空）"),
+    ):
+        code, report = run_a(tmp_path, tie_files(True, (7,), selected_null), tag)
+        assert code == 3 and report["error"] is None, tag
+        assert failure_statuses(report) == [nonfinite, tie_failure], tag
+        assert items_where(report, item="并列组切换次数")[0]["script"] == [KEYS[7]]
+        selected = items_where(report, item="selected")[0]
+        assert (selected["script"], selected["status"]) == (None, expected_selected), tag
+        for key in ("outcome", "feasible", "maximum", "tied"):
+            assert items_where(report, item=key)[0]["status"].startswith("一致"), (tag, key)
+    code, report = run_a(tmp_path, tie_files(True, (6, 7, 8), False), "tie_iii")
+    assert code == 3 and report["error"] is None
+    assert failure_statuses(report) == [nonfinite] * 3 + [tie_failure]
+    assert items_where(report, item="并列组切换次数")[0]["script"] == [KEYS[6], KEYS[7], KEYS[8]]
+    for tag, flat5, orders in (("tie_iv", True, (5,)), ("tie_v", False, (6,))):
+        code, report = run_a(tmp_path, tie_files(flat5, orders, False), tag)
+        assert code == 3 and report["error"] is None and failure_statuses(report) == [nonfinite], tag
+        selected = items_where(report, item="selected")[0]
+        assert (selected["script"], selected["status"]) == (SELECTED_HAND, "一致"), tag
+    code, report = run_a(tmp_path, tie_files(True, (), False), "tie_vi")
+    assert code == 0, problems(report)[:3]
+    assert items_where(report, item="tied")[0]["script"] == [KEYS[6], KEYS[7], KEYS[8]]
+    assert items_where(report, item="selected")[0]["script"] == SELECTED_HAND
+
+
+def coverage_fault(tmp_path: Path, tag: str, late: bool, change: object) -> tuple[int, object]:
+    """对构造目录的 run_record 施加一项改动后只运行甲层。"""
+    files = make_project(variant(late=late))
+    change(files["run_record.json"])
+    code, report, _ = run_one(SCRIPT_A, tmp_path, files, tag)
+    return code, report
+
+
+def test_a_window_coverage_checks(tmp_path: Path) -> None:
+    """修正批第一道门第四节第 5 条（人工期望见人工期望说明第 12 节）：正常例满足（主变体）、不满足（晚窗口）一致；
+    故障注入逐项不一致；window_coverage 缺失、键多、键少 → 退出码 2。"""
+    for tag, late in (("wc_ok", False), ("wc_late_ok", True)):
+        code, report = coverage_fault(tmp_path, tag, late, lambda record: None)
+        assert code == 0 and len(items_where(report, status="一致", object="覆盖判定")) == 5, tag
+
+    def setter(key: str, value: object) -> object:
+        return lambda record: record["window_coverage"].__setitem__(key, value)
+
+    faults = (
+        ("wc_cond", False, setter("condition", "axis[j0] < 2000-03-24"), "window_coverage.condition"),
+        ("wc_first", False, setter("first_day", "2000-03-21"), "window_coverage.first_day"),
+        ("wc_status", False, setter("status", "未判定：无窗口"), "window_coverage.status"),
+        ("wc_str", False, setter("satisfied", "true"), "window_coverage.satisfied"),
+        ("wc_one", False, setter("satisfied", 1), "window_coverage.satisfied"),
+        ("wc_flip", False, setter("satisfied", False), "window_coverage.satisfied"),
+        (
+            "wc_missing_limit",
+            True,
+            lambda r: r.__setitem__("usage_restriction", []),
+            "usage_restriction 含开发窗口覆盖限制",
+        ),
+        (
+            "wc_extra_limit",
+            False,
+            lambda r: r.__setitem__("usage_restriction", [COVERAGE_LIMIT]),
+            "usage_restriction 含开发窗口覆盖限制",
+        ),
+    )
+    for tag, late, change, item in faults:
+        code, report = coverage_fault(tmp_path, tag, late, change)
+        assert code == 1, tag
+        assert [i["item"] for i in problems(report)] == [item], (tag, problems(report)[:3])
+    for tag, change in (
+        ("wc_absent", lambda r: r.pop("window_coverage")),
+        ("wc_more", lambda r: r["window_coverage"].__setitem__("note", "多余")),
+        ("wc_less", lambda r: r["window_coverage"].pop("status")),
+    ):
+        code, report = coverage_fault(tmp_path, tag, False, change)
+        error = report["error"]
+        assert code == 2 and "window_coverage" in error["location"] + error["message"], tag
+
+
+def test_b_constant_positions_item14(tmp_path: Path) -> None:
+    """答复单第 14 项订正（人工期望见人工期望说明第 13 节）：
+    (a) 无选定候选（E1K1）：constants[1] 选定候选 computed 假、四项 null → 一致；
+    (b) 结构 B（QQQ 在 d2 缺价）：主参照 computed 假、nav null、三项 = 计划目标平均 (0.5, 0.2, 0.9) → 一致；
+    三项任一改 null 或偏离 1e-9 → 不一致；
+    (c) 结构 A 下主参照 computed 改为假 → 不一致。"""
+    code, report, err = run_one(SCRIPT_B, tmp_path, make_project(variant(evaluable2=False, r2_pass=False)), "c14a")
+    assert code == 0, err
+    assert len(items_where(report, object="恒定仓位：选定候选", status="一致")) == 5
+    files = make_project(variant(missing_qqq=2))
+    reference = files["descriptive.json"]["constants"][0]
+    assert (reference["computed"], reference["nav"]) == (False, None)
+    assert all(
+        abs(reference[k] - v) <= 1e-12 for k, v in zip(("core", "leverage", "exposure"), CONST_REF_HAND, strict=True)
+    )
+    code, report, err = run_one(SCRIPT_B, tmp_path, files, "c14b")
+    assert code == 0, (err, problems(report)[:3])
+    assert abs(items_where(report, item="exposure", object="恒定仓位：主参照")[0]["script"] - 0.9) <= 1e-12
+    for tag, key, value in (("c14b_null", "leverage", None), ("c14b_off", "core", 0.5 + 1e-9)):
+        files = make_project(variant(missing_qqq=2))
+        files["descriptive.json"]["constants"][0][key] = value
+        code, report, _ = run_one(SCRIPT_B, tmp_path, files, tag)
+        assert code == 1 and [i["item"] for i in problems(report)] == [key], tag
+    files = make_project(variant())
+    files["descriptive.json"]["constants"][0]["computed"] = False
+    code, report, _ = run_one(SCRIPT_B, tmp_path, files, "c14c")
+    assert code == 1
+    assert items_where(report, object="恒定仓位：主参照", status="不一致：结构 A 下 computed 为假")
 
 
 # ================================================================ (c) 写入中断与 AST 检查

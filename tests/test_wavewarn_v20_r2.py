@@ -415,3 +415,26 @@ def test_window_construction_error_is_a_plain_r2_error() -> None:
     with pytest.raises(R2Error, match="恰好覆盖") as caught:
         Window(days, numbered(2), numbered(4), {day: Prompt.NO for day in days[2:]})
     assert not isinstance(caught.value, R2Undeterminable)
+
+
+# ---------------------------------------------------------------------------
+# 修正批 K7 A10（复查附件 G3 第三节 T5；G3-05）：窗口末 20 个交易日内开始的提示段走 limit = None 分支
+# ---------------------------------------------------------------------------
+
+
+def test_segment_starting_in_the_last_twenty_days_uses_the_open_limit_and_is_early() -> None:
+    """交易日 0—59（不额外延长），E = 第 59 日；事件 (P 50, T3 53, T5 55, Tr 57, 未结束)；提示只在第 45 日。
+
+    手推：提示段 = [45, 45]（第 46 日恢复 N）。不在事件内（P = 50 > 45）；不在低点后（Tr = 57 > 45）；
+    s + 20 = 第 65 日，超出轴末（轴只到第 59 日）→ limit = None；45 < T5 = 55 → 判“提前”。
+    """
+    from market_risk.wavewarn_v20.r2 import classify_segment
+
+    states = marked(60, {45: "Y"})
+    (segment,) = prompt_segments(states)
+    assert (segment.start, segment.end, segment.pre_window) == (numbered(45), numbered(45), False)
+    assert states.index(segment.start) + RULE.observation >= len(states.days)          # 65 超出轴末：limit = None
+    found = classify_segment(segment, [event(50, 53, 55, 57, None)], states, RULE)
+    assert found is SegmentClass.EARLY
+    ledger = segment_ledger([event(50, 53, 55, 57, None)], states, RULE)
+    assert [category for _, category in ledger.classes] == [SegmentClass.EARLY]

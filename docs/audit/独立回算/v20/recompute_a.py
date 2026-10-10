@@ -63,6 +63,14 @@ SEGMENTS = (
     ("熊市二", "2007-10-09", "2009-03-09"),
 )
 TOL_LOG = 1e-10  # 对数净值汇总与对账（绝对）
+COVERAGE_DATE = date(2000, 3, 24)  # 登记区间起点（熊市一 P）：first_day 不晚于此日为满足
+COVERAGE_CONDITION = "axis[j0] <= 2000-03-24"
+COVERAGE_STATUS = "已判定"
+COVERAGE_LIMIT = "开发窗口未覆盖登记区间（axis[j₀] 晚于 2000-03-24）"
+WINDOW_COVERAGE_KEYS = ("condition", "first_day", "satisfied", "status")
+PREFIX_LIMIT = "前缀诊断运行（严格读取未通过：缺少必需价格）"
+R2_UNAVAILABLE_STATUS = "照录：R2 事件不可得（项目表示；原因未独立核对）"
+R2_COLUMNS = ("computable", "denominator", "achieved", "new_only", "meets")
 TOL_WEALTH = 1e-12  # 逐日净值（混合绝对/相对）
 TOL_FLOAT = 1e-12  # 其余 float64 字段（绝对；推导见 README）
 
@@ -566,11 +574,11 @@ def exposure(core: float, leverage: float) -> float:
 
 @dataclass(frozen=True)
 class SwitchSummary:
-    """切换次数、调仓幅度（Σ|Δe|）、方向和（ΣΔe）。"""
+    """切换次数、调仓幅度（Σ|Δe|）、方向和（ΣΔe）；暴露非有限的对象三项均为空（不再计算）。"""
 
-    count: int
-    magnitude: float
-    change: float
+    count: int | None
+    magnitude: float | None
+    change: float | None
 
 
 def switch_summary(positions: list[str] | tuple[str, ...], exposures: list[float] | tuple[float, ...]) -> SwitchSummary:
@@ -703,22 +711,26 @@ class CandidateRecord:
     r2_spx: bool | None
     r2_qqq: bool | None
     log_wealth: float | None
-    switches: int
+    switches: int | None  # 暴露非有限的候选为空（裁决 F-2、F-4）
 
 
 @dataclass(frozen=True)
 class SelectionResult:
-    """选择结果：出口、可行集、最大值、并列组、选定。"""
+    """选择结果：出口、可行集、最大值、并列组、选定；
+    uncomputable_tied 为切换次数为空的并列组成员（并列组至少两名时）。"""
 
     outcome: str
     feasible: tuple[str, ...]
     maximum: float | None
     tied: tuple[str, ...]
     selected: str | None
+    uncomputable_tied: tuple[str, ...] = ()
 
 
 def select_candidate(records: list[CandidateRecord] | tuple[CandidateRecord, ...]) -> SelectionResult:
-    """出口优先级：计算失败 > 缺值无法评价 > 无合格候选 > 选定；并列 ln W ≥ M − 1e-10，按 (切换, 顺序) 取最小。"""
+    """出口优先级：计算失败 > 缺值无法评价 > 无合格候选 > 选定；并列 ln W ≥ M − 1e-10，按 (切换, 顺序) 取最小。
+    并列组只有一名则照常选定；并列组至少两名且任一成员切换次数为空（含全部为空）时停止排序、不比较，selected 为空，
+    uncomputable_tied 列出切换次数为空的成员（项目负责人 2026-10-06 裁决 F-4）。"""
     if any(record.failed for record in records):
         return SelectionResult("计算失败", (), None, (), None)
     if any(None in (r.r1, r.r2_spx, r.r2_qqq, r.log_wealth) for r in records):
@@ -728,8 +740,12 @@ def select_candidate(records: list[CandidateRecord] | tuple[CandidateRecord, ...
         return SelectionResult("无合格候选", (), None, (), None)
     maximum = max(float(r.log_wealth or 0.0) for r in feasible)
     tied = [r for r in feasible if float(r.log_wealth or 0.0) >= maximum - TIE_TOLERANCE]
-    chosen = min(tied, key=lambda r: (r.switches, r.order))
-    return SelectionResult("选定", tuple(r.key for r in feasible), maximum, tuple(r.key for r in tied), chosen.key)
+    feasible_keys, tied_keys = tuple(r.key for r in feasible), tuple(r.key for r in tied)
+    missing = tuple(r.key for r in tied if r.switches is None)
+    if len(tied) >= 2 and missing:
+        return SelectionResult("选定", feasible_keys, maximum, tied_keys, None, missing)
+    chosen = tied[0] if len(tied) == 1 else min(tied, key=lambda r: (r.switches, r.order))
+    return SelectionResult("选定", feasible_keys, maximum, tied_keys, chosen.key)
 
 
 # ---------------------------------------------------------------- 输入整理
@@ -1211,19 +1227,62 @@ def r2_by_candidate(
     return result, items
 
 
-def switches_by_object(targets: dict[str, list[Row]]) -> dict[str, SwitchSummary]:
-    """每个 O_d 对象的切换次数与调仓幅度（暴露由行内 core、leverage 计算）。"""
+def target_exposures(obj: str, rows: list[Row]) -> tuple[list[float] | None, list[Item]]:
+    """daily_targets 逐行暴露 e = core + λ·leverage：core、leverage 先逐值校验有限性，e 再校验有限性；任一非有限记
+    “计算失败：非有限值”（位置写表、对象、日期、字段），该对象返回 None（项目负责人 2026-10-06 裁决 F-2 第 1 条）。"""
     table = "daily_targets.csv.gz"
-    result = {}
+    exposures: list[float] = []
+    items: list[Item] = []
+    for row in rows:
+        location = f"{table} 对象={obj} 日期={row['date']}"
+        core = float(to_float(need(row, "core", table), where(table, row)) or 0.0)
+        leverage = float(to_float(need(row, "leverage", table), where(table, row)) or 0.0)
+        bad = [(name, value) for name, value in (("core", core), ("leverage", leverage)) if not math.isfinite(value)]
+        items.extend(
+            Item("暴露输入", obj, f"{location} 字段={name}", None, value, None, "计算失败：非有限值")
+            for name, value in bad
+        )
+        if bad:
+            continue
+        value = exposure(core, leverage)
+        if not math.isfinite(value):
+            items.append(
+                Item("暴露", obj, f"{location} 字段=e（core + λ·leverage）", value, None, None, "计算失败：非有限值")
+            )
+            continue
+        exposures.append(value)
+    return (None if items else exposures), items
+
+
+def delta_failures(obj: str, rows: list[Row], positions: list[str], exposures: list[float]) -> list[Item]:
+    """切换处暴露变化 Δe 的有限性校验（裁决 F-2 第 1 条）。"""
+    items = []
+    for index in range(1, len(positions)):
+        if positions[index] != positions[index - 1]:
+            delta = exposures[index] - exposures[index - 1]
+            if not math.isfinite(delta):
+                location = f"daily_targets.csv.gz 对象={obj} 日期={rows[index]['date']} 字段=Δe"
+                items.append(Item("暴露变化", obj, location, delta, None, None, "计算失败：非有限值"))
+    return items
+
+
+def switches_by_object(targets: dict[str, list[Row]]) -> tuple[dict[str, SwitchSummary], list[Item]]:
+    """每个 O_d 对象的切换次数与调仓幅度（暴露由行内 core、leverage 计算）。core、leverage、e 或 Δe 非有限的对象记
+    “计算失败：非有限值”，其切换次数与调仓幅度不再计算（记为空：SwitchSummary(None, None, None)）。"""
+    table = "daily_targets.csv.gz"
+    result: dict[str, SwitchSummary] = {}
+    failures: list[Item] = []
     for obj, rows in targets.items():
         positions = [to_enum(row["position"], POSITIONS, where(table, row)) for row in rows]
-        exposures = []
-        for row in rows:
-            core = to_float(need(row, "core", table), where(table, row))
-            leverage = to_float(need(row, "leverage", table), where(table, row))
-            exposures.append(exposure(float(core or 0.0), float(leverage or 0.0)))
-        result[obj] = switch_summary(positions, exposures)
-    return result
+        exposures, items = target_exposures(obj, rows)
+        if exposures is not None:
+            items = delta_failures(obj, rows, positions, exposures)
+        failures.extend(items)
+        if items or exposures is None:
+            result[obj] = SwitchSummary(None, None, None)
+        else:
+            result[obj] = switch_summary(positions, exposures)
+    return result, failures
 
 
 STATE_KEYS = (
@@ -1338,7 +1397,9 @@ def derive_all(inputs: Inputs, sets: ObjectSets, days: list[date]) -> tuple[Deri
     items.extend(extra)
     states = states_by_object(signals, targets, project_state_entries(inputs.docs["descriptive.json"], sets.candidates))
     differences, extra = policy_differences(chains, policy, sets.daily, inputs.structure)
-    derived = Derived(chains, r1, r2, switches_by_object(targets), states, differences, extra)
+    switches, failures = switches_by_object(targets)
+    items.extend(failures)
+    derived = Derived(chains, r1, r2, switches, states, differences, extra)
     return derived, items
 
 
@@ -1478,25 +1539,62 @@ def drawdown(chain: Chain | None) -> float | None:
     return None if chain is None else chain.drawdown
 
 
-def compare_candidate_rest(key: str, row: Row, derived: Derived) -> list[Item]:
+def r2_unavailable_assets(
+    summary_rows: list[Row] | tuple[Row, ...], r2_rows: list[Row] | tuple[Row, ...], record: Any, selection: Any
+) -> frozenset[str]:
+    """R2 事件不可得的资产（项目负责人 2026-10-06 裁决 F-1，经项目发起人批准）：资产 a 进入特殊分支的唯一条件是
+    candidates_summary 27 行中 a 的五列全部为空，且（i）r2_judgements 无 a 的任何行，
+    （ii）usage_restriction 数组含前缀诊断
+    限制文字（逐字），（iii）selection.json 27 条 records[*].r2[a] 均为 null。只读已获准字段，不改变任何结构检查。"""
+    usage = record.get("usage_restriction") if isinstance(record, dict) else None
+    prefix_present = isinstance(usage, list) and PREFIX_LIMIT in usage
+    records = selection.get("records") if isinstance(selection, dict) else None
+    found = set()
+    for asset, prefix in (("SPX", "spx"), ("QQQ", "qqq")):
+        columns = [f"{prefix}_r2_{name}" for name in R2_COLUMNS]
+        summary_empty = len(summary_rows) == 27 and all(row[col] is None for row in summary_rows for col in columns)
+        no_judgements = not any(row["asset"] == asset for row in r2_rows)
+        records_null = (
+            isinstance(records, list)
+            and len(records) == 27
+            and all(
+                isinstance(rec, dict)
+                and isinstance(rec.get("r2"), dict)
+                and asset in rec["r2"]
+                and rec["r2"][asset] is None
+                for rec in records
+            )
+        )
+        if summary_empty and no_judgements and prefix_present and records_null:
+            found.add(asset)
+    return frozenset(found)
+
+
+def r2_column_items(key: str, row: Row, r2: R2Result, prefix: str, unavailable: bool) -> list[Item]:
+    """candidates_summary 中一个资产的 R2 五列：项目值照常按类型读取；资产处于特殊分支时五项照录（不计一致、
+    不一致或计算失败），
+    否则按既有规则逐字段比对。"""
+    at = where("candidates_summary.csv", row)
+    pairs = (
+        ("computable", r2.computable, to_bool(row[f"{prefix}_r2_computable"], at)),
+        ("denominator", r2.denominator, to_int(row[f"{prefix}_r2_denominator"], at)),
+        ("achieved", r2.achieved, to_int(row[f"{prefix}_r2_achieved"], at)),
+        ("new_only", r2.new_only, to_int(row[f"{prefix}_r2_new_only"], at)),
+        ("meets", r2.meets, to_bool(row[f"{prefix}_r2_meets"], at)),
+    )
+    if unavailable:
+        return [
+            Item(f"{prefix}_r2_{name}", key, at, None, theirs, None, R2_UNAVAILABLE_STATUS) for name, _, theirs in pairs
+        ]
+    return [compare_exact(f"{prefix}_r2_{name}", key, at, mine, theirs) for name, mine, theirs in pairs]
+
+
+def compare_candidate_rest(key: str, row: Row, derived: Derived, unavailable: frozenset[str]) -> list[Item]:
     """candidates_summary 的 R2 十列、政策差额与四项状态统计列。"""
     at = where("candidates_summary.csv", row)
     items = []
     for asset, prefix in (("SPX", "spx"), ("QQQ", "qqq")):
-        r2 = derived.r2[(key, asset)]
-        items.extend(
-            [
-                compare_exact(
-                    f"{prefix}_r2_computable", key, at, r2.computable, to_bool(row[f"{prefix}_r2_computable"], at)
-                ),
-                compare_exact(
-                    f"{prefix}_r2_denominator", key, at, r2.denominator, to_int(row[f"{prefix}_r2_denominator"], at)
-                ),
-                compare_exact(f"{prefix}_r2_achieved", key, at, r2.achieved, to_int(row[f"{prefix}_r2_achieved"], at)),
-                compare_exact(f"{prefix}_r2_new_only", key, at, r2.new_only, to_int(row[f"{prefix}_r2_new_only"], at)),
-                compare_exact(f"{prefix}_r2_meets", key, at, r2.meets, to_bool(row[f"{prefix}_r2_meets"], at)),
-            ]
-        )
+        items.extend(r2_column_items(key, row, derived.r2[(key, asset)], prefix, asset in unavailable))
     state = derived.states[key]
     items.extend(
         [
@@ -1518,15 +1616,17 @@ def compare_candidate_rest(key: str, row: Row, derived: Derived) -> list[Item]:
     return items
 
 
-def check_candidates_summary(rows: list[Row] | tuple[Row, ...], sets: ObjectSets, derived: Derived) -> list[Item]:
-    """candidates_summary.csv：27 行逐项比对。"""
+def check_candidates_summary(
+    rows: list[Row] | tuple[Row, ...], sets: ObjectSets, derived: Derived, unavailable: frozenset[str]
+) -> list[Item]:
+    """candidates_summary.csv：27 行逐项比对（R2 事件不可得的资产按 r2_unavailable_assets 的特殊分支照录）。"""
     indexed, items = candidate_rows("candidates_summary.csv", rows, sets.candidates)
     for order, key in enumerate(sets.candidates):
         row = indexed.get(key)
         if row is None:
             continue
         items.extend(compare_candidate_core(key, row, order, derived))
-        items.extend(compare_candidate_rest(key, row, derived))
+        items.extend(compare_candidate_rest(key, row, derived, unavailable))
     return items
 
 
@@ -1783,6 +1883,10 @@ def outcome_items(
         return expected, [reserved, reference_evidence(reference_rows)]
     result = select_candidate(records)
     items = [compare_exact("outcome", "选择", location, result.outcome, outcome)]
+    if result.uncomputable_tied:  # 裁决 F-4：无论项目值如何均追加；selected 仍按既有 compare_exact 比对
+        members = list(result.uncomputable_tied)
+        position = f"{location} selected（切换次数为空的并列组成员：{'、'.join(members)}）"
+        items.append(Item("并列组切换次数", "选择", position, members, None, None, "计算失败：并列组切换次数不可计算"))
     if outcome != "选定":
         by_records = outcome_from_records(project_records)
         items.append(compare_exact("出口按 records 成立", "选择", f"{location} records", by_records, outcome))
@@ -1972,6 +2076,45 @@ def check_structure_b(inputs: Inputs, sets: ObjectSets) -> list[Item]:
     ]
 
 
+def usage_restriction_list(record: Any) -> list[str]:
+    """run_record.usage_restriction：须为 JSON 字符串数组，照录全部元素、保持原顺序（[] 为无用途限制）；
+    值不是数组或任一元素不是字符串为输入错误（不转换、不忽略）；缺键沿用 jget 的既有处理（输入错误“缺少字段”）。
+    未登记的文字、顺序与重复不作判定，只照录
+    （接口 E1 第 4 条；项目负责人 2026-10-06 裁决 R-1：照录、不作判定）。"""
+    value = jget(record, "usage_restriction", "run_record.json")
+    if not isinstance(value, list) or any(not isinstance(element, str) for element in value):
+        raise InputError(f"usage_restriction 须为字符串数组，实际 {value!r}", "run_record.json usage_restriction")
+    return list(value)
+
+
+def check_window_coverage(record: Any, window: Window, usage: list[str]) -> list[Item]:
+    """run_record.window_coverage 只作比对对象（修正批第一道门第四节）：恰含四键，否则输入错误；
+    condition 逐字、first_day 等于 window.json first_day、status 为“已判定”、satisfied 为 JSON 布尔且等于以 window.json
+    first_day 与冻结常量 2000-03-24 独立判定的结果；usage_restriction 含覆盖限制文字（逐字）当且仅当独立判定为不满足。
+    不作任何计算输入或结构判定依据，不改变其他核验项。"""
+    location = "run_record.json window_coverage"
+    coverage = jget(record, "window_coverage", "run_record.json")
+    if not isinstance(coverage, dict) or set(coverage) != set(WINDOW_COVERAGE_KEYS):
+        keys = list(coverage) if isinstance(coverage, dict) else coverage
+        raise InputError(f"window_coverage 须恰含 {list(WINDOW_COVERAGE_KEYS)}，实际 {keys}", location)
+    satisfied = window.first_day <= COVERAGE_DATE
+    return [
+        compare_exact("window_coverage.condition", "覆盖判定", location, COVERAGE_CONDITION, coverage["condition"]),
+        compare_exact(
+            "window_coverage.first_day", "覆盖判定", location, window.first_day.isoformat(), coverage["first_day"]
+        ),
+        compare_exact("window_coverage.status", "覆盖判定", location, COVERAGE_STATUS, coverage["status"]),
+        compare_exact("window_coverage.satisfied", "覆盖判定", location, satisfied, coverage["satisfied"]),
+        compare_exact(
+            "usage_restriction 含开发窗口覆盖限制",
+            "覆盖判定",
+            "run_record.json usage_restriction",
+            not satisfied,
+            COVERAGE_LIMIT in usage,
+        ),
+    ]
+
+
 def evaluate(raw: dict[str, bytes]) -> dict[str, Any]:
     """甲层全部核对；返回报告主体（不含输入哈希）。"""
     inputs = parse_inputs(raw)
@@ -1983,16 +2126,25 @@ def evaluate(raw: dict[str, bytes]) -> dict[str, Any]:
     recon = parse_reconciliation(inputs.docs["reconciliation.json"])
     items.extend(check_single_reconciliation(derived.chains, recon, dict(sets.constant_sources)))
     items.extend(check_relative_reconciliation(derived.chains, recon, sets.candidates))
-    items.extend(check_candidates_summary(inputs.tables["candidates_summary.csv"], sets, derived))
+    unavailable = r2_unavailable_assets(
+        inputs.tables["candidates_summary.csv"],
+        inputs.tables["r2_judgements.csv.gz"],
+        inputs.docs["run_record.json"],
+        inputs.docs["selection.json"],
+    )
+    items.extend(check_candidates_summary(inputs.tables["candidates_summary.csv"], sets, derived, unavailable))
     items.extend(check_reference_summary(inputs.tables["reference_summary.csv"], sets, derived))
     items.extend(check_segments(inputs.tables["segments.csv"], sets, derived, days))
     items.extend(check_selection(inputs.docs["selection.json"], sets, derived, inputs.tables["reference_summary.csv"]))
     items.extend(check_descriptive(inputs.docs["descriptive.json"], sets, derived))
     items.extend(check_structure_b(inputs, sets))
     record = inputs.docs["run_record.json"]
+    usage = usage_restriction_list(record)
+    items.extend(check_window_coverage(record, inputs.window, usage))
     return {
         "structure": inputs.structure,
-        "usage_restriction": jget(record, "usage_restriction", "run_record.json"),
+        "usage_restriction": usage,
+        "r2_unavailable_assets": sorted(unavailable),
         "cutoff": jget(record, "cutoff", "run_record.json"),
         "window": {
             "first_day": inputs.window.first_day,
@@ -2084,7 +2236,15 @@ def build_report(raw: dict[str, bytes], hashes: list[dict[str, Any]]) -> tuple[d
         )
     except ComputeFailure as exc:
         return finish_report({}, hashes, {"kind": "计算失败", "message": exc.message, "location": exc.location}, 3)
+    # 未预期异常兜底（项目负责人 2026-10-06 裁决 F-2 第 3 条）：既有分类之外，退出码 3；按裁决须捕获全部异常
+    except Exception as exc:
+        return finish_report({}, hashes, unexpected_error(exc), 3)
     return finish_report(body, hashes, None, 0)
+
+
+def unexpected_error(exc: Exception) -> dict[str, str]:
+    """未预期异常的 error 记录：异常类型与信息。"""
+    return {"kind": "未预期异常", "message": f"{type(exc).__name__}: {exc}", "location": "主入口兜底"}
 
 
 def read_inputs(result_dir: Path) -> tuple[dict[str, bytes], list[dict[str, Any]]]:
@@ -2158,6 +2318,9 @@ def main(argv: list[str] | tuple[str, ...]) -> int:
         report, code = finish_report(
             {}, [], {"kind": "参数或输入错误", "message": exc.message, "location": exc.location}, 2
         )
+    # 未预期异常兜底（裁决 F-2 第 3 条）：读入阶段既有分类之外的异常，写出报告，退出码 3；按裁决须捕获全部异常
+    except Exception as exc:
+        report, code = finish_report({}, [], unexpected_error(exc), 3)
     payload = (json.dumps(report, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
     try:
         write_report(out_path, payload)

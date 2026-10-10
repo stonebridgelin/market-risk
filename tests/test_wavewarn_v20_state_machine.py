@@ -281,3 +281,33 @@ def test_system_transition_dates_are_reported_separately_from_channel_event_date
     assert models[0].paths == models[1].paths == models[2].paths
     changes = [transitions(NORMAL, model.system) for model in models]
     assert changes[0] != changes[2]
+
+
+# ---------------------------------------------------------------------------
+# 修正批 K7 A9（复查附件 G1 RS-2；G1-07）：二级降到一级后，因 MR 持续激活停在一级
+# ---------------------------------------------------------------------------
+
+
+def test_level2_steps_down_and_then_stays_at_level1_while_mr_is_active() -> None:
+    """数据完整（C、H 存在且完整，均线完整）；PR、P 未激活；两资产 Q = 8 ≥ K = 5；MR 激活（C = 100 < MA = 110）。
+    自（二级，c₁ = 0，c₂ = 0）、h = 3 出发连续 5 日。
+
+    手推：每日 L = 1（只有 MR 激活）。A₂ 四项（两价存在、H 完整、PR 未激活、Q ≥ K）都成立 → c₂ = 1、2、3、3、3
+    （截断于 h）；A₁ 第五项（均线完整且 MR 未激活）不成立 → c₁ 恒为 0。
+    第 1、2 日 c₂ < h，二级保持（第 7 行）；第 3 日 c₂ = 3 ≥ h → 一级（第 6 行）；
+    第 4、5 日 L = 1、c₁ = 0 → 一级保持（第 5 行）。
+    """
+    from wavewarn_v20_helpers import axis
+
+    from market_risk.wavewarn_v20.state_machine import run_system
+
+    days = axis(5)
+    found = [evidence(spx=asset(q=8, day=day), qqq=asset(q=8, day=day), ma=trend("100", "110", day=day),
+                      mr=ACTIVE, day=day) for day in days]
+    path = run_system(SystemState(LEVEL2, 0, 0), found, K, H)
+    assert [item.level for item in path] == [1, 1, 1, 1, 1]
+    assert [(item.a1, item.a2) for item in path] == [(False, True)] * 5
+    assert [item.c2 for item in path] == [1, 2, 3, 3, 3]
+    assert [item.c1 for item in path] == [0, 0, 0, 0, 0]
+    assert [item.risk for item in path] == [LEVEL2, LEVEL2, LEVEL1, LEVEL1, LEVEL1]
+    assert transitions(LEVEL2, path) == ((days[2], LEVEL2, LEVEL1),)

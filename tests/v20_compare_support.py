@@ -2776,3 +2776,234 @@ def sequence_record_fields(source: SequenceSource, tool_seconds: float | None, p
             "项目重建秒数": None if project_seconds is None else round(project_seconds, 3),
             "工具输出字节数": None if tool_output is None else len(tool_output),
             "工具输出 SHA-256": None if tool_output is None else sha256(tool_output)}
+
+
+# ---------------------------------------------------------------------------
+# 修正批 B8（K10）：四个新输出文件（登记补充第 6 条；契约例外 E7）的比对。只追加，既有函数不改。
+# 项目一侧：development_output.serialize_events 的实际字节（descriptive 只给 rebuild_states 的重建结果与空的均线对照，
+#   因为工具输出没有均线对照；均线对照两行在下面列为“工具输出未覆盖”）。
+# 工具一侧（独立推得的期望）：groups[*].days 的逐日通道状态 ch 与 transition（ser_machine）、reference.days 的 S、
+#   signal_sim.switch_list 与 switches（switch_list）。
+# 两类比对分层记录：“新文件（算法）”比对行的内容与条数；“新文件（序列化）”比对表头、排序、空值与文字格式。
+# 由通道状态推得事件的规则（登记第一节第 1 小节更新表；不读项目源码）：未武装 → 已武装为“重新武装”；未武装 →
+# 激活为“重新武装”“进入”（同日、此顺序）；已武装 → 激活为“进入”；激活 → 未武装或已武装为“退出”；状态不变无事件。
+# ---------------------------------------------------------------------------
+
+import csv as _csv  # noqa: E402  只追加：导入放在追加段内，既有导入段不改
+import gzip as _gzip  # noqa: E402
+import io as _io  # noqa: E402
+from itertools import pairwise as _pairwise  # noqa: E402
+from types import SimpleNamespace as _SimpleNamespace  # noqa: E402
+
+from market_risk.wavewarn_v20 import development_compare as _compare  # noqa: E402
+from market_risk.wavewarn_v20 import development_output as _output  # noqa: E402
+
+EVENT_ALGO, EVENT_SER = "新文件（算法）", "新文件（序列化）"
+EVENT_FILES = ("channel_events.csv.gz", "system_transitions.csv.gz", "switches.csv.gz", "switch_stages.csv")
+EVENT_HEADERS = {
+    "channel_events.csv.gz": ["date", "k", "theta_p", "channel", "event"],
+    "system_transitions.csv.gz": ["date", "object", "from_risk", "to_risk", "direction"],
+    "switches.csv.gz": ["date", "object", "path", "before", "after", "exposure_change", "exposure_magnitude",
+                        "stages"],
+    "switch_stages.csv": ["object", "path", "switches", "stages_total", "stages_null_count"],
+}
+FILE_CHANNELS = dict(zip(CHANNEL_NAMES, ("p_spx", "p_qqq", "pr_spx", "pr_qqq", "mr"), strict=True))
+STATE_EVENTS = {("未武装未激活", "已武装未激活"): ("重新武装",), ("未武装未激活", "激活"): ("重新武装", "进入"),
+                ("已武装未激活", "激活"): ("进入",), ("激活", "未武装未激活"): ("退出",),
+                ("激活", "已武装未激活"): ("退出",)}
+RISK_ORDER = {"正常": 0, "一级": 1, "二级": 2}
+EXPOSURE_POSITIONS = {Decimal("1.4"): "正常", Decimal("0.6"): "一级", Decimal("0.3"): "二级", Decimal("0"): "全部现金"}
+SIGNAL_PATH_TEXT = "信号模拟"
+EVENT_UNCOVERED = (
+    ("switches.csv.gz、switch_stages.csv", "均线对照两行（200 日均线一级版、带缓冲带的二级版）",
+     "工具输出未覆盖：工具没有均线对照的信号模拟与切换"),
+    ("switch_stages.csv", "不可评价对象三列为空",
+     "工具输出未覆盖：同上；由项目构造测试 test_a12_smooth_prices_give_missing_value_and_non_evaluable_outputs 验收"),
+    ("channel_events.csv.gz", "同日多事件的先后（重新武装在进入之前）",
+     "工具只给逐日状态，不给事件；先后由上列推得规则给出，不是工具的独立输出"),
+)
+
+
+def event_state_changes(before: str, after: str) -> tuple[str, ...] | None:
+    """一个通道相邻两日的状态 → 当日事件（规则见本段说明）；规则表外的变化返回 None（记不一致，不猜）。"""
+    if before == after:
+        return ()
+    return STATE_EVENTS.get((before, after))
+
+
+def parse_event_file(name: str, data: bytes) -> tuple[list[str], list[dict[str, str]], str]:
+    """解析项目写出的一个新文件：返回表头、逐行字典与解码后的文本（.gz 先解压）。"""
+    raw = _gzip.decompress(data) if name.endswith(".gz") else data
+    text = raw.decode("utf-8")
+    reader = _csv.reader(_io.StringIO(text, newline=""))
+    header = next(reader)
+    return header, [dict(zip(header, row, strict=True)) for row in reader], text
+
+
+def project_event_files(snapshot: Snapshot, result: research_run.WindowResult) -> dict[str, bytes]:
+    """项目实际序列化的四个文件字节。rebuild_states 只读取 parameters.windows（A、B 同为 WINDOWS）。"""
+    rebuilt = _compare.rebuild_states(snapshot, result, confirm_run_parameters())
+    return _output.serialize_events(result, _SimpleNamespace(rebuilt=rebuilt, averages=()))
+
+
+def signal_day_range(tool: Mapping, axis: Sequence[str]) -> tuple[str, str] | None:
+    """工具的信号日范围：工具 window_first_signal_day 至工具 E 在输入日期轴上的前一日（axis[j₀−1 .. E−1]）；
+    日期轴取输入快照的日期（输入数据，不是项目计算结果）。"""
+    first, last = tool.get("window_first_signal_day"), tool.get("E")
+    if first is None or last not in axis or axis.index(last) == 0:
+        return None
+    return str(first), axis[axis.index(last) - 1]
+
+
+def tool_channel_rows(tool: Mapping, candidates: Sequence[Candidate], span: tuple[str, str],
+                      record: Recorder) -> list[tuple]:
+    """由工具逐日通道状态推得 channel_events 的期望行；同一 (K, θ_P) 的三个 h 组须给出相同的行（另记一项）。"""
+    by_pair: dict[tuple[int, Decimal], list[tuple]] = {}
+    for candidate in candidates:
+        days = tool["groups"][group_key(candidate)]["days"]
+        rows: list[tuple] = []
+        for previous, today in _pairwise(days):
+            if not span[0] <= str(today["day"]) <= span[1]:
+                continue
+            for name in CHANNEL_NAMES:
+                events = event_state_changes(previous["ch"][name], today["ch"][name])
+                if events is None:
+                    record.add(EVENT_ALGO, "channel_events：规则表外的状态变化", "不一致", f"{group_key(candidate)} "
+                               f"{today['day']} {name}", [previous["ch"][name], today["ch"][name]], None)
+                    continue
+                rows += [(str(today["day"]), str(candidate.k), str(candidate.theta), FILE_CHANNELS[name], event)
+                         for event in events]
+        pair = (candidate.k, candidate.theta)
+        if pair in by_pair:
+            record.exact(EVENT_ALGO, "channel_events：同一 (K, θ_P) 三个 h 组的工具推得行相同",
+                         group_key(candidate), by_pair[pair], rows)
+        else:
+            by_pair[pair] = rows
+    rank = {name: index for index, name in enumerate(FILE_CHANNELS.values())}
+    flat = [row for rows in by_pair.values() for row in rows]
+    return sorted(flat, key=lambda row: (row[0], int(row[1]), Decimal(row[2]), rank[row[3]]))
+
+
+def tool_transition_rows(tool: Mapping, candidates: Sequence[Candidate], span: tuple[str, str]) -> list[tuple]:
+    """由工具 groups[*].days 的 transition 与 reference.days 的 S 推得 system_transitions 的期望行。"""
+    rows: list[tuple] = []
+    for order, candidate in enumerate(candidates):
+        for item in tool["groups"][group_key(candidate)]["days"]:
+            move = item.get("transition")
+            if move is not None and span[0] <= str(item["day"]) <= span[1]:
+                rows.append((str(item["day"]), order, research_run.candidate_key(candidate), move["from"], move["to"]))
+    days = tool["reference"]["days"]
+    for previous, today in _pairwise(days):
+        if span[0] <= str(today["day"]) <= span[1] and previous["S"] != today["S"]:
+            rows.append((str(today["day"]), len(candidates), "主参照", previous["S"], today["S"]))
+    return [(day, name, before, after, "升级" if RISK_ORDER[after] > RISK_ORDER[before] else "降级")
+            for day, _, name, before, after in sorted(rows, key=lambda row: (row[0], row[1]))]
+
+
+def tool_switch_objects(tool: Mapping, candidates: Sequence[Candidate]) -> list[tuple[str, Mapping]]:
+    objects = [(research_run.candidate_key(candidate), tool["groups"][group_key(candidate)]["signal_sim"])
+               for candidate in candidates]
+    return [*objects, ("主参照", tool["reference"]["signal_sim"])]
+
+
+def valid_zero_switch(simulation: Mapping) -> bool:
+    """B-01 修正（发起人 2026-10-10 批准）：合法零切换对象——工具信号模拟含 failed 键且其值为空、switches 为 0、
+    switch_list 为空列表。只有这种对象在 switches.csv.gz 中没有明细行；失败、缺键等情形不按零切换放行，沿用原口径。"""
+    return ("failed" in simulation and simulation["failed"] is None
+            and simulation["switches"] == 0 and simulation["switch_list"] == [])
+
+
+def compare_event_rows(record: Recorder, item: str, expected: Sequence[tuple], found: Sequence[tuple]) -> None:
+    record.exact(EVENT_ALGO, f"{item} 条数", "场景", len(expected), len(found))
+    for index, (left, right) in enumerate(zip(expected, found, strict=False)):
+        record.exact(EVENT_ALGO, f"{item} 行", f"第 {index + 1} 行", list(left), list(right))
+
+
+def compare_serialization(record: Recorder, name: str, header: list[str], rows: list[dict[str, str]],
+                          text: str, keys: list[tuple]) -> None:
+    """序列化比对：表头、换行（LF、无 BOM、以换行结尾）、按登记补充第 6 条的排序键有序。"""
+    record.exact(EVENT_SER, f"{name} 表头", "表头", EVENT_HEADERS[name], header)
+    record.exact(EVENT_SER, f"{name} 换行与编码", "文件", True,
+                 "\r" not in text and not text.startswith("﻿") and text.endswith("\n"))
+    record.exact(EVENT_SER, f"{name} 排序", "文件", sorted(keys), keys)
+    if rows and "date" in rows[0]:
+        record.exact(EVENT_SER, f"{name} 日期为 ISO 文字", "文件", True,
+                     all(re.fullmatch(r"\d{4}-\d{2}-\d{2}", row["date"]) for row in rows))
+
+
+def compare_event_files(record: Recorder, tool: Mapping, snapshot: Snapshot, result: research_run.WindowResult,
+                        candidates: Sequence[Candidate]) -> dict:
+    """B8：四个新文件的行、排序与汇总。工具缺少所需键或项目组合层停止时记“未比较”（不写为通过）。"""
+    for where, item, note in EVENT_UNCOVERED:
+        record.add(EVENT_ALGO, item, "未比较", where, note=note)
+    needed = ("groups", "reference", "window_first_signal_day", "E")
+    missing = [key for key in needed if key not in tool]
+    if missing or result.stop is not None or result.window is None or result.reference is None:
+        note = (f"工具输出缺键：{'、'.join(missing)}" if missing else "项目组合层停止或无窗口")
+        record.add(EVENT_ALGO, "四个新文件", "未比较", "场景", note=note)
+        return {"比对": False, "原因": note}
+    span = signal_day_range(tool, [day_text(day) for day in snapshot.days])
+    if span is None:
+        record.add(EVENT_ALGO, "四个新文件", "未比较", "场景", note="工具信号日范围无法确定")
+        return {"比对": False, "原因": "工具信号日范围无法确定"}
+    files = project_event_files(snapshot, result)
+    parsed = {name: parse_event_file(name, files[name]) for name in EVENT_FILES}
+
+    header, rows, text = parsed["channel_events.csv.gz"]
+    found = [(row["date"], row["k"], row["theta_p"], row["channel"], row["event"]) for row in rows]
+    compare_event_rows(record, "channel_events", tool_channel_rows(tool, candidates, span, record), found)
+    rank = {name: index for index, name in enumerate(FILE_CHANNELS.values())}
+    compare_serialization(record, "channel_events.csv.gz", header, rows, text,
+                          [(row["date"], int(row["k"]), Decimal(row["theta_p"]), rank.get(row["channel"], -1))
+                           for row in rows])
+
+    header, rows, text = parsed["system_transitions.csv.gz"]
+    found = [(row["date"], row["object"], row["from_risk"], row["to_risk"], row["direction"]) for row in rows]
+    compare_event_rows(record, "system_transitions", tool_transition_rows(tool, candidates, span), found)
+    order = {name: index for index, name in enumerate([*(research_run.candidate_key(item) for item in candidates),
+                                                       "主参照"])}
+    compare_serialization(record, "system_transitions.csv.gz", header, rows, text,
+                          [(row["date"], order.get(row["object"], -1)) for row in rows])
+
+    header, rows, text = parsed["switches.csv.gz"]
+    objects = tool_switch_objects(tool, candidates)
+    object_rank = {name: index for index, (name, _) in enumerate(objects)}
+    for name, simulation in objects:
+        expected = simulation["switch_list"]
+        mine = [row for row in rows if row["object"] == name]
+        record.exact(EVENT_ALGO, "switches 条数（= 工具 switches）", name, simulation["switches"], len(mine))
+        record.exact(EVENT_ALGO, "switches 条数（= 工具 switch_list）", name, len(expected), len(mine))
+        for left, right in zip(expected, mine, strict=False):
+            where = f"{name} {left['exec_idx']}"
+            record.exact(EVENT_ALGO, "switches.date", where, str(left["exec_idx"]), right["date"])
+            record.exact(EVENT_ALGO, "switches.before/after", where,
+                         [EXPOSURE_POSITIONS.get(Decimal(str(left["from"]))),
+                          EXPOSURE_POSITIONS.get(Decimal(str(left["to"])))], [right["before"], right["after"]])
+            record.exact(EVENT_ALGO, "switches.stages", where, left["stages"],
+                         None if right["stages"] == "" else int(right["stages"]))
+            record.number(EVENT_ALGO, "switches.exposure_change", where, Decimal(str(left["delta_signed"])),
+                          float(right["exposure_change"]))
+            record.number(EVENT_ALGO, "switches.exposure_magnitude", where, Decimal(str(left["delta"])),
+                          float(right["exposure_magnitude"]))
+        record.exact(EVENT_SER, "switches.path", name, [SIGNAL_PATH_TEXT] * len(mine), [row["path"] for row in mine])
+    # B-01 修正：合法零切换对象没有明细行，不计入应有明细的对象；未知对象、有切换对象缺行仍判不一致。
+    expected_objects = sorted(name for name, simulation in objects if not valid_zero_switch(simulation))
+    record.exact(EVENT_ALGO, "switches 对象集合", "场景", expected_objects, sorted({row["object"] for row in rows}))
+    compare_serialization(record, "switches.csv.gz", header, rows, text,
+                          [(object_rank.get(row["object"], -1), row["date"]) for row in rows])
+
+    header, rows, text = parsed["switch_stages.csv"]
+    expected_totals = []
+    for name, simulation in objects:
+        values = [item["stages"] for item in simulation["switch_list"]]
+        expected_totals.append([name, SIGNAL_PATH_TEXT, str(len(values)),
+                                str(sum(value for value in values if value is not None)),
+                                str(sum(1 for value in values if value is None))])
+    found_totals = [[row[key] for key in EVENT_HEADERS["switch_stages.csv"]] for row in rows]
+    compare_event_rows(record, "switch_stages", [tuple(item) for item in expected_totals],
+                       [tuple(item) for item in found_totals])
+    compare_serialization(record, "switch_stages.csv", header, rows, text,
+                          [(object_rank.get(row["object"], -1),) for row in rows])
+    return {"比对": True, "信号日范围": list(span),
+            "文件 SHA-256": {name: sha256(files[name]) for name in EVENT_FILES},
+            "行数": {name: len(parsed[name][1]) for name in EVENT_FILES}}

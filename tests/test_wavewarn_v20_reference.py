@@ -93,3 +93,47 @@ def test_reference_convergence_day_takes_part_in_the_common_start() -> None:
     candidates, reference = [120, 150], 190
     assert common_start_index(100, [*candidates, reference], 63, 500) == 191
     assert common_start_index(100, candidates, 63, 500) == 163
+
+
+# ---------------------------------------------------------------------------
+# 修正批 K7 A7（复查附件 G2 G2-02 的 B7）：主参照的执行政策端到端（与候选共用 simulate_policy_with_gaps）
+# ---------------------------------------------------------------------------
+
+
+def test_reference_policy_stops_and_reenters_on_average_completeness() -> None:
+    """两资产同价，第 1—16 日为执行日：第 1 日 100，第 2 日 97，第 3 日起 90。SPX 收盘价即上列价格（第 0 日 100），
+    均线恒为 80（收盘价一直在均线上方，L_参照 = 0），只有第 13 日均线不完整。主参照自正常出发。
+
+    手推：参照状态每日为正常（第 13 日均线不完整，保持正常），第 0—15 日信号记录的“当日输入完整”= 均线完整，
+    只有第 13 日为假。执行政策：第 1、2 日 1.4；W₂ = 1 − 1.4 × 0.03 = 0.958 ≤ 0.96 → 第 3 日 STOP_CASH（序号 2）；
+    冷却满在序号 12（第 13 日），但第 13 日均线不完整（参照信号“不完整”），不重入 → 第 14 日仍离场；
+    第 14 日正常且均线完整 → 第 15 日 REENTRY_CAP 0.6（U = 一级）；第 15 日正常且完整 → 第 16 日 1.4。
+    离场共 11 日（第 4—14 日）。重入条件看均线完整性，与五个通道无关（主参照没有通道）。
+    """
+    from decimal import Decimal
+
+    from wavewarn_v20_helpers import POLICY, TOLERANCE
+
+    from market_risk.wavewarn_v20 import nav
+    from market_risk.wavewarn_v20.execution import TargetSource, reference_signal_records
+
+    prices = ["100", "97", *["90"] * 14]
+    days = [numbered(number) for number in range(1, 17)]
+    spx = ["100", *prices[:15]]                                         # 第 0—15 日的 SPX 收盘价
+    inputs = [trend(close, None if number == 13 else "80", numbered(number)) for number, close in enumerate(spx)]
+    path = run_reference(NORMAL, inputs, WINDOWS.average)
+    assert [item.risk for item in path] == [NORMAL] * 16
+    assert [item.level for item in path] == [0] * 13 + [None] + [0] * 2
+    valid = [item.close is not None and item.complete for item in inputs]
+    signals = reference_signal_records(path, valid)
+    assert [item.all_valid for item in signals] == [True] * 13 + [False] + [True] * 2
+    closes = {"SPX": [Decimal(value) for value in prices], "QQQ": [Decimal(value) for value in prices]}
+    result = nav.simulate_policy_with_gaps(days, signals, closes, POSITIONS, POLICY, TOLERANCE)
+    assert isinstance(result, nav.PolicyResult)
+    assert [item.source for item in result.targets] == [
+        *[TargetSource.SYSTEM] * 2, TargetSource.STOP_CASH, *[TargetSource.OUT_CASH] * 11, TargetSource.REENTRY_CAP,
+        TargetSource.SYSTEM]
+    assert [POSITIONS.exposure(item.position) for item in result.targets] == pytest.approx(
+        [1.4, 1.4, *[0.0] * 12, 0.6, 1.4])
+    assert result.nav.wealth[1] == pytest.approx(0.958)
+    assert [item.cap_active for item in result.targets[14:]] == [True, False]

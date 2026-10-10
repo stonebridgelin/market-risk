@@ -51,6 +51,14 @@ INFORMATION_STATE = "information_state.json"
 INFORMATION_STATE_FINAL = "information_state_final.json"
 FAILURE = "failure.json"
 PREFIX_USAGE = "前缀诊断运行（严格读取未通过：缺少必需价格）"       # 补充二第四节
+# 修正批 K4（登记补充第 5 条，甲案）：开发窗口覆盖条件不满足时追加的用途限制（逐字）。
+COVERAGE_USAGE = "开发窗口未覆盖登记区间（axis[j₀] 晚于 2000-03-24）"
+# 修正批 K2：登记补充第 7.1 条固定文字（逐字）与第 4.2 条说明（实施指令 K2 第 1 条给出的原句，逐字）。
+HISTORICAL_NOTE = ("本报告为历史回算：以登记第零节绑定的数据集版本重放，并假定这些数值在当日美东 18:30 可以取得。"
+                   "运行记录中的 `acquired_at` 是本次运行取得数据的时间，不是历史上每个信号日的实际取得时间。")
+EXPOSURE_SUBSTITUTION_NOTE = ("熊市暴露替换对照按《阶段四字段级设计稿（修订二）》第五节第 5 小节口径筛选，"
+                              "与登记第 43 行字面不等价，只作描述。")
+SIGNAL_PATH = "信号模拟"                                          # 修正批 B10 甲：切换输出只含信号模拟
 NOT_A_SUCCESS = "该正式目录不得作为成功结果引用，交负责人处理"
 # 允许变化的文件集合（设计稿第八节第 2 小节）：清单中只有这两行允许不同。
 UNSTABLE_FILES = (RUN_ENVIRONMENT, AUDIT_LOG)
@@ -563,6 +571,58 @@ def descriptive_document(descriptive: compare.Descriptive) -> dict:
                           for name, events in descriptive.policy_events.items()},
         "policy_minus_signal": dict(descriptive.policy_differences),
         "note": "描述性对照与报告项不参与筛选、排序或确认性检验；不新增扫描参数",
+        "exposure_substitution_note": EXPOSURE_SUBSTITUTION_NOTE,          # 修正批 K2（契约例外 E6）
+    }
+
+
+# ---------------------------------------------------------------------------
+# 修正批 K1（登记补充第 6 条；契约例外 E7）：通道事件日期、系统转换日期、切换与阶段变化数
+# ---------------------------------------------------------------------------
+
+
+def switch_objects(result: WindowResult, descriptive: compare.Descriptive) -> list[tuple[str, tuple | None]]:
+    """切换输出的对象与其信号模拟切换（B10 甲：只含信号模拟）：候选 0—26、主参照、两条均线对照（按
+    descriptive.averages 顺序；不可评价者为 None）；不含一直持有与恒定仓位。"""
+    objects: list[tuple[str, tuple | None]] = [(candidate_key(candidate), tuple(outcome.outcome.switches))
+                                               for candidate, outcome in result.candidates.items()]
+    if result.reference is not None:
+        objects.append((REFERENCE, tuple(result.reference.outcome.switches)))
+    objects += [(item.name, tuple(item.switches) if item.evaluable else None) for item in descriptive.averages]
+    return objects
+
+
+def switch_rows(objects: Sequence[tuple[str, Sequence | None]]) -> tuple[list[tuple], list[tuple]]:
+    """switches.csv.gz 与 switch_stages.csv 的行。阶段数为空（涉及全部现金）时写空字段并计入 stages_null_count，
+    stages_total 只对非空值求和，不以零代替空值；不可评价对象只在 switch_stages.csv 写一行，三列为空。"""
+    details: list[tuple] = []
+    totals: list[tuple] = []
+    for name, changes in objects:
+        if changes is None:
+            totals.append((name, SIGNAL_PATH, None, None, None))
+            continue
+        details += [(item.day, name, SIGNAL_PATH, item.before, item.after, item.exposure_change,
+                     item.exposure_magnitude, item.stages) for item in sorted(changes, key=lambda item: item.day)]
+        stages = [item.stages for item in changes]
+        totals.append((name, SIGNAL_PATH, len(changes), sum(value for value in stages if value is not None),
+                       sum(1 for value in stages if value is None)))
+    return details, totals
+
+
+def serialize_events(result: WindowResult, descriptive: compare.Descriptive) -> dict[str, bytes]:
+    """channel_events.csv.gz、system_transitions.csv.gz、switches.csv.gz、switch_stages.csv。"""
+    channel_rows = [(row.day, row.k, row.theta, row.channel, row.event)
+                    for row in compare.channel_events(result, descriptive.rebuilt)]
+    transition_rows = [(row.day, row.object, _risk(row.before), _risk(row.after), row.direction)
+                       for row in compare.system_transitions(result)]
+    details, totals = switch_rows(switch_objects(result, descriptive))
+    return {
+        "channel_events.csv.gz": gzip_bytes(csv_bytes(("date", "k", "theta_p", "channel", "event"), channel_rows)),
+        "system_transitions.csv.gz": gzip_bytes(csv_bytes(
+            ("date", "object", "from_risk", "to_risk", "direction"), transition_rows)),
+        "switches.csv.gz": gzip_bytes(csv_bytes(
+            ("date", "object", "path", "before", "after", "exposure_change", "exposure_magnitude", "stages"),
+            details)),
+        "switch_stages.csv": csv_bytes(("object", "path", "switches", "stages_total", "stages_null_count"), totals),
     }
 
 
@@ -630,11 +690,11 @@ def serialize_tables(result: WindowResult, descriptive: compare.Descriptive) -> 
     }
 
 
-def render_report(result: WindowResult, selection: DevelopmentSelection, usage_restriction: str | None) -> bytes:
-    """报告：普通运行不写用途限制；经过诊断读取的运行在第一个标题之后的第一行写固定文字（补充二第四节）。"""
-    lines = ["# 波段预警 v2.0 开发期运行报告"]
-    if usage_restriction is not None:
-        lines.append(usage_restriction)
+def render_report(result: WindowResult, selection: DevelopmentSelection, usage_restriction: Sequence[str]) -> bytes:
+    """报告：用途限制在第一个标题之后逐项一行（补充二第四节；修正批 E1、E3：数组，无限制时不写）；随后为登记补充
+    第 7.1 条固定文字与第 4.2 条说明（修正批 K2），再接正文。覆盖条件不满足时在选择一节写明不作正式选定（K4）。"""
+    lines = ["# 波段预警 v2.0 开发期运行报告", *usage_restriction, "", HISTORICAL_NOTE, "",
+             EXPOSURE_SUBSTITUTION_NOTE]
     window = result.window
     lines += ["", "## 窗口", ""]
     if window is not None:
@@ -644,6 +704,8 @@ def render_report(result: WindowResult, selection: DevelopmentSelection, usage_r
     lines += ["", "## 选择（组合层与选择程序出口）", "", f"- 出口：{chosen.outcome.value}",
               f"- 选定组：{'无' if chosen.selected is None else candidate_key(chosen.selected)}",
               f"- 可行组数：{len(chosen.feasible)}；并列组数：{len(chosen.tied)}"]
+    if COVERAGE_USAGE in usage_restriction:
+        lines.append("- 开发窗口覆盖条件不满足：上列出口照录，不作正式选定、不进入锁定（登记补充第 5 条，甲案）。")
     lines += ["", "## 说明", "", "- 描述性对照与报告项不参与筛选、排序或确认性检验。",
               "- 执行政策与信号模拟之差包含整套止损、冷却、重入路径的差异，不归因为任何单项规则。", ""]
     return "\n".join(lines).encode("utf-8")
@@ -651,7 +713,7 @@ def render_report(result: WindowResult, selection: DevelopmentSelection, usage_r
 
 def stable_files(snapshot: Snapshot, result: WindowResult, selection: DevelopmentSelection,
                  descriptive: compare.Descriptive, reconciliation: Sequence[compare.ReconciliationRow],
-                 run_record: Mapping, usage_restriction: str | None,
+                 run_record: Mapping, usage_restriction: Sequence[str],
                  note: Callable[[str], None] | None = None) -> dict[str, bytes]:
     """全部稳定计算文件（information_state.json 除外，它由调用方最后写出），按写出顺序排列。"""
 
@@ -669,6 +731,7 @@ def stable_files(snapshot: Snapshot, result: WindowResult, selection: Developmen
     files.update(serialize_tables(result, descriptive))
     mark("汇总表")
     files.update(serialize_daily(result, descriptive))
+    files.update(serialize_events(result, descriptive))
     files.update(serialize_r2(result))
     files["diagnostics.csv.gz"] = serialize_diagnostics(result)
     mark("逐日明细")

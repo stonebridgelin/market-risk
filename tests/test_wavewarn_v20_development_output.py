@@ -186,7 +186,7 @@ def test_failure_before_manifest_file_set(tmp_path: Path, capsys: pytest.Capture
     writes = entry.WriteRecord()                     # 补充七：写入经完成状态记录（与入口同一方式）
     for name, data in written.items():
         writes.write(output, places.staging / name, data)
-    code = entry._fail(failure(), "trace", entry.Audit(), entry.Information(), places, written, writes, None, None,
+    code = entry._fail(failure(), "trace", entry.Audit(), entry.Information(), places, written, writes, None, [],
                        output.readable_roots(places), output, {})
     assert code == 1 and not output.path_exists(places.staging)
     assert json.loads(get(places.failed / "failure.json"))["incomplete_files"] == []
@@ -216,7 +216,7 @@ def test_failure_after_manifest_file_set(tmp_path: Path, capsys: pytest.CaptureF
     files = frozen_package(places, writes)
     manifest_sha = output.sha256(get(places.staging / output.MANIFEST))
     code = entry._fail_after_manifest(failure(), "trace", entry.Audit(), entry.Information(), places, writes, 0,
-                                      manifest_sha, None, output.readable_roots(places), output, {})
+                                      manifest_sha, [], output.readable_roots(places), output, {})
     assert code == 1
     assert json.loads(get(places.failed / "failure.json"))["incomplete_files"] == []
     assert names(places.failed) == {*files, "MANIFEST.sha256", "failure.json", "information_state_final.json",
@@ -238,7 +238,7 @@ def test_failure_after_publishing_leaves_the_formal_directory_byte_identical(
     writes.moved(places.staging, places.formal)
     before = {name: get(places.formal / name) for name in names(places.formal)}
     manifest_sha = output.sha256(before[output.MANIFEST])
-    code = entry._fail_published(failure(), entry.Audit(), entry.Information(), places, writes, 0, manifest_sha, None,
+    code = entry._fail_published(failure(), entry.Audit(), entry.Information(), places, writes, 0, manifest_sha, [],
                                  output.readable_roots(places), output, {})
     assert code == 1
     assert {name: get(places.formal / name) for name in names(places.formal)} == before
@@ -255,9 +255,87 @@ def test_unwritable_evidence_keeps_the_staging_name_and_exits_three(
     output.make_directory(places.staging)
     output.write_new(places.staging / "failure.json", b"{}\n")            # 已存在：独占写入失败，不覆盖
     code = entry._fail(failure(), "trace", entry.Audit(), entry.Information(), places, {}, entry.WriteRecord(), None,
-                       None, output.readable_roots(places), output, {})
+                       [], output.readable_roots(places), output, {})
     assert code == 3 and output.path_exists(places.staging) and not output.path_exists(places.failed)
     assert get(places.staging / "failure.json") == b"{}\n"
     assert names(places.staging) == {"failure.json"}
     assert "失败证据未完整取得" in capsys.readouterr().err
     assert tail_records(places)[-1]["outcome"] == "失败"
+
+
+# ---------------------------------------------------------------------------
+# 修正批 K1（切换与阶段变化数的空值规则）与 K2（报告固定文字）
+# ---------------------------------------------------------------------------
+
+
+def test_switch_rows_keep_cash_stages_empty_and_count_them() -> None:
+    """手工切换样本（execution.switches 计算）：目标 正常、二级、全部现金（止损）、一级（重入）、正常，日期第 1—5 日。
+
+    手推：第 2 日 正常→二级，直接跨级，阶段数 2，暴露 1.4 → 0.3（变化 −1.1，幅度 1.1）；第 3 日 二级→全部现金，阶段数
+    为空（涉及全部现金）；第 4 日 全部现金→一级，阶段数为空；第 5 日 一级→正常，阶段数 1。
+    switches = 4；stages_total 只对非空值求和 = 2 + 1 = 3（不以零代替空值）；stages_null_count = 2。
+    不可评价的均线对照只在 switch_stages.csv 写一行，switches、stages_total、stages_null_count 三列为空。
+    """
+    from wavewarn_v20_helpers import POSITIONS, numbered
+
+    from market_risk.wavewarn_v20.execution import PlannedTarget, Position, TargetSource, switches
+
+    positions = [Position.NORMAL, Position.LEVEL2, Position.CASH, Position.LEVEL1, Position.NORMAL]
+    targets = [PlannedTarget(numbered(number), position, POSITIONS.weights(position).core,
+                             POSITIONS.weights(position).leverage, TargetSource.SYSTEM, False)
+               for number, position in enumerate(positions, start=1)]
+    changes = switches(targets, POSITIONS)
+    details, totals = output.switch_rows([("构造候选", changes), ("均线对照（不可评价）", None)])
+    assert [(row[0], row[1], row[2], row[3], row[4], row[7]) for row in details] == [
+        (numbered(2), "构造候选", "信号模拟", Position.NORMAL, Position.LEVEL2, 2),
+        (numbered(3), "构造候选", "信号模拟", Position.LEVEL2, Position.CASH, None),
+        (numbered(4), "构造候选", "信号模拟", Position.CASH, Position.LEVEL1, None),
+        (numbered(5), "构造候选", "信号模拟", Position.LEVEL1, Position.NORMAL, 1)]
+    assert (details[0][5], details[0][6]) == pytest.approx((-1.1, 1.1))
+    assert totals == [("构造候选", "信号模拟", 4, 3, 2), ("均线对照（不可评价）", "信号模拟", None, None, None)]
+    text = output.csv_bytes(("object", "path", "switches", "stages_total", "stages_null_count"), totals).decode()
+    assert text == ("object,path,switches,stages_total,stages_null_count\n构造候选,信号模拟,4,3,2\n"
+                    "均线对照（不可评价）,信号模拟,,,\n")
+    stages = [line.rsplit(",", 1)[1] for line in output.csv_bytes(
+        ("date", "object", "path", "before", "after", "exposure_change", "exposure_magnitude", "stages"),
+        details).decode().splitlines()[1:]]
+    assert stages == ["2", "", "", "1"]
+    # 没有切换的可评价对象：三列为 0、0、0（不是空值）
+    assert output.switch_rows([("无切换", ())]) == ([], [("无切换", "信号模拟", 0, 0, 0)])
+
+
+def report_fakes(usage: list[str]) -> bytes:
+    """render_report 读取的字段的替身。"""
+    from types import SimpleNamespace
+
+    window = SimpleNamespace(first_day=dt.date(2000, 3, 24), last_day=dt.date(2016, 12, 30), n=4220,
+                             start_basis="t0 + 63")
+    selection = SimpleNamespace(selection=SimpleNamespace(outcome=SimpleNamespace(value="选定"), selected=None,
+                                                          feasible=(), tied=()))
+    return output.render_report(SimpleNamespace(window=window), selection, usage)
+
+
+def test_report_fixed_texts_follow_the_usage_restrictions_before_the_body() -> None:
+    """K2：标题 → 用途限制逐项一行（E1、E3：数组；无限制时不写）→ 空行 → 登记补充第 7.1 条固定文字 → 空行 → 第 4.2 条
+    说明 → 正文（“## 窗口”）。K4：覆盖条件不满足（用途限制含 COVERAGE_USAGE）时，选择一节写明不作正式选定。"""
+    historical = ("本报告为历史回算：以登记第零节绑定的数据集版本重放，并假定这些数值在当日美东 18:30 可以取得。"
+                  "运行记录中的 `acquired_at` 是本次运行取得数据的时间，不是历史上每个信号日的实际取得时间。")
+    exposure = ("熊市暴露替换对照按《阶段四字段级设计稿（修订二）》第五节第 5 小节口径筛选，"
+                "与登记第 43 行字面不等价，只作描述。")
+    assert output.HISTORICAL_NOTE == historical and output.EXPOSURE_SUBSTITUTION_NOTE == exposure
+    coverage = "开发窗口未覆盖登记区间（axis[j₀] 晚于 2000-03-24）"
+    assert output.COVERAGE_USAGE == coverage
+    statement = "- 开发窗口覆盖条件不满足：上列出口照录，不作正式选定、不进入锁定（登记补充第 5 条，甲案）。"
+
+    lines = report_fakes([]).decode("utf-8").split("\n")
+    assert lines[:7] == ["# 波段预警 v2.0 开发期运行报告", "", historical, "", exposure, "", "## 窗口"]
+    assert statement not in lines
+
+    both = [output.PREFIX_USAGE, coverage]
+    lines = report_fakes(both).decode("utf-8").split("\n")
+    assert lines[:9] == ["# 波段预警 v2.0 开发期运行报告", output.PREFIX_USAGE, coverage, "", historical, "", exposure,
+                         "", "## 窗口"]
+    assert lines.count(statement) == 1
+    assert lines.index(statement) > lines.index("## 选择（组合层与选择程序出口）")
+    assert lines.index(statement) < lines.index("## 说明")
+    assert report_fakes([output.PREFIX_USAGE]).decode("utf-8").count(statement) == 0

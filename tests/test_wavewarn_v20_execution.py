@@ -415,3 +415,164 @@ def test_switch_reports_absolute_magnitude_and_signed_direction() -> None:
     assert [(item.stages, round(item.exposure_magnitude, 12), round(item.exposure_change, 12))
             for item in with_cash] == [(None, 0.6, -0.6), (None, 1.4, 1.4)]
     assert all(close_to(item.exposure_magnitude, abs(item.exposure_change)) for item in with_cash)
+
+
+# ---------------------------------------------------------------------------
+# 修正批 K7 A1—A6（复查附件 G2 G2-02 的 B1—B5）：执行政策与净值逐日联动的构造验收
+# 价格两资产同价；signals[0] 为第 0 日（j₀ − 1）的信号；止损线 0.96 × 本轮基准；冷却 10 日；POSITIONS 中
+# 正常 1.4、一级 0.6、二级 0.3 倍暴露。
+# ---------------------------------------------------------------------------
+
+
+def policy_run(prices: list[str], risks: list[Risk]) -> nav.PolicyResult:
+    """第 1 至 n 日的价格与第 0 至 n − 1 日的信号（全部有效），返回执行政策模拟结果。"""
+    days = [numbered(number) for number in range(1, len(prices) + 1)]
+    closes = {"SPX": [Decimal(value) for value in prices], "QQQ": [Decimal(value) for value in prices]}
+    signals = [signal(number, risk) for number, risk in enumerate(risks)]
+    return nav.simulate_policy(days, signals, nav.basket_returns(days, closes), POSITIONS, POLICY, TOLERANCE)
+
+
+def sources(result: nav.PolicyResult) -> list[TargetSource]:
+    return [item.source for item in result.targets]
+
+
+# 目标来源简写（不用 OUT，避免遮蔽本文件前面的离场状态 OUT）。
+STOP, AWAY, CAP, SYSTEM = TargetSource.STOP_CASH, TargetSource.OUT_CASH, TargetSource.REENTRY_CAP, TargetSource.SYSTEM
+
+
+def test_a1_stop_under_level1_exposure() -> None:
+    """A1（B1）：信号第 0—13 日为一级，第 14 日起正常；价格 100, 95, 90, 88, 之后 88 不变，共 16 日。
+
+    手推：第 1—3 日目标一级（0.6）。W₂ = 1 − 0.6 × 0.05 = 0.97 > 0.96；
+    W₃ = 0.97 × (1 − 0.6 × 5/95) = 0.939368… ≤ 0.96 × 1 → 第 3 日收盘止损确认，第 4 日 STOP_CASH（序号 3）；
+    W₄ = W₃ × (1 − 0.6 × 2/90) = 0.926843…（确认日到执行日的跌幅仍由组合承担）。
+    第 5—14 日离场（OUT_CASH 共 10 日；第 14 日（序号 13 = 3 + 10）信号才为正常 → 第 15 日重入 0.6，U = 一级）；
+    第 15 日信号正常且有效 → 第 16 日 U 解除，正常 1.4。
+    """
+    result = policy_run(["100", "95", "90", *["88"] * 13], [LEVEL1] * 14 + [NORMAL] * 2)
+    assert [exposure(item) for item in result.targets] == pytest.approx([0.6] * 3 + [0.0] * 11 + [0.6, 1.4])
+    assert sources(result) == [SYSTEM] * 3 + [STOP] + [AWAY] * 10 + [CAP, SYSTEM]
+    wealth = result.nav.wealth
+    assert wealth[1] == pytest.approx(0.97)
+    assert wealth[2] == pytest.approx(0.97 * (1 - 0.6 * 5 / 95))
+    assert wealth[2] == pytest.approx(0.939368, abs=1e-6)
+    assert wealth[3] == pytest.approx(wealth[2] * (1 - 0.6 * 2 / 90))
+    assert wealth[3] == pytest.approx(0.926843, abs=1e-6)
+    assert all(value == wealth[3] for value in wealth[3:])                          # 其后价格不变
+    assert [item.cap_active for item in result.targets[14:]] == [True, False]
+
+
+def test_a2_stop_under_level2_exposure() -> None:
+    """A2（B1）：信号第 0—9 日为二级、第 10 日起正常；价格 100, 95, 90, 86, 之后 86 不变，共 17 日。
+
+    手推：第 1—4 日目标二级（0.3）。W₂ = 1 − 0.3 × 0.05 = 0.985；W₃ = 0.985 × (1 − 0.3 × 5/95) = 0.969447…；
+    两者都 > 0.96。W₄ = W₃ × (1 − 0.3 × 4/90) = 0.956521… ≤ 0.96（累计跌约 4.35%）→ 第 5 日 STOP_CASH（序号 4）。
+    第 6—15 日离场 10 日：第 10—14 日信号虽已正常，但序号 9—13 < 4 + 10，冷却未满；第 15 日（序号 14）信号正常
+    → 第 16 日重入 0.6；第 16 日信号正常 → 第 17 日 1.4。
+    """
+    result = policy_run(["100", "95", "90", *["86"] * 14], [LEVEL2] * 10 + [NORMAL] * 7)
+    assert [exposure(item) for item in result.targets] == pytest.approx([0.3] * 4 + [0.0] * 11 + [0.6, 1.4])
+    assert sources(result) == [SYSTEM] * 4 + [STOP] + [AWAY] * 10 + [CAP, SYSTEM]
+    wealth = result.nav.wealth
+    assert (wealth[1], wealth[2]) == pytest.approx((0.985, 0.985 * (1 - 0.3 * 5 / 95)))
+    assert wealth[3] == pytest.approx(wealth[2] * (1 - 0.3 * 4 / 90))
+    assert wealth[3] == pytest.approx(0.956521, abs=1e-6)
+    assert wealth[2] > 0.96 >= wealth[3]
+
+
+def test_a3_two_rounds_reset_the_benchmark() -> None:
+    """A3（B2）：信号恒为正常；价格 100, 97, 之后 90 至第 15 日, 93, 91, 90, 90, 90，共 20 日。
+
+    手推：第一轮 W₂ = 1 − 1.4 × 0.03 = 0.958 ≤ 0.96 → 第 3 日 STOP_CASH（序号 2）；W₃ = 0.958 × (1 − 1.4 × 7/97)
+    = 0.861213…；第 4—13 日离场 10 日；第 13 日（序号 12 = 2 + 10）信号正常 → 第 14 日重入 0.6，新一轮基准在第 14 日
+    收盘重置为 W₁₄ = W₃（90 → 90）。若不重置（仍以第一轮的 1 为基准），W₁₄ = 0.861… ≤ 0.96 会在第 14 日立即止损；
+    实际第 15 日 U 解除、1.4。第 16 日 93：W₁₆ = W₁₄ × (1 + 1.4 × 3/90)，为第二轮最高；第 17 日 91：
+    W₁₇/W₁₆ = 1 − 1.4 × 2/93 = 0.969892… > 0.96；第 18 日 90：
+    W₁₈/W₁₆ = (90.2/93) × (89.6/91) = 8081.92/8463 = 0.954971… ≤ 0.96
+    → 第 19 日第二次 STOP_CASH（序号 18），第 20 日离场。两次止损各自以本轮最高净值为准。
+    """
+    prices = ["100", "97", *["90"] * 13, "93", "91", "90", "90", "90"]
+    result = policy_run(prices, [NORMAL] * 20)
+    assert sources(result) == [SYSTEM] * 2 + [STOP] + [AWAY] * 10 + [CAP] + [SYSTEM] * 4 + [STOP, AWAY]
+    assert [exposure(item) for item in result.targets] == pytest.approx(
+        [1.4] * 2 + [0.0] * 11 + [0.6] + [1.4] * 4 + [0.0] * 2)
+    wealth = result.nav.wealth
+    assert wealth[2] == pytest.approx(0.958 * (1 - 1.4 * 7 / 97))
+    assert wealth[13] == wealth[2] < 0.96                                              # 不重置就会立即止损
+    assert wealth[15] == pytest.approx(wealth[13] * (1 + 1.4 * 3 / 90))
+    assert wealth[16] / wealth[15] == pytest.approx(0.969892, abs=1e-6)
+    assert wealth[17] / wealth[15] == pytest.approx(8081.92 / 8463)
+    assert sum(item is STOP for item in sources(result)) == 2
+
+
+def test_a4_stop_while_the_reentry_cap_is_active() -> None:
+    """A4（B3）：价格 100, 97, 之后 90 至第 14 日, 第 15 日 83, 之后 83 至第 17 日；信号第 0—13 日正常，第 14 日起二级。
+
+    手推：同 A3，第 3 日 STOP_CASH，第 14 日重入 0.6（U = 一级），基准重置为 W₁₄。第 14 日信号二级：U 仍有效
+    （只有“正常且完整”才解除），二级与一级取小仍为二级 → 第 15 日目标二级 0.3、cap_active 为真。
+    第 15 日 83：第 14 日至第 15 日持有 0.6，W₁₅/W₁₄ = 1 − 0.6 × 7/90 = 0.953333… ≤ 0.96 → 第 16 日 STOP_CASH，
+    U 作废；第 17 日离场。事件：第 16 日为“止损执行”与“U 作废（止损）”（detail 为止损确认日第 15 日），
+    不出现“U 解除”（修正批 B1，G2-01）。
+    """
+    from market_risk.wavewarn_v20.development_compare import policy_events
+
+    result = policy_run(["100", "97", *["90"] * 12, "83", "83", "83"], [NORMAL] * 14 + [LEVEL2] * 3)
+    assert sources(result) == [SYSTEM] * 2 + [STOP] + [AWAY] * 10 + [CAP, SYSTEM, STOP, AWAY]
+    assert [(item.position, item.cap_active) for item in result.targets[13:]] == [
+        (Position.LEVEL1, True), (Position.LEVEL2, True), (Position.CASH, False), (Position.CASH, False)]
+    wealth = result.nav.wealth
+    assert wealth[14] / wealth[13] == pytest.approx(1 - 0.6 * 7 / 90)
+    events = [(item.kind, item.day, item.detail) for item in policy_events(result)]
+    assert ("止损执行", numbered(16), f"止损确认日 {numbered(15)}") in events
+    assert ("U 作废（止损）", numbered(16), f"止损确认日 {numbered(15)}") in events
+    assert all(kind != "U 解除" for kind, _, _ in events)
+    assert [kind for kind, day, _ in events if day == numbered(14)] == ["重入", "U 设置"]
+
+
+def test_a4_normal_release_of_the_reentry_cap() -> None:
+    """A4 正常解除例：A3 的第 14 日重入（U = 一级），第 14 日信号正常且完整 → 第 15 日 U 解除，事件为“U 解除”、
+    不出现“U 作废（止损）”；第 3 日与第 19 日的止损执行时 U 本来为无，也不记“U 作废（止损）”。
+    """
+    from market_risk.wavewarn_v20.development_compare import policy_events
+
+    prices = ["100", "97", *["90"] * 13, "93", "91", "90", "90", "90"]
+    events = [(item.kind, item.day, item.detail) for item in policy_events(policy_run(prices, [NORMAL] * 20))]
+    assert ("U 解除", numbered(15), "U = 无") in events
+    assert all(kind != "U 作废（止损）" for kind, _, _ in events)
+    assert [day for kind, day, _ in events if kind == "止损执行"] == [numbered(3), numbered(19)]
+
+
+def test_a5_stop_confirmed_on_the_second_last_day() -> None:
+    """A5（B4）：16 日轴，信号恒为正常；价格 100 至第 14 日，第 15、16 日 97。
+
+    手推：W₁₅ = 1 − 1.4 × 0.03 = 0.958 ≤ 0.96 → 第 15 日（E − 1）收盘确认，第 16 日（E）目标 STOP_CASH；
+    切换计一次（正常 → 现金，stages 为空）；窗口在离场状态结束，没有 OUT_CASH（没有冷却记录）。
+    另：E − 1 决定重入。14 日轴，第 2 日 97 → 第 3 日 STOP_CASH（序号 2）；第 13 日（序号 12）信号正常
+    → 第 14 日（E）目标 REENTRY_CAP 0.6，切换计两次（正常 → 现金，现金 → 一级）。
+    """
+    result = policy_run([*["100"] * 14, "97", "97"], [NORMAL] * 16)
+    assert sources(result) == [SYSTEM] * 15 + [STOP]
+    assert result.nav.wealth[14] == pytest.approx(0.958)
+    found = switches(result.targets, POSITIONS)
+    assert [(item.day, item.before, item.after, item.stages) for item in found] == [
+        (numbered(16), Position.NORMAL, Position.CASH, None)]
+    reentry = policy_run(["100", *["97"] * 13], [NORMAL] * 14)
+    assert sources(reentry) == [SYSTEM] * 2 + [STOP] + [AWAY] * 10 + [CAP]
+    assert [(item.day, item.before, item.after) for item in switches(reentry.targets, POSITIONS)] == [
+        (numbered(3), Position.NORMAL, Position.CASH), (numbered(14), Position.CASH, Position.LEVEL1)]
+
+
+def test_a6_window_opens_at_level2() -> None:
+    """A6（B5）：信号第 0 日（j₀ − 1）二级、第 1 日二级、第 2 日一级、第 3 日起正常；
+    价格 100 至第 8 日，第 9、10 日 97。
+
+    手推：第 1 日目标由 S_{j₀−1} = 二级决定（0.3，第一轮在第 1 日开始，U = 无）；第 2 日二级 0.3；第 3 日一级 0.6；
+    第 4 日起正常 1.4，逐级恢复（不经重入上限）。第 1—8 日价格不变，净值恒为 1，基准 = 1；
+    第 9 日 97：W₉ = 1 − 1.4 × 0.03 = 0.958 ≤ 0.96 × 1 → 第 10 日 STOP_CASH（证明第一轮基准自第 1 日收盘 1 起算）。
+    """
+    result = policy_run([*["100"] * 8, "97", "97"], [LEVEL2, LEVEL2, LEVEL1] + [NORMAL] * 7)
+    assert [exposure(item) for item in result.targets] == pytest.approx([0.3, 0.3, 0.6, *[1.4] * 6, 0.0])
+    assert sources(result) == [SYSTEM] * 9 + [STOP]
+    assert all(not item.cap_active for item in result.targets)
+    assert list(result.nav.wealth[:8]) == [1.0] * 8
+    assert result.nav.wealth[8] == pytest.approx(0.958)

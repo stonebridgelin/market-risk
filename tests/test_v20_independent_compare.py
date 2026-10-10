@@ -386,8 +386,11 @@ def research_round(record: support.Recorder, out: Path, name: str, data: dict, c
                                              "message": result.stop.message, "detail": dict(result.stop.detail)}
     checks = support.self_consistency(result, project_fields, axis)
     compared = not any(support.self_state(check) == support.SELF_DIFFERENT for check in checks.values())
+    events = None
     if compared:
         support.compare_research(record, tool, result, chosen, axis, len(axis) - 1, source_label)
+        # 修正批 B8（K10）：四个新输出文件的行、排序与汇总，与由工具输出推得的期望比对（工具未覆盖的部分记“未比较”）。
+        events = support.compare_event_files(record, tool, adaptation.snapshot, result, support.CANDIDATES)
     disclosure = None
     if histories != configured:
         original, original_choice = support.run_research(adaptation.snapshot, configured)
@@ -402,7 +405,7 @@ def research_round(record: support.Recorder, out: Path, name: str, data: dict, c
                 "outcome": chosen.selection.outcome.value,
                 "selected": (None if chosen.selection.selected is None
                              else support.group_key(chosen.selection.selected))},
-            "自洽检查": checks, "已与工具比对": compared}
+            "自洽检查": checks, "已与工具比对": compared, "新文件比对": events}
 
 
 def test_summary() -> None:
@@ -568,6 +571,8 @@ def test_b_confirm_case(name: str) -> None:
         premise = support.b_premise(tool, result.common.events)
         extra["P_B"] = premise
         support.compare_b_confirm(record, tool, data, candidate, result, confirm_data, outcome, premise)
+        # 修正批 B8（K10）：B 场景同样比对四个新文件；工具输出缺所需键时记“未比较”（先判断键是否存在）。
+        extra["新文件比对"] = support.compare_event_files(record, tool, snapshot, result, (candidate,))
         if outcome.valid:                                                    # 第一节第 4 条：p 原值，便于复算
             rows = (outcome.main, *outcome.sensitivities)
             extra["p 原值"] = {"项目": {str(row.block): row.p_value for row in rows},
@@ -1792,3 +1797,293 @@ def test_wiring_sequence_origin_keys_and_types() -> None:
     for key, value in bad_values:
         with pytest.raises(sequence.SequenceError, match="类型或格式不符"):
             support.sequence_origin_fields({**good, key: value})
+
+
+# ---------------------------------------------------------------------------
+# 修正批 B8（K10）接线自检：未设置环境变量时照常运行，不读外部材料。构造快照（2003—2005 年 NYSE 交易日，
+# random_closes 种子 SPX 2、QQQ 3）；以项目同构字段 project_full 充当“工具输出”只检验接线逻辑（不证明独立性，
+# 独立证据来自第二道门 A、B 场景重跑）。
+# ---------------------------------------------------------------------------
+
+
+@functools.lru_cache(maxsize=1)
+def b8_built() -> tuple[object, object, dict]:
+    from wavewarn_v20_helpers import random_closes
+
+    axis = tuple(support.stock_trading_days(dt.date(2003, 1, 2), dt.date(2005, 12, 30)))
+    closes = {asset: dict(zip(axis, random_closes(seed, len(axis)), strict=True))
+              for asset, seed in (("SPX", 2), ("QQQ", 3))}
+    snapshot = support.make_snapshot(axis, closes, axis[-1], support.ACQUIRED_AT, {"SPX": "0" * 64, "QQQ": "0" * 64})
+    result, _ = support.run_research(snapshot, {"SPX": axis[0], "QQQ": axis[0]})
+    return snapshot, result, support.project_full(snapshot)
+
+
+def test_wiring_b8_state_change_rules() -> None:
+    assert support.event_state_changes("激活", "激活") == ()
+    assert support.event_state_changes("未武装未激活", "已武装未激活") == ("重新武装",)
+    assert support.event_state_changes("未武装未激活", "激活") == ("重新武装", "进入")
+    assert support.event_state_changes("已武装未激活", "激活") == ("进入",)
+    assert support.event_state_changes("激活", "未武装未激活") == ("退出",)
+    assert support.event_state_changes("激活", "已武装未激活") == ("退出",)
+    assert support.event_state_changes("已武装未激活", "未武装未激活") is None            # 规则表外：记不一致
+
+
+def test_wiring_b8_event_files_against_isomorphic_fields() -> None:
+    snapshot, result, tool = b8_built()
+    record = support.Recorder()
+    found = support.compare_event_files(record, tool, snapshot, result, support.CANDIDATES)
+    assert found["比对"] is True and record.total("不一致") == 0, record.inconsistent()
+    assert found["行数"]["switch_stages.csv"] == 28 and found["行数"]["channel_events.csv.gz"] > 0
+    summary = record.summary()
+    assert set(summary) == {support.EVENT_ALGO, support.EVENT_SER}
+    uncovered = [item for item, statuses in summary[support.EVENT_ALGO].items() if "未比较" in statuses]
+    assert sorted(uncovered) == sorted(item for _, item, _ in support.EVENT_UNCOVERED)
+
+
+def test_wiring_b8_changed_tool_state_is_inconsistent() -> None:
+    import copy
+
+    snapshot, result, tool = b8_built()
+    changed = copy.deepcopy(tool)
+    key = support.group_key(support.CANDIDATES[0])
+    day = next(item for item in changed["groups"][key]["days"]
+               if not item["init"] and item["day"] > changed["window_first_signal_day"])
+    day["transition"] = {"from": "正常", "to": "二级"} if day["transition"] is None else None
+    changed["groups"][key]["signal_sim"]["switches"] += 1
+    record = support.Recorder()
+    support.compare_event_files(record, changed, snapshot, result, support.CANDIDATES)
+    items = {entry["item"] for entry in record.inconsistent()}
+    assert "system_transitions 条数" in items or "system_transitions 行" in items
+    assert "switches 条数（= 工具 switches）" in items
+
+
+def test_wiring_b8_missing_tool_keys_are_not_compared() -> None:
+    snapshot, result, tool = b8_built()
+    record = support.Recorder()
+    found = support.compare_event_files(record, {key: value for key, value in tool.items() if key != "groups"},
+                                        snapshot, result, support.CANDIDATES)
+    assert found == {"比对": False, "原因": "工具输出缺键：groups"}
+    assert record.total("不一致") == 0 and record.total("一致") == 0
+
+
+# ---------------------------------------------------------------------------
+# 修正批 B-01 修正步（发起人 2026-10-10 批准）：切换明细对象集合核验的构造验收与回归。
+# 只用内存操作：工具侧在 copy.deepcopy(tool) 上改写；项目侧取 support.project_event_files 的原始字节，在内存中改写
+# switches.csv.gz 与 switch_stages.csv（LF、无 BOM、以换行结尾、保持排序），再以 monkeypatch 注入。
+# 人工期望照发送文件第四节 B 第 4 条（A1—A6、A8、A9）；A7 为既有四项 B8 接线自检，不改动。
+# ---------------------------------------------------------------------------
+
+SWITCH_FILES = ("switches.csv.gz", "switch_stages.csv")
+
+
+def b8_table(data: bytes, compressed: bool) -> tuple[list[str], list[list[str]]]:
+    import csv
+    import gzip
+    import io
+
+    raw = gzip.decompress(data) if compressed else data
+    rows = list(csv.reader(io.StringIO(raw.decode("utf-8"), newline="")))
+    return rows[0], rows[1:]
+
+
+def b8_bytes(header: list[str], rows: list[list[str]], compressed: bool) -> bytes:
+    import csv
+    import gzip
+    import io
+
+    buffer = io.StringIO(newline="")
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(header)
+    writer.writerows(rows)
+    data = buffer.getvalue().encode("utf-8")
+    return gzip.compress(data, mtime=0) if compressed else data
+
+
+def b8_project_tables() -> dict[str, tuple[list[str], list[list[str]]]]:
+    snapshot, result, _ = b8_built()
+    files = support.project_event_files(snapshot, result)
+    return {name: b8_table(files[name], name.endswith(".gz")) for name in SWITCH_FILES}
+
+
+def b8_compare(monkeypatch: pytest.MonkeyPatch, tool: dict,
+               tables: dict[str, tuple[list[str], list[list[str]]]]) -> tuple[dict, support.Recorder]:
+    """以改写后的两张表替换项目侧两个文件（其余两个文件为原始字节），运行 compare_event_files。"""
+    snapshot, result, _ = b8_built()
+    files = dict(support.project_event_files(snapshot, result))
+    for name in SWITCH_FILES:
+        header, rows = tables[name]
+        files[name] = b8_bytes(header, rows, name.endswith(".gz"))
+    monkeypatch.setattr(support, "project_event_files", lambda *_: files)
+    record = support.Recorder()
+    found = support.compare_event_files(record, tool, snapshot, result, support.CANDIDATES)
+    return found, record
+
+
+def b8_inconsistent_items(record: support.Recorder) -> set[str]:
+    return {entry["item"] for entry in record.inconsistent()}
+
+
+def b8_signal_sims(tool: dict) -> list[tuple[str, dict]]:
+    """（对象名, 工具 signal_sim）：27 组候选按登记顺序，主参照最后（与 tool_switch_objects 相同）。"""
+    sims = [(support.research_run.candidate_key(candidate),
+             tool["groups"][support.group_key(candidate)]["signal_sim"]) for candidate in support.CANDIDATES]
+    return [*sims, ("主参照", tool["reference"]["signal_sim"])]
+
+
+def b8_zero_project(tables: dict, name: str) -> None:
+    """项目侧：删去该对象全部明细行，汇总行三列改为 0、0、0。"""
+    header, rows = tables["switches.csv.gz"]
+    column = header.index("object")
+    tables["switches.csv.gz"] = (header, [row for row in rows if row[column] != name])
+    header, rows = tables["switch_stages.csv"]
+    tables["switch_stages.csv"] = (header, [[row[0], row[1], "0", "0", "0"] if row[0] == name else row
+                                            for row in rows])
+
+
+def b8_object_with_switches(tool: dict, tables: dict, minimum: int = 1) -> tuple[str, dict]:
+    header, rows = tables["switches.csv.gz"]
+    column = header.index("object")
+    for name, simulation in b8_signal_sims(tool):
+        mine = sum(1 for row in rows if row[column] == name)
+        if simulation["switches"] >= minimum and mine >= minimum:
+            return name, simulation
+    raise AssertionError(f"构造中没有工具与项目都至少有 {minimum} 次切换的对象")
+
+
+def test_wiring_b8_zero_switch_partial_is_consistent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A1：选一个工具与项目都有切换的候选（断言存在）；工具 signal_sim 的 switches 置 0、switch_list 置 []
+    （failed 保持为空值）；项目删去其全部明细行，汇总行三列改为 0、0、0。期望：比对为 True，不一致计数为 0。"""
+    import copy
+
+    _, _, original = b8_built()
+    tool, tables = copy.deepcopy(original), b8_project_tables()
+    name, simulation = b8_object_with_switches(tool, tables)
+    assert name != "主参照" and simulation["failed"] is None
+    simulation["switches"], simulation["switch_list"] = 0, []
+    b8_zero_project(tables, name)
+    found, record = b8_compare(monkeypatch, tool, tables)
+    assert found["比对"] is True and record.total("不一致") == 0, record.inconsistent()
+
+
+def test_wiring_b8_zero_switch_all_is_consistent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A2：对全部候选和主参照做 A1 的改写；先断言每个对象的 failed 均为空值。期望：同 A1；行数 switches.csv.gz 为 0，
+    switch_stages.csv 为 28。"""
+    import copy
+
+    _, _, original = b8_built()
+    tool, tables = copy.deepcopy(original), b8_project_tables()
+    sims = b8_signal_sims(tool)
+    assert len(sims) == 28 and all(simulation["failed"] is None for _, simulation in sims)
+    for name, simulation in sims:
+        simulation["switches"], simulation["switch_list"] = 0, []
+        b8_zero_project(tables, name)
+    found, record = b8_compare(monkeypatch, tool, tables)
+    assert found["比对"] is True and record.total("不一致") == 0, record.inconsistent()
+    assert found["行数"]["switches.csv.gz"] == 0 and found["行数"]["switch_stages.csv"] == 28
+
+
+def test_wiring_b8_unknown_object_is_inconsistent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A3：项目明细加入一行对象名为“未知对象”、其余字段照某既有行的行（排序键为 -1，放在最前以保持排序）。
+    期望：不一致项中含“switches 对象集合”。"""
+    _, _, tool = b8_built()
+    tables = b8_project_tables()
+    header, rows = tables["switches.csv.gz"]
+    assert rows
+    column = header.index("object")
+    extra = list(rows[0])
+    extra[column] = "未知对象"
+    tables["switches.csv.gz"] = (header, [extra, *rows])
+    _, record = b8_compare(monkeypatch, tool, tables)
+    assert "switches 对象集合" in b8_inconsistent_items(record)
+
+
+def test_wiring_b8_extra_row_is_inconsistent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A4：复制某已知对象的一行明细，紧邻原行插入。期望：不一致项中含“switches 条数（= 工具 switches）”与
+    “switches 条数（= 工具 switch_list）”。"""
+    _, _, tool = b8_built()
+    tables = b8_project_tables()
+    name, _ = b8_object_with_switches(tool, tables)
+    header, rows = tables["switches.csv.gz"]
+    column = header.index("object")
+    index = next(position for position, row in enumerate(rows) if row[column] == name)
+    tables["switches.csv.gz"] = (header, [*rows[:index + 1], list(rows[index]), *rows[index + 1:]])
+    _, record = b8_compare(monkeypatch, tool, tables)
+    items = b8_inconsistent_items(record)
+    assert {"switches 条数（= 工具 switches）", "switches 条数（= 工具 switch_list）"} <= items
+
+
+@pytest.mark.parametrize("whole", [False, True], ids=["删一行", "删全部行"])
+def test_wiring_b8_missing_rows_are_inconsistent(monkeypatch: pytest.MonkeyPatch, whole: bool) -> None:
+    """A5：（a）删去某切换数不少于 2 的对象的一行；（b）删去某有切换对象的全部行。期望：（a）两项条数核查不一致；
+    （b）两项条数核查与“switches 对象集合”均不一致。"""
+    _, _, tool = b8_built()
+    tables = b8_project_tables()
+    name, _ = b8_object_with_switches(tool, tables, minimum=1 if whole else 2)
+    header, rows = tables["switches.csv.gz"]
+    column = header.index("object")
+    if whole:
+        kept = [row for row in rows if row[column] != name]
+    else:
+        index = next(position for position, row in enumerate(rows) if row[column] == name)
+        kept = [*rows[:index], *rows[index + 1:]]
+    tables["switches.csv.gz"] = (header, kept)
+    _, record = b8_compare(monkeypatch, tool, tables)
+    items = b8_inconsistent_items(record)
+    assert {"switches 条数（= 工具 switches）", "switches 条数（= 工具 switch_list）"} <= items
+    if whole:
+        assert "switches 对象集合" in items
+
+
+@pytest.mark.parametrize("column", ["switches", "stages_total", "stages_null_count"])
+def test_wiring_b8_wrong_totals_are_inconsistent(monkeypatch: pytest.MonkeyPatch, column: str) -> None:
+    """A6：把某对象汇总行的 switches、stages_total、stages_null_count 之一加 1。
+    期望：不一致项中含“switch_stages 行”。"""
+    _, _, tool = b8_built()
+    tables = b8_project_tables()
+    name, _ = b8_object_with_switches(tool, tables)
+    header, rows = tables["switch_stages.csv"]
+    position = header.index(column)
+    changed = []
+    for row in rows:
+        row = list(row)
+        if row[0] == name:
+            row[position] = str(int(row[position]) + 1)
+        changed.append(row)
+    tables["switch_stages.csv"] = (header, changed)
+    _, record = b8_compare(monkeypatch, tool, tables)
+    assert "switch_stages 行" in b8_inconsistent_items(record)
+
+
+@pytest.mark.parametrize("variant", ["failed_缺价", "failed_缺键"])
+def test_wiring_b8_failed_or_incomplete_signal_sim_is_not_valid_zero(monkeypatch: pytest.MonkeyPatch,
+                                                                      variant: str) -> None:
+    """A8：某对象工具 signal_sim 的 switches 置 0、switch_list 置 []；（a）failed 置 {"type": "缺价", "missing":
+    [["SPX", <该对象窗口内某日>]]}；（b）删去 failed 键。两例都在项目侧删去该对象全部明细行，汇总行改为 0、0、0。
+    期望：两例的不一致项中都含“switches 对象集合”，即不按合法零切换放行。
+    （a）只验证不放行，不表示该结果正确（Q-13）。"""
+    import copy
+
+    _, _, original = b8_built()
+    tool, tables = copy.deepcopy(original), b8_project_tables()
+    name, simulation = b8_object_with_switches(tool, tables)
+    day = str(simulation["switch_list"][0]["exec_idx"])
+    simulation["switches"], simulation["switch_list"] = 0, []
+    if variant == "failed_缺价":
+        simulation["failed"] = {"type": "缺价", "missing": [["SPX", day]]}
+    else:
+        del simulation["failed"]
+    b8_zero_project(tables, name)
+    _, record = b8_compare(monkeypatch, tool, tables)
+    assert "switches 对象集合" in b8_inconsistent_items(record)
+
+
+def test_wiring_b8_missing_switch_list_raises_as_before(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A9：删去某对象工具 signal_sim 的 switch_list 键。期望：compare_event_files 抛出 KeyError（既有行为，不改）。"""
+    import copy
+
+    _, _, original = b8_built()
+    tool, tables = copy.deepcopy(original), b8_project_tables()
+    _, simulation = b8_object_with_switches(tool, tables)
+    del simulation["switch_list"]
+    with pytest.raises(KeyError):
+        b8_compare(monkeypatch, tool, tables)

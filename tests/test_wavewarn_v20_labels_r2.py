@@ -159,3 +159,37 @@ def test_label_errors_are_classified_into_three_reasons() -> None:
         with pytest.raises(LabelError) as caught:
             action()
         assert type(caught.value) is kind and caught.value.reason == expected_reasons[kind]
+
+
+# ---------------------------------------------------------------------------
+# 修正批 K5（登记补充第 3 条；复查附件 G3 第三节 T1）：确认前的反弹不视为事件结束，也不重置寻峰
+# ---------------------------------------------------------------------------
+
+
+def test_rebound_before_confirmation_does_not_restart_the_peak_search() -> None:
+    """收盘价 [100, 95.10, 99.90, 94.90]，截止日为第 4 日（登记补充第 3.3 条）。
+
+    手推：H 自第 1 日为 100；第 2 日 95.10 > 0.95 × 100 = 95.00，未确认，但 95.10 ≤ 0.97 × 100 = 97.00；
+    第 3 日 99.90 < 100，不更新 H（只在出现不低于 H 的收盘价时更新），反弹不结束寻峰；
+    第 4 日 94.90 ≤ 95.00，确认：P = 第 1 日；T3 = P 之后第一个 ≤ 97.00 的日子 = 第 2 日；T5 = 第 4 日；
+    确认后寻底的初始低点为 [P, T5] 内最低收盘价 = 第 4 日 94.90（第 3.2 条），截止日即第 4 日，Tr = 第 4 日、未结束。
+    """
+    (event,) = events(["100", "95.10", "99.90", "94.90"], cutoff=4)
+    assert (event.peak, event.peak_close) == (numbered(1), Decimal("100"))
+    assert (event.t3, event.t5) == (numbered(2), numbered(4))
+    assert (event.trough, event.trough_close) == (numbered(4), Decimal("94.90"))
+    assert (event.end, event.unfinished) == (None, True)
+
+
+def test_rebound_to_a_new_high_before_confirmation_moves_the_peak() -> None:
+    """确认前反弹并创新高：[100, 96.00, 101.00, 95.90]。
+
+    手推：第 2 日 96.00 > 95.00，未确认；第 3 日 101.00 ≥ H = 100，H 更新为 101.00（P 移到第 3 日）；
+    第 4 日 95.90 ≤ 0.95 × 101.00 = 95.95，确认：P = 第 3 日；T3 = 第 3 日之后第一个 ≤ 0.97 × 101.00 = 97.97 的
+    日子 = 第 4 日；T5 = 第 4 日；Tr = 第 4 日 95.90、未结束。第 2 日的 96.00 不是 T3（它在新 P 之前）。
+    """
+    (event,) = events(["100", "96.00", "101.00", "95.90"], cutoff=4)
+    assert (event.peak, event.peak_close) == (numbered(3), Decimal("101.00"))
+    assert (event.t3, event.t5) == (numbered(4), numbered(4))
+    assert (event.trough, event.trough_close, event.end, event.unfinished) == (
+        numbered(4), Decimal("95.90"), None, True)

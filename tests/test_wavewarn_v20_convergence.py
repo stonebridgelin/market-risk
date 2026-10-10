@@ -248,3 +248,71 @@ def test_empty_window_and_non_convergence_are_distinguishable() -> None:
     reasons = {(type(item.value), item.value.reason, getattr(item.value, "detail", None))
                for item in (at_last, beyond, never)}
     assert len(reasons) == 3                                                         # 加上 n = 1 的正常返回，共四种
+
+
+# ---------------------------------------------------------------------------
+# 修正批 K7 A13（复查附件 G4 G4-07）：j₀ − 1 枚举验收扩至登记的 27 组 (K, θ_P, h) 与主参照三种初始值；
+# 五个通道的初态各自取遍状态域，P 与 PR 不成对绑定（3⁴ × 2 = 162 种组合）。
+# ---------------------------------------------------------------------------
+
+
+def test_all_registered_candidates_and_the_reference_agree_on_the_day_before_the_common_start() -> None:
+    """验收测试（登记第四节第 3 小节）：j₀ = max(t0 + 63, κ_全 + 1)，κ_全 取 27 组候选系统收敛日与主参照收敛日的最大值。
+
+    期望值的来源：j₀ − 1 日按登记初始快照（通道全部已武装未激活、S = 正常且计数为 0、主参照正常）运行得到的状态；
+    断言其余每一种初始值在同一日给出相同的完整状态：通道层 9 个 (K, θ_P) 各 162 种初态组合（P_SPX、P_QQQ、PR_SPX、
+    PR_QQQ 各取 3 种，MR 取 2 种，互不绑定）；系统层 27 组各 3(h + 1)² 种初始值（在 κ_通道 当日放入）；
+    主参照 3 种初始值（在 t0 当日放入）。
+    """
+    from market_risk.wavewarn_v20.convergence import (
+        REGISTERED_REFERENCE,
+        reference_convergence,
+        reference_initial_states,
+    )
+    from market_risk.wavewarn_v20.reference import run_reference
+    from market_risk.wavewarn_v20.research_run import REGISTERED_CANDIDATES
+
+    length = 1000
+    spx_closes, qqq_closes = random_closes(51, length), random_closes(52, length)
+    candidates = list(REGISTERED_CANDIDATES)
+    assert len(candidates) == 27 and len({(item.k, item.theta) for item in candidates}) == 9
+    models = {candidate: run_model(spx_closes, qqq_closes, candidate) for candidate in candidates}
+    first = models[candidates[0]]
+    after = slice(first.t0 + 1, None)
+    results = {candidate: candidate_convergence(first.spx, first.qqq, first.ma, first.t0, candidate, WINDOWS.average)
+               for candidate in candidates}
+    reference_index = first.t0 + 1 + reference_convergence(first.ma[after], WINDOWS.average)
+    indices = [result.system_index for result in results.values()]
+    start = common_start_index(first.t0, [*indices, reference_index], 63, length)
+    assert start == max(first.t0 + 63, max(*indices, reference_index) + 1)
+    target = first.position(start - 1)
+
+    combinations = list(product(PULLBACK_DOMAIN, PULLBACK_DOMAIN, PULLBACK_DOMAIN, PULLBACK_DOMAIN, TREND_DOMAIN))
+    assert len(combinations) == 162
+    checked_pairs, checked_systems = set(), 0
+    for candidate, result in results.items():
+        model = models[candidate]
+        assert result.kappa_channel == max(result.channel_indices.values()) < result.system_index < start
+        if (candidate.k, candidate.theta) not in checked_pairs:
+            checked_pairs.add((candidate.k, candidate.theta))
+            expected = tuple(path[target].state for path in (
+                model.paths.p_spx, model.paths.p_qqq, model.paths.pr_spx, model.paths.pr_qqq, model.paths.mr))
+            spx, qqq, ma = (series[after][:target + 1] for series in (model.spx, model.qqq, model.ma))
+            for initial in combinations:
+                paths = run_channels(ChannelInitial(*initial), spx, qqq, ma, candidate.k, candidate.theta,
+                                     WINDOWS.average)
+                assert tuple(path[target].state for path in (
+                    paths.p_spx, paths.p_qqq, paths.pr_spx, paths.pr_qqq, paths.mr)) == expected, (candidate, initial)
+        tail = model.evidence[model.position(result.kappa_channel) + 1:]
+        offset = target - model.position(result.kappa_channel) - 1
+        for initial in system_initial_states(candidate.h):
+            assert run_system(initial, tail, candidate.k, candidate.h)[offset].state == model.system[target].state
+            checked_systems += 1
+    assert len(checked_pairs) == 9
+    assert checked_systems == 9 * sum(3 * (h + 1) ** 2 for h in {item.h for item in candidates})
+
+    assert reference_index < start and len(reference_initial_states()) == 3
+    expected_reference = run_reference(REGISTERED_REFERENCE, first.ma[after], WINDOWS.average)[target]
+    for initial in reference_initial_states():
+        found = run_reference(initial, first.ma[after][:target + 1], WINDOWS.average)[target]
+        assert (found.risk, found.level) == (expected_reference.risk, expected_reference.level), initial

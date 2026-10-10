@@ -913,6 +913,7 @@ def summary_log_items(
     docs: dict[str, Any],
     averages: dict[str, tuple[float, float, float]],
     evaluable: list[str] | tuple[str, ...],
+    structure: str,
 ) -> list[Item]:
     """ln W_末 与 candidates_summary、reference_summary 的 signal_log_wealth，及 descriptive.constants 比较。"""
     logs = {path.obj: math.log(path.wealth[-1]) for path in paths}
@@ -947,31 +948,73 @@ def summary_log_items(
                     False,
                 )
             )
-    items.extend(constant_items(docs["descriptive.json"], logs, averages))
+    items.extend(constant_items(docs["descriptive.json"], logs, averages, structure))
     return items
 
 
-def constant_items(doc: Any, logs: dict[str, float], averages: dict[str, tuple[float, float, float]]) -> list[Item]:
-    """descriptive.constants[*]：已计算者比对 core、leverage、exposure（1e-12 绝对）与 nav.log_wealth（1e-10 绝对）；
-    computed 为假者 core、leverage、exposure、nav 须均为 JSON null（答复单第 14 项）。"""
+def target_averages(
+    fields: StructureFields, targets: dict[str, list[Row]], n: int
+) -> dict[str, tuple[float, float, float]]:
+    """constants 中对象为主参照或候选键者：由该对象 daily_targets 前 n 行自算平均核心、平均杠杆、
+    平均暴露（两种结构都算，
+    只用计划目标、不用价格；答复单第 14 项订正（b）（c））。键为 daily_nav 中的名称“恒定仓位：<对象>”。"""
+    averages: dict[str, tuple[float, float, float]] = {}
+    for obj, _ in fields.constants:
+        if obj == REFERENCE or obj in candidate_keys():
+            weights = row_weights(targets[obj], "daily_targets.csv.gz")[:n]
+            averages[CONSTANT_PREFIX + obj] = constant_weights([w[0] for w in weights], [w[1] for w in weights])
+    return averages
+
+
+def weight_items(name: str, entry: Any, at: str, average: tuple[float, float, float]) -> list[Item]:
+    """core、leverage、exposure 与自算平均比对（1e-12 绝对）；任一为 null 即一方缺值。"""
+    return [
+        compare_float(label, name, at, value, jfloat(jget(entry, label, at), at), TOL_WEIGHT, False)
+        for label, value in zip(("core", "leverage", "exposure"), average, strict=True)
+    ]
+
+
+def constant_items(
+    doc: Any, logs: dict[str, float], averages: dict[str, tuple[float, float, float]], structure: str
+) -> list[Item]:
+    """descriptive.constants[*]，按答复单第 14 项订正（定稿，2026-10-06）分三种情形；note 不读取：
+    （a）object 为“选定候选”：computed 须为假，core、leverage、exposure、nav 均为 JSON null；
+    （b）object 为主参照或候选键且快照判定为结构 B：computed 须为假（为真已在 evaluate 记不一致），nav 为 null，
+        三项与 daily_targets 前 n 行自算平均比对；
+    （c）object 为主参照或候选键且为结构 A：computed 须为真，三项平均与 nav.log_wealth 比对；computed 为假 → 不一致。"""
     items = []
     for index, entry in enumerate(jget(doc, "constants", "descriptive.json")):
         at = f"descriptive.json constants[{index}]"
-        name = CONSTANT_PREFIX + str(entry["object"])
-        if entry["computed"] is False:
+        obj = str(entry["object"])
+        name = CONSTANT_PREFIX + obj
+        if obj == SELECTED_PLACEHOLDER:
+            items.append(compare_exact("computed（选定候选须为假）", name, at, False, entry["computed"]))
             items.extend(
-                compare_exact(f"{key}（computed 为假须为 null）", name, at, None, jget(entry, key, at))
+                compare_exact(f"{key}（选定候选须为 null）", name, at, None, jget(entry, key, at))
                 for key in ("core", "leverage", "exposure", "nav")
             )
             continue
-        if name not in averages:
-            continue  # computed 为真但身份不符或处于结构 B：已在 object_plan / evaluate 记为不一致
-        nav = jget(entry, "nav", at)
-        project_log = jfloat(jget(nav, "log_wealth", at), at)
+        items.extend(weight_items(name, entry, at, averages[name]))
+        if structure == "B":
+            items.append(compare_exact("nav（结构 B 须为 null）", name, at, None, jget(entry, "nav", at)))
+            continue
+        if entry["computed"] is False:
+            items.append(Item("恒定仓位条件", name, at, True, False, None, "不一致：结构 A 下 computed 为假"))
+            continue
+        project_log = jfloat(jget(jget(entry, "nav", at), "log_wealth", at), at)
         items.append(compare_float("nav.log_wealth", name, at, logs.get(name), project_log, TOL_LOG, False))
-        for label, value in zip(("core", "leverage", "exposure"), averages[name], strict=True):
-            items.append(compare_float(label, name, at, value, jfloat(jget(entry, label, at), at), TOL_WEIGHT, False))
     return items
+
+
+def usage_restriction_list(record: Any) -> list[str]:
+    """run_record.usage_restriction：须为 JSON 字符串数组，照录全部元素、保持原顺序（[] 为无用途限制）；
+    值不是数组或任一元素不是字符串为输入错误（不转换、不忽略）；缺键沿用 jget 的既有处理（输入错误“缺少字段”）。
+    未登记的文字、顺序与重复不作判定，只照录
+    （接口 E1 第 4 条；项目负责人 2026-10-06 裁决 R-1：照录、不作判定）。"""
+    value = jget(record, "usage_restriction", "run_record.json")
+    if not isinstance(value, list) or any(not isinstance(element, str) for element in value):
+        raise InputError(f"usage_restriction 须为字符串数组，实际 {value!r}", "run_record.json usage_restriction")
+    return list(value)
 
 
 def policy_prefix_items(
@@ -1230,12 +1273,11 @@ def evaluate(raw: dict[str, bytes], policy_raw: bytes | None) -> dict[str, Any]:
     us = interval_returns(context.snapshot, context.start, context.window.n, context.known)
     paths: list[NavPath] = []
     if context.known is None and context.has_nav:
-        paths, averages = build_paths(targets, [float(u) for u in us if u is not None], constants, context.window.n)
+        paths, _ = build_paths(targets, [float(u) for u in us if u is not None], constants, context.window.n)
         items.extend(compare_nav(paths, tables["daily_nav.csv.gz"], context.days))
-    else:
-        averages = {}
+    averages = target_averages(fields, targets, context.window.n)
     evaluable = tuple(name for name in AVERAGE_NAMES if name in daily)
-    items.extend(summary_log_items(paths, tables, docs, averages, evaluable))
+    items.extend(summary_log_items(paths, tables, docs, averages, evaluable, structure))
     if structure == "B" and policy_raw is not None:
         policy, more = index_targets(parse_csv_table(POLICY_FILE, policy_raw), daily, context.days, POLICY_FILE, True)
         items.extend(more)
@@ -1248,7 +1290,7 @@ def evaluate(raw: dict[str, bytes], policy_raw: bytes | None) -> dict[str, Any]:
     return {
         "structure": structure,
         "known": context.known,
-        "usage_restriction": jget(docs["run_record.json"], "usage_restriction", "run_record.json"),
+        "usage_restriction": usage_restriction_list(docs["run_record.json"]),
         "cutoff": context.cutoff,
         "days": list(context.days),
         "interval_u": list(us),
@@ -1329,7 +1371,15 @@ def build_report(
         )
     except ComputeFailure as exc:
         return finish_report({}, hashes, {"kind": "计算失败", "message": exc.message, "location": exc.location}, 3)
+    # 未预期异常兜底（项目负责人 2026-10-06 裁决 F-2 第 3 条）：既有分类之外，退出码 3；按裁决须捕获全部异常
+    except Exception as exc:
+        return finish_report({}, hashes, unexpected_error(exc), 3)
     return finish_report(body, hashes, None, 0)
+
+
+def unexpected_error(exc: Exception) -> dict[str, str]:
+    """未预期异常的 error 记录：异常类型与信息。"""
+    return {"kind": "未预期异常", "message": f"{type(exc).__name__}: {exc}", "location": "主入口兜底"}
 
 
 def read_inputs(result_dir: Path, names: list[str] | tuple[str, ...]) -> tuple[dict[str, bytes], list[dict[str, Any]]]:
@@ -1409,6 +1459,9 @@ def main(argv: list[str] | tuple[str, ...]) -> int:
         report, code = finish_report(
             {}, [], {"kind": "参数或输入错误", "message": exc.message, "location": exc.location}, 2
         )
+    # 未预期异常兜底（裁决 F-2 第 3 条）：读入阶段既有分类之外的异常，写出报告，退出码 3；按裁决须捕获全部异常
+    except Exception as exc:
+        report, code = finish_report({}, [], unexpected_error(exc), 3)
     payload = (json.dumps(report, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
     try:
         write_report(out_path, payload)

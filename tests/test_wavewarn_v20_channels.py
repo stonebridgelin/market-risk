@@ -200,3 +200,40 @@ def test_channel_events_depend_only_on_the_channel_inputs() -> None:
     assert event_dates(path) == ((days[0], ChannelEvent.ENTER), (days[2], ChannelEvent.EXIT),
                                  (days[3], ChannelEvent.REARM))
     assert path[0].day == days[0] != DAY
+
+
+# ---------------------------------------------------------------------------
+# 修正批 K7 A8（复查附件 G1 RS-1；G1-06）：P 与 PR 的武装状态分叉
+# ---------------------------------------------------------------------------
+
+
+def test_pullback_and_double_pullback_arming_diverge_after_a_common_exit() -> None:
+    """θ = 2%（P 门槛 2%，PR 门槛 4%），K = 3，H = 100 并保持完整；P、PR 自“已武装未激活”出发。
+
+    手推（D = 1 − C/H）：
+    第 1 日 C = 95.5（D = 4.5%，NL = 1，Q = 0）：P（≥2%）、PR（≥4%）都进入 → 都激活；
+    第 2—4 日 C = 97（NL = 0，Q = 1、2、3）：第 4 日 Q = 3 ≥ K，P、PR 同日退出 → 都未武装；
+    第 5 日 C = 97（D = 3%，Q = 4）：PR 因 D < 4% 重新武装（已武装未激活）；P 因 D ≥ 2% 保持未武装；
+    第 6 日 C = 95.8（D = 4.2%；95.5 仍在前 19 日内，NL = 0，Q = 5）：PR 达到 4% 进入 → 激活；P 未创新低且 D ≥ 2%，
+    仍未武装。证据：PR_SPX 激活、P_SPX 未武装 → 证据级别 L = 2（只含 SPX 两个通道不同，其余按辅助函数默认）；
+    自（正常，0，0）、h = 3 走一步：L = 2 → S = 二级（七行表第 1 行）。
+    """
+    from wavewarn_v20_helpers import evidence
+
+    from market_risk.wavewarn_v20.state_machine import Risk, SystemState, evidence_level, system_step
+
+    theta, k = Decimal("0.02"), 3
+    closes = [("95.5", NewLow.YES, 0), ("97", NewLow.NO, 1), ("97", NewLow.NO, 2), ("97", NewLow.NO, 3),
+              ("97", NewLow.NO, 4), ("95.8", NewLow.NO, 5)]
+    days = axis(len(closes))
+    inputs = [asset(close, "100", True, nl, q, day) for (close, nl, q), day in zip(closes, days, strict=True)]
+    p = run_pullback(ARMED, inputs, k, theta)
+    pr = run_pullback(ARMED, inputs, k, 2 * theta)
+    assert [item.state for item in p] == [ACTIVE, ACTIVE, ACTIVE, UNARMED, UNARMED, UNARMED]
+    assert [item.state for item in pr] == [ACTIVE, ACTIVE, ACTIVE, UNARMED, ARMED, ACTIVE]
+    assert [item.events for item in p] == [(ChannelEvent.ENTER,), (), (), (ChannelEvent.EXIT,), (), ()]
+    assert [item.events for item in pr] == [(ChannelEvent.ENTER,), (), (), (ChannelEvent.EXIT,),
+                                            (ChannelEvent.REARM,), (ChannelEvent.ENTER,)]
+    found = evidence(spx=inputs[-1], p_spx=p[-1].state, pr_spx=pr[-1].state, day=days[-1])
+    assert evidence_level(found) == 2
+    assert system_step(SystemState(Risk.NORMAL, 0, 0), found, k, 3).risk is Risk.LEVEL2

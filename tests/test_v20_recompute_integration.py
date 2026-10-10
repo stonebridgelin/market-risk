@@ -84,3 +84,44 @@ def test_ab_on_constructed_formal_directory(normal: tuple[Path, subprocess.Compl
     record_property("summary", json.dumps(report["summary"], ensure_ascii=False))
     record_property("summary.reserved", reserved_count(report, layer))
     assert (result.returncode, inconsistent_count(report)) == (0, 0), result.stderr[-2000:]
+
+
+# ---------------------------------------------------------------------------
+# 修正批 K3（K7 A14；D-4）：结构 B 联检。构造窗口内缺价的全长构造正式目录（SPX 在 2010-03-01 起第一个交易日缺价，
+# 前缀诊断运行、成功发布；评价窗口价格不齐全，即结构 B），运行冻结后的 N1、N2：期望退出码 0、不一致 0。
+# 依赖独立回算脚本会话按《答复单第 14 项订正（定稿）》与 K4 读取方适配后的 N1、N2；集成前照实记录为“待集成”。
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def structure_b(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, subprocess.CompletedProcess]:
+    import datetime as dt
+
+    rows = rehearsal.market_lines("SPX", 11)
+    missing = next(day for day, _ in rows if day >= dt.date(2010, 3, 1))
+    root = rehearsal.build_root(tmp_path_factory.mktemp("structure_b"),
+                                spx=rehearsal.market_lines("SPX", 11, {missing: ""}))
+    return root, rehearsal.run_entry(root)
+
+
+@pytest.mark.parametrize("layer", list(LAYERS), ids=list(LAYERS))
+def test_ab_on_structure_b_formal_directory(structure_b: tuple[Path, subprocess.CompletedProcess], layer: str,
+                                            tmp_path: Path, record_property) -> None:
+    root, done = structure_b
+    assert done.returncode == 0, done.stderr
+    formal = rehearsal.research_dir(root) / "evaluation_development"
+    # 结构 B 的前提（只核对构造是否达到结构 B，不作回算期望）：出口“缺值无法评价”，主参照恒定仓位未计算。
+    assert json.loads(get(formal / "selection.json"))["outcome"] == "缺值无法评价"
+    assert json.loads(get(formal / "descriptive.json"))["constants"][0]["computed"] is False
+    script = SCRIPTS / LAYERS[layer]
+    actual = hashlib.sha256(get(script)).hexdigest()
+    assert actual == frozen_hashes()[LAYERS[layer]], f"{LAYERS[layer]} 与冻结清单不符：{actual}"
+    out = tmp_path / f"{layer}层报告_结构B.json"
+    result = run_script(script, formal, out)
+    record_property("正式目录 MANIFEST.sha256", hashlib.sha256(get(formal / "MANIFEST.sha256")).hexdigest())
+    record_property("脚本退出码", result.returncode)
+    assert out.is_file(), f"{layer}层未写出报告：退出码 {result.returncode}；{result.stderr[-2000:]}"
+    report = json.loads(get(out).decode("utf-8"))
+    record_property("报告 SHA-256", hashlib.sha256(get(out)).hexdigest())
+    record_property("summary", json.dumps(report["summary"], ensure_ascii=False))
+    assert (result.returncode, inconsistent_count(report)) == (0, 0), result.stderr[-2000:]

@@ -42,6 +42,28 @@ EXIT_INPUT = "输入校验失败"
 EXIT_UNEXPECTED = "未预期异常"
 EXIT_FAILED = "计算失败"
 STAGE_DIAGNOSIS = "读取行情（诊断读取）"                       # 补充六第一节第 2 小节第 2 条
+# 修正批 K4（登记补充第 5 条，甲案；契约例外 E2）：开发窗口覆盖条件。熊市一起点由调用方从 registered_v20.BEARS 传入，
+# 条件文字须与之相符；本条件只对登记截止日 2016-12-30 定义（登记补充第 5.1 条）。
+COVERAGE_CONDITION = "axis[j0] <= 2000-03-24"
+COVERAGE_CUTOFF = dt.date(2016, 12, 30)
+DECIDED, NO_WINDOW, NOT_RETURNED = "已判定", "未判定：无窗口", "未判定：组合层未返回"
+
+
+def coverage_undetermined(status: str) -> dict:
+    return {"condition": COVERAGE_CONDITION, "first_day": None, "satisfied": None, "status": status}
+
+
+def window_coverage(first_day: dt.date | None, bear_start: dt.date, cutoff: dt.date) -> dict:
+    """开发窗口覆盖判定：satisfied = (axis[j₀] <= 熊市一起点)。截止日不是登记截止日，或条件文字与熊市一起点不符，
+    即抛错（不写覆盖结论）；无窗口记“未判定：无窗口”。first_day 以 ISO 日期文字写入。"""
+    if cutoff != COVERAGE_CUTOFF:
+        raise ValueError(f"开发窗口覆盖条件只对登记截止日 {COVERAGE_CUTOFF} 定义，实际截止日 {cutoff}")
+    if COVERAGE_CONDITION != f"axis[j0] <= {bear_start.isoformat()}":
+        raise ValueError(f"覆盖条件文字与熊市一起点 {bear_start} 不符")
+    if first_day is None:
+        return coverage_undetermined(NO_WINDOW)
+    return {"condition": COVERAGE_CONDITION, "first_day": first_day.isoformat(), "satisfied": first_day <= bear_start,
+            "status": DECIDED}
 
 
 def default_root() -> Path:
@@ -154,6 +176,10 @@ class Information:
         self.exception: dict | None = None
         self.completed: list[str] = []
         self.composition_called = False
+        # 修正批 K4（契约例外 E1、E4）：用途限制数组与开发窗口覆盖判定；判定完成或用途限制变化时就地更新（同一对象），
+        # 此后写出的任何信息状态、运行记录、失败记录与标准输出都取同一份当前值。
+        self.usage_restriction: list[str] = []
+        self.window_coverage: dict = coverage_undetermined(NOT_RETURNED)
 
     def _next(self) -> int:
         self.seq += 1
@@ -189,6 +215,7 @@ class Information:
             "data_read": self.data_read, "evaluation_prices_parsed": self.parsed, "derived_inputs": self.derived,
             "performance_info": self.performance, "performance_info_status": status, "stage_trace": self.trace,
             "exception": self.exception, "completed_results": list(self.completed),
+            "usage_restriction": list(self.usage_restriction), "window_coverage": dict(self.window_coverage),
             "s21_facts": {"读入行情": sorted(asset for asset, item in self.data_read.items() if item.get("read")),
                           "严格解析完成": sorted(asset for asset, item in self.parsed.items()
                                            if item.get("strict_completed")),
@@ -301,7 +328,9 @@ def main(argv: list[str] | None = None) -> int:
     audit.allow([places.staging, places.failed, places.formal, places.tail, places.publish_failure])
     stdout_report.update({"staging": str(places.staging), "formal": str(places.formal), "tail": places.tail.name})
     allowed = output.readable_roots(places)
-    usage: str | None = None
+    usage = info.usage_restriction                                      # 修正批 E1：同一列表对象，就地追加
+    # 修正批 E1、E2：标准输出取同一列表与同一判定对象（打印时的当前值）；预检拒绝分支沿用既有行为，不加这两项。
+    stdout_report.update({"usage_restriction": usage, "window_coverage": info.window_coverage})
     cutoff_seq: int | None = None
     files_written: dict[str, bytes] = {}
     writes = WriteRecord()                                              # 各次写入的完成状态（补充七）
@@ -373,7 +402,8 @@ def main(argv: list[str] | None = None) -> int:
                 if any(check["result"] == "否" for check in checks):
                     raise RunFailure(EXIT_UNEXPECTED, "诊断核实", None, {
                         "asset": asset, "evidence": evidence, "detail": "读取实现不一致"}) from strict_error
-                usage = output.PREFIX_USAGE
+                if output.PREFIX_USAGE not in usage:
+                    usage.append(output.PREFIX_USAGE)                   # 前缀诊断在前（修正批 E1）
                 item = diagnosis.series
             else:
                 parsed["strict_completed"] = True
@@ -394,6 +424,12 @@ def main(argv: list[str] | None = None) -> int:
         result = research_run.run_window(snapshot, registered_v20.window_spec(), parameters,
                                          registered_v20.CANDIDATES, journal=info.journal)
         info.leave("组合层")
+        # 修正批 K4 第 1 条：run_window 返回之后、检查 result.stop 之前立即判定（有窗口即判定，组合层停止也判定）；
+        # 不改选择，覆盖不满足时在用途限制末尾追加（覆盖限制在后）。
+        info.window_coverage.update(window_coverage(None if result.window is None else result.window.first_day,
+                                                    registered_v20.BEARS[0][1], registered_v20.CUTOFF))
+        if info.window_coverage["satisfied"] is False:
+            usage.append(output.COVERAGE_USAGE)
         if result.stop is not None:
             raise RunFailure(result.stop.exit.value, "组合层", None,
                              {"stop": {"exit": result.stop.exit.value, "object": result.stop.object,
@@ -574,7 +610,7 @@ def _preflight(root: Path, started: dt.datetime, output: Any) -> tuple[str, Any,
 
 
 def _run_record(commit: str, preflight: dict, registered: dict, info: Information, cutoff: dt.date, audit: Audit,
-                usage: str | None, output: Any) -> dict:
+                usage: list[str], output: Any) -> dict:
     return {
         "output_scheme": output.OUTPUT_SCHEME,
         "commit": commit,
@@ -585,7 +621,8 @@ def _run_record(commit: str, preflight: dict, registered: dict, info: Informatio
         "data_files": {asset: {"bytes": item["bytes"], "raw_sha256": item["raw_sha256"]}
                        for asset, item in info.data_read.items()},
         "cutoff": cutoff,
-        "usage_restriction": usage,
+        "usage_restriction": list(usage),
+        "window_coverage": dict(info.window_coverage),        # 修正批 E2
         "audit_conclusion": {"violation_found_until_this_file": audit.violations(1, len(audit.events)) > 0,
                              "note": "成功路径上任何违规都会使运行失败；完整结论以审计尾段收尾记录为准"},
         "audit_coverage": {"coverage_end": COVERAGE_END, "not_covered": list(NOT_COVERED)},
@@ -647,11 +684,12 @@ def _write_tail(audit: Audit, places: Any, package: Path, last: int | None, mani
     return True, bool(outcome.get("success"))
 
 
-def _failure_document(failure: RunFailure, trace: str | None, usage: str | None, extra: dict,
+def _failure_document(failure: RunFailure, trace: str | None, usage: list[str], coverage: dict, extra: dict,
                       missing: list[str], incomplete: list[dict]) -> dict:
     """incomplete_files（补充七第一节第 1 小节第 3 条）：部分写出的文件名与状态；普通失败为空列表。"""
     return {"exit": failure.exit_text, "stage": failure.stage, "exception": exception_record(failure.error, trace),
-            "detail": failure.detail, "usage_restriction": usage, "missing_evidence": missing,
+            "detail": failure.detail, "usage_restriction": list(usage), "window_coverage": dict(coverage),
+            "missing_evidence": missing,
             "incomplete_files": incomplete, **extra}
 
 
@@ -676,7 +714,7 @@ def _content_mismatch(directory: Path, writes: WriteRecord, files: dict[str, byt
 
 
 def _fail(failure: RunFailure, trace: str | None, audit: Audit, info: Information, places: Any,
-          written: dict[str, bytes], writes: WriteRecord, cutoff_seq: int | None, usage: str | None, allowed: tuple,
+          written: dict[str, bytes], writes: WriteRecord, cutoff_seq: int | None, usage: list[str], allowed: tuple,
           output: Any, report: dict) -> int:
     """清单生成之前失败（设计稿第八节第 5 小节）：已写文件保留（部分写出的原样保留、读回后列入失败清单，补充七）；
     新写 failure.json 与 information_state_final.json；尚未写出 audit_log.jsonl 时先写出；生成 FAILURE_MANIFEST.sha256；
@@ -701,7 +739,8 @@ def _fail(failure: RunFailure, trace: str | None, audit: Audit, info: Informatio
                                  cutoff_seq, writes, allowed, output, report)
     report["incomplete_files"] = incomplete
     try:
-        failure_data = output.json_bytes(_failure_document(failure, trace, usage, {}, missing, incomplete))
+        failure_data = output.json_bytes(_failure_document(failure, trace, usage, info.window_coverage, {}, missing,
+                                                                    incomplete))
         writes.write(output, staging / output.FAILURE, failure_data)
         files[output.FAILURE] = failure_data
         final = output.json_bytes(info.document())
@@ -735,7 +774,7 @@ def _fail(failure: RunFailure, trace: str | None, audit: Audit, info: Informatio
 
 
 def _fail_after_manifest(failure: RunFailure, trace: str | None, audit: Audit, info: Information, places: Any,
-                         writes: WriteRecord, cutoff_seq: int | None, manifest_sha: str, usage: str | None,
+                         writes: WriteRecord, cutoff_seq: int | None, manifest_sha: str, usage: list[str],
                          allowed: tuple, output: Any, report: dict) -> int:
     """清单生成之后、改名之前失败：冻结包原样保留；新写 failure.json（明记清单哈希与“该清单不覆盖本失败目录的最终内容”）
     与 information_state_final.json；生成 FAILURE_MANIFEST.sha256（含 MANIFEST.sha256 与部分写出的文件）；核对目录内容与
@@ -753,7 +792,8 @@ def _fail_after_manifest(failure: RunFailure, trace: str | None, audit: Audit, i
         report["incomplete_files"] = incomplete
         extra = {"manifest_sha256": manifest_sha, "manifest_stage": "清单生成之后、改名之前",
                  "manifest_scope": "该清单不覆盖本失败目录的最终内容；适用版本为“发布前候选内容”，状态为“未发布”"}
-        failure_data = output.json_bytes(_failure_document(failure, trace, usage, extra, [], incomplete))
+        failure_data = output.json_bytes(_failure_document(failure, trace, usage, info.window_coverage, extra, [],
+                                                                    incomplete))
         writes.write(output, staging / output.FAILURE, failure_data)
         files[output.FAILURE] = failure_data
         final = output.json_bytes(info.document())
@@ -781,7 +821,7 @@ def _fail_after_manifest(failure: RunFailure, trace: str | None, audit: Audit, i
 
 
 def _fail_published(failure: RunFailure, audit: Audit, info: Information, places: Any, writes: WriteRecord,
-                    cutoff_seq: int | None, manifest_sha: str, usage: str | None, allowed: tuple, output: Any,
+                    cutoff_seq: int | None, manifest_sha: str, usage: list[str], allowed: tuple, output: Any,
                     report: dict) -> int:
     """发布后失败（已改名为正式目录之后）：正式目录保持原状，不追加、不改名、不删除；包外写发布失败说明；照常写尾段
     （尾段已完成时不改写，说明中记录这一点）；两个包外文件任一未完成即退出码 3 并在标准错误列明。
@@ -798,7 +838,8 @@ def _fail_published(failure: RunFailure, audit: Audit, info: Information, places
         report["missing_evidence"] = [*report.get("missing_evidence", []), tail_label]
     note = {"exception": exception_record(failure.error), "stage": failure.stage, "exit": failure.exit_text,
             "formal_dir": str(places.formal), "manifest_sha256": manifest_sha,
-            "information_state_final": info.document(), "usage_restriction": usage,
+            "information_state_final": info.document(), "usage_restriction": list(usage),
+            "window_coverage": dict(info.window_coverage),
             "audit_tail": places.tail.name, "audit_tail_written": tail_written,
             "audit_tail_status": tail_status or "未写",
             "missing_evidence": [] if tail_written else [tail_label if tail_partial else "审计尾段（随后尽力写出）"],

@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
 
+from market_risk.wavewarn_v20.channels import ChannelEvent
 from market_risk.wavewarn_v20.convergence import first_common_index
 from market_risk.wavewarn_v20.execution import (
     PlannedTarget,
@@ -58,7 +59,16 @@ from market_risk.wavewarn_v20.research_run import (
 )
 from market_risk.wavewarn_v20.selection import Outcome
 from market_risk.wavewarn_v20.snapshot import Snapshot
-from market_risk.wavewarn_v20.state_machine import Evidence, Risk, SystemDay, evidence_series, run_channels, run_system
+from market_risk.wavewarn_v20.state_machine import (
+    ChannelPaths,
+    Evidence,
+    Risk,
+    SystemDay,
+    evidence_series,
+    run_channels,
+    run_system,
+    transitions,
+)
 
 ONE_LEVEL = "200 日均线一级版"
 BUFFERED = "带缓冲带的 200 日均线二级版（101%/99%）"
@@ -328,12 +338,14 @@ def constant_exposures(result: WindowResult, selection: DevelopmentSelection,
 
 @dataclass(frozen=True)
 class RebuiltStates:
-    """按同参同切片重建的逐日证据（自 t0+1 起）与各候选系统记录（axis[j₀−2 .. E]）。"""
+    """按同参同切片重建的逐日证据（自 t0+1 起）与各候选系统记录（axis[j₀−2 .. E]）；修正批 K1 起另保留每个
+    (K, θ_P) 的五条通道逐日路径（自 t0+1 起，与证据同一索引），供报告通道事件日期。"""
 
     evidence: Mapping[tuple[int, Decimal], tuple[Evidence, ...]]
     systems: Mapping[object, tuple[SystemDay, ...]]
     reference: tuple[ReferenceDay, ...]
     first: int                                        # 证据第 0 项的轴行号（t0 + 1）
+    channels: Mapping[tuple[int, Decimal], ChannelPaths]
 
 
 def rebuild_states(snapshot: Snapshot, result: WindowResult, parameters: RunParameters) -> RebuiltStates:
@@ -351,11 +363,13 @@ def rebuild_states(snapshot: Snapshot, result: WindowResult, parameters: RunPara
     initial = result.spec.initial
     evidence: dict[tuple[int, Decimal], tuple[Evidence, ...]] = {}
     systems: dict[object, tuple[SystemDay, ...]] = {}
+    channels: dict[tuple[int, Decimal], ChannelPaths] = {}
     for candidate, outcome in result.candidates.items():
         pair = (candidate.k, candidate.theta)
         if pair not in evidence:
             paths = run_channels(initial.channels, spx[first:], qqq[first:], trend[first:], candidate.k,
                                  candidate.theta, average)
+            channels[pair] = paths
             evidence[pair] = evidence_series(spx[first:], qqq[first:], trend[first:], paths)
         whole = run_system(initial.system, evidence[pair], candidate.k, candidate.h)
         rebuilt = whole[j0 - 2 - first:e_index - first + 1]
@@ -368,7 +382,78 @@ def rebuild_states(snapshot: Snapshot, result: WindowResult, parameters: RunPara
     valid = tuple(trend[index].close is not None and trend[index].complete for index in range(j0 - 2, e_index + 1))
     if valid != tuple(reference.all_valid):
         raise ComparisonError("主参照的“当日输入完整”无法重建")
-    return RebuiltStates(evidence, systems, tuple(rebuilt_reference), first)
+    return RebuiltStates(evidence, systems, tuple(rebuilt_reference), first, channels)
+
+
+# ---------------------------------------------------------------------------
+# 修正批 K1（登记补充第 6 条）：通道事件日期、系统转换日期。范围为各对象 daily_signals 的信号日
+# axis[j₀−1 .. E−1]；不另写通道或系统算法，只读取上面按同参同切片重建并已逐日核对的路径与系统记录。
+# ---------------------------------------------------------------------------
+
+CHANNEL_NAMES = ("p_spx", "p_qqq", "pr_spx", "pr_qqq", "mr")       # 五个通道的列名与排序
+RAISE, LOWER = "升级", "降级"
+
+
+@dataclass(frozen=True)
+class ChannelEventRow:
+    """一次通道事件：只由该通道自身的输入与 K、θ_P 决定，适用于对应的 3 个 h。"""
+
+    day: dt.date
+    k: int
+    theta: Decimal
+    channel: str
+    event: ChannelEvent
+
+
+@dataclass(frozen=True)
+class TransitionRow:
+    """一次系统风险状态转换（S 改变的日期、前后状态与方向）。"""
+
+    day: dt.date
+    object: str
+    before: Risk
+    after: Risk
+    direction: str
+
+
+def channel_events(result: WindowResult, rebuilt: RebuiltStates) -> tuple[ChannelEventRow, ...]:
+    """9 个 (K, θ_P) 组合的五条通道在信号日 axis[j₀−1 .. E−1] 内的事件；排序 (日期, K, θ_P 数值, 通道按
+    CHANNEL_NAMES, 同日同通道按 ChannelDay.events 次序)。信号日与各候选 daily_signals 的日期须逐日相同。"""
+    window = result.window
+    if window is None:
+        raise ComparisonError("通道事件只对完整的窗口结果计算")
+    low, high = window.j0 - 1 - rebuilt.first, window.e_index - rebuilt.first
+    signal_days = {(candidate.k, candidate.theta): tuple(item.day for item in outcome.outcome.signals)
+                   for candidate, outcome in result.candidates.items()}
+    rank = {name: index for index, name in enumerate(CHANNEL_NAMES)}
+    rows: list[ChannelEventRow] = []
+    for (k, theta), paths in rebuilt.channels.items():
+        for channel in CHANNEL_NAMES:
+            days = getattr(paths, channel)[low:high]
+            if tuple(item.day for item in days) != signal_days[(k, theta)]:
+                raise ComparisonError(f"K={k}, θ_P={theta} 的通道路径与信号日不对应")
+            rows += [ChannelEventRow(item.day, k, theta, channel, event) for item in days for event in item.events]
+    return tuple(sorted(rows, key=lambda row: (row.day, row.k, row.theta, rank[row.channel])))
+
+
+def system_transitions(result: WindowResult) -> tuple[TransitionRow, ...]:
+    """27 组候选与主参照在信号日 axis[j₀−1 .. E−1] 的风险状态转换（state_machine.transitions）；首个信号日以已计算的
+    axis[j₀−2] 状态判断。排序 (日期, 对象登记顺序：候选 0—26，主参照最后)。"""
+    if result.window is None or result.reference is None:
+        raise ComparisonError("系统转换只对完整的窗口结果计算")
+    rows: list[TransitionRow] = []
+
+    def add(name: str, records: Sequence[SystemDay] | Sequence[ReferenceDay], signals: Sequence[dt.date]) -> None:
+        path = records[1:-1]                                  # records 覆盖 axis[j₀−2 .. E]
+        if tuple(item.day for item in path) != tuple(signals):
+            raise ComparisonError(f"{name} 的系统记录与信号日不对应")
+        for day, before, after in transitions(records[0].risk, path):     # type: ignore[arg-type]
+            rows.append(TransitionRow(day, name, before, after, RAISE if after > before else LOWER))
+
+    for candidate, outcome in result.candidates.items():
+        add(candidate_key(candidate), outcome.system, [item.day for item in outcome.outcome.signals])
+    add(REFERENCE, result.reference.days, [item.day for item in result.reference.outcome.signals])
+    return tuple(sorted(rows, key=lambda row: row.day))           # 稳定排序：同日保持对象登记顺序
 
 
 # ---------------------------------------------------------------------------
@@ -643,7 +728,7 @@ def state_statistics(name: str, risks: Sequence[tuple[dt.date, Risk]], targets: 
 
 @dataclass(frozen=True)
 class PolicyEvent:
-    kind: str                          # 止损执行、离场期、重入、U 设置、U 解除、无法确定
+    kind: str                          # 止损执行、离场期、重入、U 设置、U 解除、U 作废（止损）、无法确定
     day: dt.date
     detail: str
 
@@ -665,7 +750,12 @@ def policy_events(policy: PolicyResult | PartialPolicyResult | None) -> tuple[Po
         if target.cap_active and (before is None or not before.cap_active):
             events.append(PolicyEvent("U 设置", target.day, "U = 一级"))
         if before is not None and before.cap_active and not target.cap_active:
-            events.append(PolicyEvent("U 解除", target.day, "U = 无"))
+            # 修正批 B1（登记第 149 行区分“解除”与“作废”）：止损执行当日的目标（来源 STOP_CASH）使 U 作废，
+            # 不记“U 解除”；detail 写止损确认日（前一目标所在日）。其余 cap_active 由真变假的情形记“U 解除”。
+            if target.source is TargetSource.STOP_CASH:
+                events.append(PolicyEvent("U 作废（止损）", target.day, f"止损确认日 {before.day}"))
+            else:
+                events.append(PolicyEvent("U 解除", target.day, "U = 无"))
     if isinstance(policy, PartialPolicyResult) and policy.undetermined is not None:
         events.append(PolicyEvent("无法确定", policy.undetermined.day, policy.undetermined.reason))
     return tuple(events)

@@ -395,3 +395,160 @@ def test_descriptive_collects_every_item(snapshot: Snapshot, result: WindowResul
     assert [item.name for item in found.averages] == [compare.ONE_LEVEL, compare.BUFFERED]
     assert len(found.substitutions) == 27 and len(found.statistics) == 28
     assert set(found.policy_events) == set(found.policy_differences)
+
+
+# ---------------------------------------------------------------------------
+# 修正批 K1（登记补充第 6 条）：通道事件日期与系统转换日期的手算例；B1 / K7 A4：止损使 U 作废的事件文字
+# ---------------------------------------------------------------------------
+
+
+def fake_window(days: tuple[dt.date, ...], first: int, j0: int, e_index: int, pairs: list[tuple[int, Decimal]],
+                channels: dict) -> tuple[object, object]:
+    """只含 channel_events 读取的字段的替身：days 为自 first 起的轴；信号日 axis[j₀−1 .. E−1]。"""
+    from types import SimpleNamespace
+
+    from market_risk.wavewarn_v20.convergence import Candidate
+
+    signals = [SimpleNamespace(day=day) for day in days[j0 - 1 - first:e_index - first]]
+    candidates = {Candidate(k, theta, 1): SimpleNamespace(outcome=SimpleNamespace(signals=signals))
+                  for k, theta in pairs}
+    result = SimpleNamespace(window=SimpleNamespace(j0=j0, e_index=e_index), candidates=candidates)
+    return result, SimpleNamespace(first=first, channels=channels)
+
+
+def test_channel_events_hand_example_enter_exit_rearm_and_order() -> None:
+    """K = 3；两资产输入相同；轴第 10—17 行（first = 10），j₀ = 12、E = 17 → 信号日为第 11—16 行（第 1—6 日）。
+
+    第 0 日 C = 100（H = 100，NL = 0，Q = 1）；第 1—6 日同 A8（RS-1）：95.5（NL = 1）、97 × 4（Q = 1—4）、
+    95.8（Q = 5）；第 7 日（E）97（Q = 6）。MR：均线 99，第 2 日 C = 98 低于均线 → 进入，第 3 日 100 → 退出，
+    其余日 100。
+    手推（θ_P = 2%：P 门槛 2%，PR 门槛 4%）：第 1 日 P、PR 进入；第 4 日 Q = 3 都退出；第 5 日 D = 3% < 4%，
+    PR 重新武装，P 保持未武装；第 6 日 D = 4.2%，PR 进入；第 7 日 PR 再次退出（Q = 6，但第 7 日 = E 不在信号日内，
+    不列）。
+    θ_P = 1.5%（P 门槛 1.5%，PR 门槛 3%）：第 1 日进入、第 4 日退出；第 5 日 D = 3% 恰达到 3%（C = 97 ≤ 0.97 × 100），
+    PR 不重新武装；第 6 日仍未武装。排序：日期，K，θ_P 数值（0.015 在 0.02 之前，与字典插入次序无关），
+    通道 p_spx、p_qqq、pr_spx、pr_qqq、mr。
+    """
+    from wavewarn_v20_helpers import asset, axis
+    from wavewarn_v20_helpers import trend as trend_day
+
+    from market_risk.wavewarn_v20.channels import ChannelEvent, ChannelState, run_pullback, run_trend
+    from market_risk.wavewarn_v20.inputs import NewLow
+    from market_risk.wavewarn_v20.state_machine import ChannelPaths
+
+    days = axis(8)
+    rows = [("100", NewLow.NO, 1), ("95.5", NewLow.YES, 0), ("97", NewLow.NO, 1), ("97", NewLow.NO, 2),
+            ("97", NewLow.NO, 3), ("97", NewLow.NO, 4), ("95.8", NewLow.NO, 5), ("97", NewLow.NO, 6)]
+    inputs = [asset(close, "100", True, nl, q, day) for (close, nl, q), day in zip(rows, days, strict=True)]
+    trend_inputs = [trend_day("98" if index == 2 else "100", "99", day) for index, day in enumerate(days)]
+    armed = ChannelState.ARMED
+
+    def paths(theta: Decimal) -> ChannelPaths:
+        p, pr = run_pullback(armed, inputs, 3, theta), run_pullback(armed, inputs, 3, 2 * theta)
+        return ChannelPaths(p, p, pr, pr, run_trend(armed, trend_inputs, 200))
+
+    high, low = Decimal("0.02"), Decimal("0.015")
+    result, rebuilt = fake_window(days, 10, 12, 17, [(3, high), (3, low)],
+                                  {(3, high): paths(high), (3, low): paths(low)})
+    found = [(row.day, row.k, row.theta, row.channel, row.event) for row in compare.channel_events(result, rebuilt)]
+    enter, leave, rearm = ChannelEvent.ENTER, ChannelEvent.EXIT, ChannelEvent.REARM
+    four = ("p_spx", "p_qqq", "pr_spx", "pr_qqq")
+    expected = [(days[1], 3, theta, name, enter) for theta in (low, high) for name in four]
+    expected += [(days[2], 3, low, "mr", enter), (days[2], 3, high, "mr", enter)]
+    expected += [(days[3], 3, low, "mr", leave), (days[3], 3, high, "mr", leave)]
+    expected += [(days[4], 3, theta, name, leave) for theta in (low, high) for name in four]
+    expected += [(days[5], 3, high, "pr_spx", rearm), (days[5], 3, high, "pr_qqq", rearm)]
+    expected += [(days[6], 3, high, "pr_spx", enter), (days[6], 3, high, "pr_qqq", enter)]
+    assert found == expected
+    # 通道路径与信号日错开一行（first 改为 11）→ 计算失败
+    from types import SimpleNamespace
+
+    with pytest.raises(compare.ComparisonError, match="信号日不对应"):
+        compare.channel_events(result, SimpleNamespace(first=11, channels=rebuilt.channels))
+
+
+def test_system_transitions_hand_example_first_day_and_order() -> None:
+    """记录覆盖 axis[j₀−2 .. E]（第 0—6 日），信号日为第 1—5 日。
+
+    候选 K10_θ0.02_h1：第 0—6 日 一级、正常、正常、二级、一级、一级、正常。首个信号日（第 1 日）以第 0 日（axis[j₀−2]）
+    的一级判断 → 第 1 日 一级→正常“降级”；第 3 日 正常→二级“升级”；第 4 日 二级→一级“降级”；第 6 日为 E，不列。
+    主参照：正常、正常、正常、二级、一级、正常、正常 → 第 3 日“升级”、第 4 日“降级”、第 5 日“降级”。
+    排序：日期；同日候选（登记顺序）在前、主参照最后。
+    """
+    from types import SimpleNamespace
+
+    from market_risk.wavewarn_v20.convergence import Candidate
+
+    days = tuple(D(2004, 1, 5) + dt.timedelta(days=index) for index in range(7))
+    N, L1, L2 = Risk.NORMAL, Risk.LEVEL1, Risk.LEVEL2
+
+    def records(risks: list[Risk]) -> tuple:
+        return tuple(SimpleNamespace(day=day, risk=risk) for day, risk in zip(days, risks, strict=True))
+
+    signals = [SimpleNamespace(day=day) for day in days[1:6]]
+    candidate = Candidate(10, Decimal("0.02"), 1)
+    outcome = SimpleNamespace(system=records([L1, N, N, L2, L1, L1, N]), outcome=SimpleNamespace(signals=signals))
+    reference = SimpleNamespace(days=records([N, N, N, L2, L1, N, N]), outcome=SimpleNamespace(signals=signals))
+    result = SimpleNamespace(window=object(), reference=reference, candidates={candidate: outcome})
+    found = [(row.day, row.object, row.before, row.after, row.direction) for row in compare.system_transitions(result)]
+    name = candidate_key(candidate)
+    assert found == [
+        (days[1], name, L1, N, "降级"),
+        (days[3], name, N, L2, "升级"), (days[3], compare.REFERENCE, N, L2, "升级"),
+        (days[4], name, L2, L1, "降级"), (days[4], compare.REFERENCE, L2, L1, "降级"),
+        (days[5], compare.REFERENCE, L1, N, "降级"),
+    ]
+
+
+def test_channel_events_and_transitions_on_the_constructed_window(snapshot: Snapshot, result: WindowResult) -> None:
+    """756 日构造：通道事件只落在信号日内且按规定排序；每个候选的转换条数等于其 axis[j₀−2 .. E−1] 状态的变化次数，
+    并与 daily_signals 的风险列逐日一致（首日以 axis[j₀−2] 判断）。"""
+    import itertools
+
+    rebuilt = compare.rebuild_states(snapshot, result, registered_v20.run_parameters())
+    assert result.window is not None and result.reference is not None
+    events = compare.channel_events(result, rebuilt)
+    assert {(row.k, row.theta) for row in events} <= set(rebuilt.channels)
+    rank = {name: index for index, name in enumerate(compare.CHANNEL_NAMES)}
+    keys = [(row.day, row.k, row.theta, rank[row.channel]) for row in events]
+    assert keys == sorted(keys)
+    for candidate, outcome in result.candidates.items():
+        days = {item.day for item in outcome.outcome.signals}
+        assert all(row.day in days for row in events if (row.k, row.theta) == (candidate.k, candidate.theta))
+    transitions = compare.system_transitions(result)
+    for candidate, outcome in result.candidates.items():
+        risks = [item.risk for item in outcome.system[:-1]]
+        changes = sum(1 for before, after in itertools.pairwise(risks) if after is not before)
+        mine = [row for row in transitions if row.object == candidate_key(candidate)]
+        assert len(mine) == changes
+        assert [item.risk for item in outcome.outcome.signals] == risks[1:]
+        assert all(row.direction == ("升级" if row.after > row.before else "降级") for row in mine)
+    assert [row.day for row in transitions] == sorted(row.day for row in transitions)
+
+
+def test_stop_during_the_reentry_cap_voids_u_instead_of_releasing_it() -> None:
+    """K7 A4 / 修正批 B1：同 test_wavewarn_v20_execution.py 的 A4 构造（重入后 U 生效期间止损）。
+
+    第 14 日重入（U = 一级）、第 15 日二级且 U 仍有效、第 15 日收盘 W₁₅/W₁₄ = 1 − 0.6 × 7/90 ≤ 0.96 → 第 16 日止损执行。
+    事件：第 16 日“止损执行”与“U 作废（止损）”，detail 都是“止损确认日 第 15 日”；全程不出现“U 解除”。
+    正常解除例：第 14 日信号正常 → 第 15 日“U 解除”，detail “U = 无”。
+    """
+    from wavewarn_v20_helpers import POLICY, POSITIONS, TOLERANCE, numbered, signal
+
+    from market_risk.wavewarn_v20 import nav
+
+    def run(prices: list[str], risks: list[Risk]) -> list[tuple[str, dt.date, str]]:
+        days = [numbered(number) for number in range(1, len(prices) + 1)]
+        closes = {"SPX": [Decimal(value) for value in prices], "QQQ": [Decimal(value) for value in prices]}
+        signals = [signal(number, risk) for number, risk in enumerate(risks)]
+        policy = nav.simulate_policy(days, signals, nav.basket_returns(days, closes), POSITIONS, POLICY, TOLERANCE)
+        return [(item.kind, item.day, item.detail) for item in compare.policy_events(policy)]
+
+    voided = run(["100", "97", *["90"] * 12, "83", "83", "83"], [Risk.NORMAL] * 14 + [Risk.LEVEL2] * 3)
+    assert [item for item in voided if item[1] == numbered(16)] == [
+        ("止损执行", numbered(16), f"止损确认日 {numbered(15)}"),
+        ("U 作废（止损）", numbered(16), f"止损确认日 {numbered(15)}")]
+    assert all(kind != "U 解除" for kind, _, _ in voided)
+    released = run(["100", "97", *["90"] * 14], [Risk.NORMAL] * 16)
+    assert ("U 解除", numbered(15), "U = 无") in released
+    assert all(kind != "U 作废（止损）" for kind, _, _ in released)
