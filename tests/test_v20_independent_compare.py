@@ -271,7 +271,8 @@ def test_independent_compare(kind: str, name: str, scenario: Path, expected: str
               "project_seconds": round(project_seconds, 3),
               "tool_output_sha256": support.sha256(support.get_bytes(tool_out)), "counts": counts,
               "by_layer": {layer: items for layer, items in record.summary().items()}, "details": record.details,
-              "alignment": project_fields.get("alignment") if isinstance(project_fields, dict) else None}
+              "alignment": project_fields.get("alignment") if isinstance(project_fields, dict) else None,
+              "B8逐项": record.ledger}
     support.put_bytes(record_path, support.dump_json(result))
     assert counts["不一致"] == 0, f"{name} 有 {counts['不一致']} 处不一致，见 {record_path}"
 
@@ -353,7 +354,7 @@ def recompare_case(out: Path, source: Path, kind: str, name: str, scenario: Path
               "tool_output_sha256": support.sha256(tool_bytes), "counts": counts,
               "by_layer": {layer: items for layer, items in record.summary().items()}, "details": record.details,
               "alignment": project_fields.get("alignment") if isinstance(project_fields, dict) else None,
-              "evidence": extra}
+              "evidence": extra, "B8逐项": record.ledger}
     if chosen is not None:
         result.update(support.tool_source_fields(chosen))           # 第三轮：工具输出来源与生成工具
     support.put_bytes(record_path, support.dump_json(result))
@@ -588,7 +589,7 @@ def test_b_confirm_case(name: str) -> None:
                "project_seconds": round(project_seconds, 3),
                "tool_output_sha256": support.sha256(support.get_bytes(tool_out)), "counts": counts,
                "by_layer": {layer: items for layer, items in record.summary().items()}, "details": record.details,
-               "evidence": extra}
+               "evidence": extra, "B8逐项": record.ledger}
     record_path = out / "逐场景比对" / f"{name}.json"
     support.put_bytes(record_path, support.dump_json(payload))
     assert counts["不一致"] == 0, f"{name} 有 {counts['不一致']} 处不一致，见 {record_path}"
@@ -1693,7 +1694,8 @@ def test_sequence_compare(case: str) -> None:
     payload = {"name": name, "kind": "sequence", "状态": "完成", "started": started, "tool_exit_code": exit_code,
                "counts": counts, "by_layer": {layer: items for layer, items in record.summary().items()},
                "details": record.details, "evidence": entry_info, "alignment": project_fields.get("alignment"),
-               "sequence": support.sequence_record_fields(source, tool_seconds, project_seconds, tool_bytes)}
+               "sequence": support.sequence_record_fields(source, tool_seconds, project_seconds, tool_bytes),
+               "B8逐项": record.ledger}
     support.put_bytes(record_path, support.dump_json(payload))
     sequence_summary(out, payload)
     support.assert_self_consistent(research.get("自洽检查") or {}, name)

@@ -593,6 +593,8 @@ class Recorder:
     counts: dict = field(default_factory=dict)
     details: list = field(default_factory=list)
     limit: int = 30
+    # J5 乙：“新文件（算法）”“新文件（序列化）”两层的每一次比对逐条保留对象、项目与标识，供 B8 归类逐项核对
+    ledger: list = field(default_factory=list)
 
     def add(self, layer: str, item: str, status: str, where: str = "", tool: object = None,
             project: object = None, note: str = "") -> None:
@@ -602,6 +604,9 @@ class Recorder:
         if status != "一致" and self.counts[key] <= self.limit:
             self.details.append({"layer": layer, "item": item, "status": status, "where": where,
                                  "tool": tool, "project": project, "note": note})
+        if layer in ("新文件（算法）", "新文件（序列化）"):
+            self.ledger.append({"层": layer, "项目": item, "状态": status, "标识": where,
+                                "工具值": json.loads(json.dumps(tool, ensure_ascii=False, default=str))})
 
     def check(self, layer: str, item: str, ok: bool, where: str, tool: object, project: object) -> None:
         self.add(layer, item, "一致" if ok else "不一致", where, tool, project)
@@ -634,6 +639,8 @@ class Recorder:
         removed = sum(self.counts.pop(key) for key in keys)
         self.details = [entry for entry in self.details
                         if not (entry["layer"] == layer and (item is None or entry["item"] == item))]
+        self.ledger = [entry for entry in self.ledger
+                       if not (entry["层"] == layer and (item is None or entry["项目"] == item))]
         return removed
 
     def window_end(self) -> int:
