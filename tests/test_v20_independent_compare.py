@@ -2056,13 +2056,13 @@ def test_wiring_b8_wrong_totals_are_inconsistent(monkeypatch: pytest.MonkeyPatch
     assert "switch_stages 行" in b8_inconsistent_items(record)
 
 
-@pytest.mark.parametrize("variant", ["failed_缺价", "failed_缺键"])
+@pytest.mark.parametrize("variant", ["failed_缺键"])
 def test_wiring_b8_failed_or_incomplete_signal_sim_is_not_valid_zero(monkeypatch: pytest.MonkeyPatch,
                                                                       variant: str) -> None:
-    """A8：某对象工具 signal_sim 的 switches 置 0、switch_list 置 []；（a）failed 置 {"type": "缺价", "missing":
-    [["SPX", <该对象窗口内某日>]]}；（b）删去 failed 键。两例都在项目侧删去该对象全部明细行，汇总行改为 0、0、0。
-    期望：两例的不一致项中都含“switches 对象集合”，即不按合法零切换放行。
-    （a）只验证不放行，不表示该结果正确（Q-13）。"""
+    """A8：某对象工具 signal_sim 的 switches 置 0、switch_list 置 []，并删去 failed 键（Z2／S3，未判定零切换）；项目侧
+    删去该对象全部明细行，汇总行改为 0、0、0。期望：不一致项中含“switches 对象集合”，即不按合法零切换放行。
+    原（a）“failed 为缺价”一例由 Q-13 甲-1（发起人 2026-10-13 批准）改由 S2 通用规则判定，见下方 Q-13 各测试；
+    原（a）在候选修订十八中的断言与结果保留于该候选证据，不删除。"""
     import copy
 
     _, _, original = b8_built()
@@ -2070,13 +2070,12 @@ def test_wiring_b8_failed_or_incomplete_signal_sim_is_not_valid_zero(monkeypatch
     name, simulation = b8_object_with_switches(tool, tables)
     day = str(simulation["switch_list"][0]["exec_idx"])
     simulation["switches"], simulation["switch_list"] = 0, []
-    if variant == "failed_缺价":
-        simulation["failed"] = {"type": "缺价", "missing": [["SPX", day]]}
-    else:
-        del simulation["failed"]
+    assert variant == "failed_缺键" and day
+    del simulation["failed"]
     b8_zero_project(tables, name)
     _, record = b8_compare(monkeypatch, tool, tables)
     assert "switches 对象集合" in b8_inconsistent_items(record)
+    assert not [entry for entry in record.ledger if entry["项目"] == support.FAILED_ZERO_ITEM]
 
 
 def test_wiring_b8_missing_switch_list_raises_as_before(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2089,3 +2088,227 @@ def test_wiring_b8_missing_switch_list_raises_as_before(monkeypatch: pytest.Monk
     del simulation["switch_list"]
     with pytest.raises(KeyError):
         b8_compare(monkeypatch, tool, tables)
+
+
+# ---------------------------------------------------------------------------
+# Q-13 甲-1（发起人 2026-10-13 批准；修改方案修订一与约束附件）：失败零切换对象（S2）只确认输出一致性，失败状态保留，
+# 单独计数，不并入合法零切换，不认定业务有效。构造只在内存中改写：工具侧在 copy.deepcopy(tool) 上改写对象的
+# signal_sim；项目侧以 monkeypatch 替换 support.project_switch_outcomes（该对象的切换与 signal_nav）与两张表。
+# 这些构造只检验 S2 判定与表格比对，不证明完整运行接线；真实提取另由 …project_switch_outcomes_real_extraction 检查。
+# 本次新增的代码与测试不含任何场景名称。
+# ---------------------------------------------------------------------------
+
+Q13_DAY = "2004-02-24"
+Q13_MISSING = [["SPX", Q13_DAY], ["QQQ", Q13_DAY]]          # 同一天两个不同资产：B5 的对照（不算重复）
+Q13_LAST: dict = {}                                         # 最近一次 q13_case 比较后的工具与项目对象
+
+
+def q13_missing(items: list) -> tuple:
+    return tuple((asset, dt.date.fromisoformat(day)) for asset, day in items)
+
+
+def q13_case(monkeypatch: pytest.MonkeyPatch, *, reference: bool = False, tool_edit=None, project_missing=None,
+             project_failed: bool = True, project_switches: bool = False, table_edit=None, tool_missing=None,
+             extra=None, project_switches_value=None):
+    """构造一个 S2 对象并运行 compare_event_files；返回（对象名, 返回值, 记录, 新项条目, 原工具 failed 副本）。"""
+    import copy
+    import dataclasses
+
+    _, result, original = b8_built()
+    tool, tables = copy.deepcopy(original), b8_project_tables()
+    if reference:
+        name = "主参照"
+        simulation = tool["reference"]["signal_sim"]
+    else:
+        name, simulation = b8_object_with_switches(tool, tables)
+    outcomes = dict(support.project_switch_outcomes(result))
+    assert name in outcomes and not isinstance(outcomes[name].signal_nav, support.research_run.Unavailable)
+    own_switches = outcomes[name].switches
+    simulation["switches"], simulation["switch_list"] = 0, []
+    simulation["failed"] = {"type": "缺价", "missing": copy.deepcopy(tool_missing if tool_missing is not None
+                                                                   else Q13_MISSING)}
+    b8_zero_project(tables, name)
+    missing = project_missing if project_missing is not None else q13_missing(Q13_MISSING)
+    nav = (support.research_run.Unavailable(missing, support.research_run.MISSING_PRICE, None,
+                                             support.research_run.SOURCE_PREFIX)
+           if project_failed else outcomes[name].signal_nav)
+    changes = own_switches if project_switches else ()
+    outcomes[name] = dataclasses.replace(outcomes[name], signal_nav=nav,
+                                         switches=changes if project_switches_value is None else project_switches_value)
+    if tool_edit is not None:
+        tool_edit(simulation)
+    if table_edit is not None:
+        table_edit(tables, name)
+    if extra is not None:
+        extra(tool, tables, name)
+    kept = copy.deepcopy(simulation["failed"])
+    monkeypatch.setattr(support, "project_switch_outcomes", lambda *_: outcomes)
+    found, record = b8_compare(monkeypatch, tool, tables)
+    entries = [(entry["标识"], entry["状态"]) for entry in record.ledger if entry["项目"] == support.FAILED_ZERO_ITEM]
+    Q13_LAST.update(simulation=simulation, outcome=outcomes[name])
+    return name, found, record, entries, kept
+
+
+@pytest.mark.parametrize("reference", [False, True], ids=["候选", "主参照"])
+@pytest.mark.parametrize("order", ["原序", "乱序"])
+def test_wiring_b8_failed_zero_switch_consistent(monkeypatch: pytest.MonkeyPatch, reference: bool,
+                                                 order: str) -> None:
+    """正例：工具失败缺价、项目同样失败且完整清单相同（乱序例：工具清单倒序，只排序比较，不删项）、零切换、明细 0 行、
+    汇总恰 1 行且为 0、0、0。期望：新项恰 1 次“一致”；对象集合一致；全场景无不一致；返回值单列该对象；
+    失败状态保留（工具 failed 原样，信号模拟层 compare_failed 仍按失败比较）。"""
+    tool_missing = list(reversed(Q13_MISSING)) if order == "乱序" else None
+    name, found, record, entries, kept = q13_case(monkeypatch, reference=reference, tool_missing=tool_missing)
+    assert entries == [(name, "一致")]
+    assert record.total("不一致") == 0, record.inconsistent()
+    assert found["失败零切换（输出一致，失败状态保留）"] == [name] and found["失败零切换（不一致）"] == []
+    # 失败状态保留：比较之后工具 failed 原样未变，项目对象仍为 Unavailable；以比较后的两侧值调用信号模拟层的
+    # compare_failed，仍按失败比较（failed.type、failed.missing 一致，不出现“failed”为空的记录）。
+    simulation, outcome = Q13_LAST["simulation"], Q13_LAST["outcome"]
+    assert simulation["failed"] == kept and kept["type"] == "缺价"
+    assert isinstance(outcome.signal_nav, support.research_run.Unavailable)
+    layer = support.Recorder()
+    support.compare_failed(layer, "信号模拟", name, simulation["failed"],
+                           {"type": "缺价", "missing": support.project_missing_list(outcome.signal_nav.missing)})
+    assert set(layer.summary()["信号模拟"]) == {"failed.type", "failed.missing"} and layer.total("不一致") == 0
+
+
+def test_wiring_b8_failed_zero_switch_does_not_touch_other_objects(monkeypatch: pytest.MonkeyPatch) -> None:
+    """不误伤：同一场景另设一个 S1 合法零切换候选（工具 switches 0、switch_list []、failed 为空值；项目明细 0 行、
+    汇总 0、0、0），其余为 S4 正常非零切换。期望：新项只对 S2 对象写 1 次；S1 与 S4 不写新项；全场景无不一致。"""
+    holder: dict = {}
+
+    def other_valid_zero(tool: dict, tables: dict, name: str) -> None:
+        other, simulation = next((key, sim) for key, sim in b8_signal_sims(tool)
+                                 if key not in (name, "主参照") and sim["switches"] > 0)
+        assert simulation["failed"] is None
+        simulation["switches"], simulation["switch_list"] = 0, []
+        b8_zero_project(tables, other)
+        holder["other"] = other
+
+    name, found, record, entries, _ = q13_case(monkeypatch, extra=other_valid_zero)
+    assert holder["other"] != name
+    assert entries == [(name, "一致")]
+    assert record.total("不一致") == 0, record.inconsistent()
+    assert found["失败零切换（输出一致，失败状态保留）"] == [name]
+
+
+def q13_set(key, value):
+    def edit(simulation: dict) -> None:
+        simulation["failed"][key] = value
+    return edit
+
+
+def q13_failed(value):
+    def edit(simulation: dict) -> None:
+        simulation["failed"] = value
+    return edit
+
+
+def q13_switches(value):
+    def edit(simulation: dict) -> None:
+        simulation["switches"] = value
+    return edit
+
+
+def q13_drop(key):
+    def edit(simulation: dict) -> None:
+        del simulation["failed"][key]
+    return edit
+
+
+def q13_detail_row(tables: dict, name: str) -> None:
+    header, rows = tables["switches.csv.gz"]
+    column = header.index("object")
+    extra = list(rows[0])
+    extra[column] = name
+    tables["switches.csv.gz"] = (header, [*rows, extra])
+
+
+def q13_stage_rows(count: int, values: tuple = ("0", "0", "0")):
+    def edit(tables: dict, name: str) -> None:
+        header, rows = tables["switch_stages.csv"]
+        kept = [row for row in rows if row[0] != name]
+        tables["switch_stages.csv"] = (header, kept + [[name, "信号模拟", *values]] * count)
+    return edit
+
+
+Q13_BAD = [
+    ("A1_switches_False", {"tool_edit": q13_switches(False)}, "A1"),
+    ("A1_switches_0.0", {"tool_edit": q13_switches(0.0)}, "A1"),
+    ("A3_failed_非字典", {"tool_edit": q13_failed(["缺价"])}, "A3"),
+    ("A3_failed_空字典", {"tool_edit": q13_failed({})}, "A3"),
+    ("A3_failed_缺missing", {"tool_edit": q13_drop("missing")}, "A3"),
+    ("A3_failed_多键", {"tool_edit": q13_set("extra", 1)}, "A3"),
+    ("A4_type_计算失败", {"tool_edit": q13_set("type", "计算失败")}, "A4"),
+    ("A4_type_非字符串", {"tool_edit": q13_set("type", 1)}, "A4"),
+    ("B1_missing_空列表", {"tool_missing": []}, "工具 B1"),
+    ("B1_missing_非列表", {"tool_edit": q13_set("missing", "SPX 2004-02-24")}, "工具 B1"),
+    ("B2_元素三项", {"tool_missing": [["SPX", Q13_DAY, "x"]]}, "工具 B2"),
+    ("B2_元素非列表", {"tool_missing": ["SPX"]}, "工具 B2"),
+    ("B3_资产小写", {"tool_missing": [["spx", Q13_DAY], ["QQQ", Q13_DAY]]}, "工具 B3"),
+    ("B4_日期格式", {"tool_missing": [["SPX", "2004-2-24"], ["QQQ", Q13_DAY]]}, "工具 B4"),
+    ("B4_日期非真实", {"tool_missing": [["SPX", "2004-02-30"], ["QQQ", Q13_DAY]]}, "工具 B4"),
+    ("B5_工具重复", {"tool_missing": [*Q13_MISSING, ["SPX", Q13_DAY]]}, "工具 B5"),
+    ("C1_项目切换非空", {"project_switches": True}, "C1 项目实际切换非空"),
+    ("C1_项目切换为列表", {"project_switches_value": []}, "C1 项目切换不是元组"),
+    ("C2_项目未失败", {"project_failed": False}, "C2"),
+    ("C4_项目重复", {"project_missing": q13_missing([*Q13_MISSING, ["SPX", Q13_DAY]])}, "C3/C4 项目 B5"),
+    ("C4_项目资产小写", {"project_missing": (("spx", dt.date(2004, 2, 24)), ("QQQ", dt.date(2004, 2, 24)))},
+     "C3/C4 项目 B3"),
+    ("C4_项目日期非date", {"project_missing": (("SPX", Q13_DAY), ("QQQ", dt.date(2004, 2, 24)))}, "C3/C4 项目 B4"),
+    ("C4_项目元素非二元组", {"project_missing": (("SPX",), ("QQQ", dt.date(2004, 2, 24)))}, "C3/C4 项目 B2"),
+    ("D_项目清单截断", {"project_missing": q13_missing(Q13_MISSING[:1])}, "D2"),
+    ("D_项目清单多一项", {"project_missing": q13_missing([*Q13_MISSING, ["SPX", "2004-07-07"]])}, "D2"),
+    ("D_日期不同", {"project_missing": q13_missing([["SPX", "2004-07-07"], ["QQQ", Q13_DAY]])}, "D2"),
+    ("E1_项目有明细行", {"table_edit": q13_detail_row}, "E1"),
+    ("E2_汇总行重复", {"table_edit": q13_stage_rows(2)}, "E2 汇总行数"),
+    ("E2_汇总行缺失", {"table_edit": q13_stage_rows(0)}, "E2 汇总行数"),
+    ("E2_汇总行不为零", {"table_edit": q13_stage_rows(1, ("1", "0", "0"))}, "E2 汇总行不为"),
+]
+
+
+@pytest.mark.parametrize(("case", "kwargs", "clause"), Q13_BAD, ids=[case for case, _, _ in Q13_BAD])
+def test_wiring_b8_failed_zero_switch_inconsistent(monkeypatch: pytest.MonkeyPatch, case: str, kwargs: dict,
+                                                   clause: str) -> None:
+    """反例：S2 对象任一条件不满足 → 新项恰 1 次“不一致”，note 以对应条款开头；返回值把它列入“不一致”，不列入
+    “输出一致”；不一致按普通不一致处理（出现在 record.inconsistent()）。"""
+    name, found, record, entries, _ = q13_case(monkeypatch, **kwargs)
+    assert entries == [(name, "不一致")], case
+    notes = [entry["note"] for entry in record.inconsistent() if entry["item"] == support.FAILED_ZERO_ITEM]
+    assert len(notes) == 1 and notes[0].startswith(clause), (case, notes)
+    assert found["失败零切换（不一致）"] == [[name, notes[0]]] and found["失败零切换（输出一致，失败状态保留）"] == []
+    if case == "E1_项目有明细行":
+        # 3 类检查、4 个记录项：新项、两项既有条数、场景级集合项都判不一致（同一缺陷，不是四个缺陷）。
+        assert {support.FAILED_ZERO_ITEM, "switches 条数（= 工具 switches）", "switches 条数（= 工具 switch_list）",
+                "switches 对象集合"} <= b8_inconsistent_items(record)
+
+
+def test_wiring_b8_failed_zero_switch_string_zero_is_not_in_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    """switches 为字符串 "0"：不进入 S2（入组沿用 == 比较），按既有路径比较：不写新项，既有条数核查判不一致。"""
+    name, _, record, entries, _ = q13_case(monkeypatch, tool_edit=q13_switches("0"))
+    assert entries == []
+    assert "switches 条数（= 工具 switches）" in b8_inconsistent_items(record) and name
+
+
+def test_wiring_b8_project_switch_outcomes_real_extraction() -> None:
+    """不替换 project_switch_outcomes：真实组合层结果的提取覆盖全部候选键与主参照，取值即组合层对象结果本身，
+    切换为元组（S2 判定的项目侧来源；完整运行接线由后续阶段验证）。"""
+    _, result, tool = b8_built()
+    outcomes = support.project_switch_outcomes(result)
+    assert sorted(outcomes) == sorted(name for name, _ in support.tool_switch_objects(tool, support.CANDIDATES))
+    for candidate, item in result.candidates.items():
+        assert outcomes[support.research_run.candidate_key(candidate)] is item.outcome
+    assert outcomes["主参照"] is result.reference.outcome
+    assert all(type(outcome.switches) is tuple for outcome in outcomes.values())
+
+
+def test_wiring_b8_duplicate_object_table_is_inconsistent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """对象表出现重复名称：写“switches 对象表重复”为不一致。"""
+    import copy
+
+    original = support.tool_switch_objects
+    monkeypatch.setattr(support, "tool_switch_objects",
+                        lambda tool, candidates: [*original(tool, candidates), original(tool, candidates)[0]])
+    _, _, tool = b8_built()
+    _, record = b8_compare(monkeypatch, copy.deepcopy(tool), b8_project_tables())
+    assert support.DUPLICATE_OBJECT_ITEM in b8_inconsistent_items(record)

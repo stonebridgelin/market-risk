@@ -2920,6 +2920,109 @@ def valid_zero_switch(simulation: Mapping) -> bool:
             and simulation["switches"] == 0 and simulation["switch_list"] == [])
 
 
+# Q-13 甲-1（发起人 2026-10-13 批准）：失败零切换对象（S2）只确认输出一致性，失败状态保留、单独计数，不并入合法零切换，
+# 不认定业务有效。入组只依据工具侧已绑定字段；判定为 A—E 共 19 条严格条件的合并结果（修改方案修订一第二、三节与
+# 约束附件；不复用宽松的 normalized_missing／compare_failed）。新项不一致按普通不一致处理，不归入 Q-13 未判定。
+FAILED_ZERO_ITEM = "switches 失败零切换输出一致"
+DUPLICATE_OBJECT_ITEM = "switches 对象表重复"
+FAILED_ZERO_TYPE = "缺价"
+FAILED_ZERO_KEYS = frozenset({"type", "missing"})
+FAILED_ZERO_ASSETS = ("SPX", "QQQ")
+FAILED_ZERO_DAY = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+
+
+def failed_zero_switch(simulation: Mapping) -> bool:
+    """S2 入组（沿用 Z1 入口口径，以 failed is not None 明确失败表示）：含 failed 键且其值不是 None、switches == 0、
+    switch_list == []。严格合法性由 failed_zero_switch_check 判定；不满足严格条件的对象仍在 S2 内、判不一致。"""
+    return ("failed" in simulation and simulation["failed"] is not None
+            and simulation["switches"] == 0 and simulation["switch_list"] == [])
+
+
+def strict_missing(items: object) -> tuple[list[tuple[str, str]] | None, str]:
+    """缺价清单的严格检查（B1—B5）：返回（按（日期, 资产）排序的清单, ""）或（None, 首个不通过的条款）。
+    排序只忽略原始顺序，不删除任何项；重复按（资产, 日期）对判断，不去重。"""
+    if type(items) is not list or not items:
+        return None, "B1 缺价清单不是非空列表"
+    pairs: list[tuple[str, str]] = []
+    for item in items:
+        if type(item) is not list or len(item) != 2:
+            return None, "B2 缺价清单元素不是两项列表"
+        asset, day = item
+        if type(asset) is not str or asset not in FAILED_ZERO_ASSETS:
+            return None, "B3 缺价清单资产不合法"
+        if type(day) is not str or FAILED_ZERO_DAY.fullmatch(day) is None:
+            return None, "B4 缺价清单日期格式不合法"
+        try:
+            dt.date.fromisoformat(day)
+        except ValueError:
+            return None, "B4 缺价清单日期不是真实日期"
+        pairs.append((asset, day))
+    if len(set(pairs)) != len(pairs):
+        return None, "B5 缺价清单重复"
+    return sorted(pairs, key=lambda pair: (pair[1], pair[0])), ""
+
+
+def project_switch_outcomes(result: research_run.WindowResult) -> dict[str, research_run.ObjectOutcome]:
+    """项目组合层各对象的实际结果（候选键、主参照）：S2 判定取项目侧切换与失败的唯一来源（C 组）。"""
+    outcomes = {research_run.candidate_key(candidate): item.outcome for candidate, item in result.candidates.items()}
+    if result.reference is not None:
+        outcomes["主参照"] = result.reference.outcome
+    return outcomes
+
+
+def project_missing_list(missing: object) -> list | None:
+    """项目 Unavailable.missing 原样转为 [资产, ISO 日期] 列表（同 missing_fields），不筛选、不截取、不去重；
+    结构或类型不符的元素（非二元组、日期不是 dt.date）改记为 None，交 strict_missing 判不一致。"""
+    if not isinstance(missing, tuple):
+        return None
+    return [[item[0], item[1].isoformat() if type(item[1]) is dt.date else None]
+            if isinstance(item, tuple) and len(item) == 2 else None for item in missing]
+
+
+def failed_zero_switch_check(name: str, simulation: Mapping, outcome: research_run.ObjectOutcome | None,
+                             detail_rows: Sequence[Mapping], stage_rows: Sequence[list[str]]) -> tuple[str, dict, dict]:
+    """S2 对象的合并判定（A—E 共 19 条）：返回（首个不通过的条款，全部通过时为空字符串；工具值；项目值）。"""
+    failed = simulation["failed"]
+    tool_value = {"switches": simulation["switches"], "switch_list": simulation["switch_list"], "failed": failed}
+    project_value: dict = {"明细行数": len(detail_rows), "汇总行": [list(row) for row in stage_rows]}
+    if outcome is not None:
+        changes = outcome.switches
+        project_value["切换数"] = len(changes) if type(changes) is tuple else f"类型 {type(changes).__name__}"
+        project_value["失败"] = (project_missing_list(outcome.signal_nav.missing)
+                               if isinstance(outcome.signal_nav, research_run.Unavailable) else None)
+    if type(simulation["switches"]) is not int or simulation["switches"] != 0:
+        return "A1 工具 switches 不是整数 0", tool_value, project_value
+    if type(simulation["switch_list"]) is not list or simulation["switch_list"] != []:
+        return "A2 工具 switch_list 不是空列表", tool_value, project_value
+    if type(failed) is not dict or set(failed) != FAILED_ZERO_KEYS:
+        return "A3 工具 failed 不是恰含 type、missing 两键的字典", tool_value, project_value
+    if type(failed["type"]) is not str or failed["type"] != FAILED_ZERO_TYPE:
+        return "A4 工具失败类型不在本规则支持范围", tool_value, project_value
+    tool_missing, why = strict_missing(failed["missing"])
+    if tool_missing is None:
+        return f"工具 {why}", tool_value, project_value
+    if outcome is None:
+        return "C1 项目侧缺少该对象结果", tool_value, project_value
+    if type(outcome.switches) is not tuple:
+        return "C1 项目切换不是元组", tool_value, project_value
+    if len(outcome.switches) != 0:
+        return "C1 项目实际切换非空", tool_value, project_value
+    if not isinstance(outcome.signal_nav, research_run.Unavailable):
+        return "C2 项目侧未失败", tool_value, project_value
+    mine, why = strict_missing(project_value["失败"])
+    if mine is None:
+        return f"C3/C4 项目 {why}", tool_value, project_value
+    if tool_missing != mine:
+        return "D2 双方完整缺价清单不同", tool_value, project_value
+    if detail_rows:
+        return "E1 项目有该对象明细行", tool_value, project_value
+    if len(stage_rows) != 1:
+        return "E2 汇总行数不为 1", tool_value, project_value
+    if list(stage_rows[0]) != [name, SIGNAL_PATH_TEXT, "0", "0", "0"]:
+        return "E2 汇总行不为 0、0、0", tool_value, project_value
+    return "", tool_value, project_value
+
+
 def compare_event_rows(record: Recorder, item: str, expected: Sequence[tuple], found: Sequence[tuple]) -> None:
     record.exact(EVENT_ALGO, f"{item} 条数", "场景", len(expected), len(found))
     for index, (left, right) in enumerate(zip(expected, found, strict=False)):
@@ -2975,6 +3078,11 @@ def compare_event_files(record: Recorder, tool: Mapping, snapshot: Snapshot, res
     header, rows, text = parsed["switches.csv.gz"]
     objects = tool_switch_objects(tool, candidates)
     object_rank = {name: index for index, (name, _) in enumerate(objects)}
+    # Q-13 甲-1：对象表须唯一（在对象循环之前检查）；重复即记不一致。
+    names = [name for name, _ in objects]
+    repeated = sorted({name for name in names if names.count(name) > 1})
+    if repeated:
+        record.add(EVENT_ALGO, DUPLICATE_OBJECT_ITEM, "不一致", "场景", repeated, None, "对象表中有重复名称")
     for name, simulation in objects:
         expected = simulation["switch_list"]
         mine = [row for row in rows if row["object"] == name]
@@ -2993,8 +3101,27 @@ def compare_event_files(record: Recorder, tool: Mapping, snapshot: Snapshot, res
             record.number(EVENT_ALGO, "switches.exposure_magnitude", where, Decimal(str(left["delta"])),
                           float(right["exposure_magnitude"]))
         record.exact(EVENT_SER, "switches.path", name, [SIGNAL_PATH_TEXT] * len(mine), [row["path"] for row in mine])
+    # Q-13 甲-1：S2（失败零切换）每对象恰写一次新项（合并判定，失败状态保留），不进入期望集合。对象表唯一性已在
+    # 对象循环之前检查；重复时另有不一致记录，归类不得以返回列表或总数代替逐项核对。
+    failed_zero = {name for name, simulation in objects if failed_zero_switch(simulation)}
+    outcomes = project_switch_outcomes(result) if failed_zero else {}
+    stage_found = [[row[key] for key in EVENT_HEADERS["switch_stages.csv"]] for row in parsed["switch_stages.csv"][1]]
+    failed_zero_ok: list[str] = []
+    failed_zero_bad: list[list[str]] = []
+    for name, simulation in objects:
+        if name not in failed_zero:
+            continue
+        why, tool_value, project_value = failed_zero_switch_check(
+            name, simulation, outcomes.get(name), [row for row in rows if row["object"] == name],
+            [row for row in stage_found if row[0] == name])
+        record.add(EVENT_ALGO, FAILED_ZERO_ITEM, "不一致" if why else "一致", name, tool_value, project_value, why)
+        if why:
+            failed_zero_bad.append([name, why])
+        else:
+            failed_zero_ok.append(name)
     # B-01 修正：合法零切换对象没有明细行，不计入应有明细的对象；未知对象、有切换对象缺行仍判不一致。
-    expected_objects = sorted(name for name, simulation in objects if not valid_zero_switch(simulation))
+    expected_objects = sorted(name for name, simulation in objects
+                              if not valid_zero_switch(simulation) and name not in failed_zero)
     record.exact(EVENT_ALGO, "switches 对象集合", "场景", expected_objects, sorted({row["object"] for row in rows}))
     compare_serialization(record, "switches.csv.gz", header, rows, text,
                           [(object_rank.get(row["object"], -1), row["date"]) for row in rows])
@@ -3013,4 +3140,5 @@ def compare_event_files(record: Recorder, tool: Mapping, snapshot: Snapshot, res
                           [(object_rank.get(row["object"], -1),) for row in rows])
     return {"比对": True, "信号日范围": list(span),
             "文件 SHA-256": {name: sha256(files[name]) for name in EVENT_FILES},
-            "行数": {name: len(parsed[name][1]) for name in EVENT_FILES}}
+            "行数": {name: len(parsed[name][1]) for name in EVENT_FILES},
+            "失败零切换（输出一致，失败状态保留）": failed_zero_ok, "失败零切换（不一致）": failed_zero_bad}
