@@ -1,0 +1,3010 @@
+{
+  "data_read": {
+    "SPX": {
+      "read": true,
+      "bytes": 643846,
+      "raw_sha256": "6941ab293eddb8201e851d873476d64c6cbd584ec9573f5ff757447173bf0b00",
+      "read_event_seq": 1345
+    },
+    "QQQ": {
+      "read": true,
+      "bytes": 410106,
+      "raw_sha256": "d14e58edcab7ec94b4e6728ce65bbbf8a0a84565d53ce951a37a4e6143a56880",
+      "read_event_seq": 1346
+    }
+  },
+  "evaluation_prices_parsed": {
+    "SPX": {
+      "strict_started": true,
+      "strict_completed": true,
+      "diagnosis_started": false,
+      "diagnosis_completed": false,
+      "rows": 6805,
+      "first_day": "1990-01-02",
+      "last_day": "2016-12-30"
+    },
+    "QQQ": {
+      "strict_started": true,
+      "strict_completed": true,
+      "diagnosis_started": false,
+      "diagnosis_completed": false,
+      "rows": 4484,
+      "first_day": "1999-03-10",
+      "last_day": "2016-12-30"
+    }
+  },
+  "derived_inputs": [
+    {
+      "seq": 12,
+      "object": "公共",
+      "field": "输入派生量",
+      "stage": "输入派生量",
+      "event": "derived"
+    },
+    {
+      "seq": 13,
+      "object": "公共",
+      "field": "t0",
+      "stage": "t0",
+      "event": "derived"
+    },
+    {
+      "seq": 43,
+      "object": "公共",
+      "field": "R2 事件",
+      "stage": "R2 事件",
+      "event": "derived"
+    }
+  ],
+  "performance_info": [
+    {
+      "seq": 14,
+      "object": "K=3,θ_P=0.015,h=1",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 15,
+      "object": "K=3,θ_P=0.015,h=3",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 16,
+      "object": "K=3,θ_P=0.015,h=5",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 17,
+      "object": "K=3,θ_P=0.02,h=1",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 18,
+      "object": "K=3,θ_P=0.02,h=3",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 19,
+      "object": "K=3,θ_P=0.02,h=5",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 20,
+      "object": "K=3,θ_P=0.025,h=1",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 21,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 22,
+      "object": "K=3,θ_P=0.025,h=5",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 23,
+      "object": "K=5,θ_P=0.015,h=1",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 24,
+      "object": "K=5,θ_P=0.015,h=3",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 25,
+      "object": "K=5,θ_P=0.015,h=5",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 26,
+      "object": "K=5,θ_P=0.02,h=1",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 27,
+      "object": "K=5,θ_P=0.02,h=3",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 28,
+      "object": "K=5,θ_P=0.02,h=5",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 29,
+      "object": "K=5,θ_P=0.025,h=1",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 30,
+      "object": "K=5,θ_P=0.025,h=3",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 31,
+      "object": "K=5,θ_P=0.025,h=5",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 32,
+      "object": "K=10,θ_P=0.015,h=1",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 33,
+      "object": "K=10,θ_P=0.015,h=3",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 34,
+      "object": "K=10,θ_P=0.015,h=5",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 35,
+      "object": "K=10,θ_P=0.02,h=1",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 36,
+      "object": "K=10,θ_P=0.02,h=3",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 37,
+      "object": "K=10,θ_P=0.02,h=5",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 38,
+      "object": "K=10,θ_P=0.025,h=1",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 39,
+      "object": "K=10,θ_P=0.025,h=3",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 40,
+      "object": "K=10,θ_P=0.025,h=5",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 41,
+      "object": "主参照",
+      "field": "收敛（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 42,
+      "object": "一直持有",
+      "field": "净值",
+      "stage": "一直持有",
+      "event": "performance"
+    },
+    {
+      "seq": 44,
+      "object": "主参照",
+      "field": "逐日状态",
+      "stage": "主参照",
+      "event": "performance"
+    },
+    {
+      "seq": 45,
+      "object": "主参照",
+      "field": "信号",
+      "stage": "主参照",
+      "event": "performance"
+    },
+    {
+      "seq": 46,
+      "object": "主参照",
+      "field": "计划目标",
+      "stage": "主参照",
+      "event": "performance"
+    },
+    {
+      "seq": 47,
+      "object": "主参照",
+      "field": "净值",
+      "stage": "主参照",
+      "event": "performance"
+    },
+    {
+      "seq": 48,
+      "object": "主参照",
+      "field": "执行政策",
+      "stage": "主参照",
+      "event": "performance"
+    },
+    {
+      "seq": 49,
+      "object": "K=3,θ_P=0.015,h=1",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 50,
+      "object": "K=3,θ_P=0.015,h=1",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 51,
+      "object": "K=3,θ_P=0.015,h=1",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 52,
+      "object": "K=3,θ_P=0.015,h=1",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 53,
+      "object": "K=3,θ_P=0.015,h=1",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 54,
+      "object": "K=3,θ_P=0.015,h=1",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 55,
+      "object": "K=3,θ_P=0.015,h=1",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 56,
+      "object": "K=3,θ_P=0.015,h=1",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 57,
+      "object": "K=3,θ_P=0.015,h=1",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 58,
+      "object": "K=3,θ_P=0.015,h=1",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 59,
+      "object": "K=3,θ_P=0.015,h=1",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 60,
+      "object": "K=3,θ_P=0.015,h=3",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 61,
+      "object": "K=3,θ_P=0.015,h=3",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 62,
+      "object": "K=3,θ_P=0.015,h=3",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 63,
+      "object": "K=3,θ_P=0.015,h=3",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 64,
+      "object": "K=3,θ_P=0.015,h=3",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 65,
+      "object": "K=3,θ_P=0.015,h=3",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 66,
+      "object": "K=3,θ_P=0.015,h=3",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 67,
+      "object": "K=3,θ_P=0.015,h=3",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 68,
+      "object": "K=3,θ_P=0.015,h=3",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 69,
+      "object": "K=3,θ_P=0.015,h=3",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 70,
+      "object": "K=3,θ_P=0.015,h=3",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 71,
+      "object": "K=3,θ_P=0.015,h=5",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 72,
+      "object": "K=3,θ_P=0.015,h=5",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 73,
+      "object": "K=3,θ_P=0.015,h=5",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 74,
+      "object": "K=3,θ_P=0.015,h=5",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 75,
+      "object": "K=3,θ_P=0.015,h=5",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 76,
+      "object": "K=3,θ_P=0.015,h=5",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 77,
+      "object": "K=3,θ_P=0.015,h=5",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 78,
+      "object": "K=3,θ_P=0.015,h=5",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 79,
+      "object": "K=3,θ_P=0.015,h=5",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 80,
+      "object": "K=3,θ_P=0.015,h=5",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 81,
+      "object": "K=3,θ_P=0.015,h=5",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 82,
+      "object": "K=3,θ_P=0.02,h=1",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 83,
+      "object": "K=3,θ_P=0.02,h=1",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 84,
+      "object": "K=3,θ_P=0.02,h=1",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 85,
+      "object": "K=3,θ_P=0.02,h=1",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 86,
+      "object": "K=3,θ_P=0.02,h=1",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 87,
+      "object": "K=3,θ_P=0.02,h=1",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 88,
+      "object": "K=3,θ_P=0.02,h=1",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 89,
+      "object": "K=3,θ_P=0.02,h=1",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 90,
+      "object": "K=3,θ_P=0.02,h=1",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 91,
+      "object": "K=3,θ_P=0.02,h=1",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 92,
+      "object": "K=3,θ_P=0.02,h=1",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 93,
+      "object": "K=3,θ_P=0.02,h=3",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 94,
+      "object": "K=3,θ_P=0.02,h=3",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 95,
+      "object": "K=3,θ_P=0.02,h=3",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 96,
+      "object": "K=3,θ_P=0.02,h=3",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 97,
+      "object": "K=3,θ_P=0.02,h=3",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 98,
+      "object": "K=3,θ_P=0.02,h=3",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 99,
+      "object": "K=3,θ_P=0.02,h=3",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 100,
+      "object": "K=3,θ_P=0.02,h=3",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 101,
+      "object": "K=3,θ_P=0.02,h=3",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 102,
+      "object": "K=3,θ_P=0.02,h=3",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 103,
+      "object": "K=3,θ_P=0.02,h=3",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 104,
+      "object": "K=3,θ_P=0.02,h=5",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 105,
+      "object": "K=3,θ_P=0.02,h=5",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 106,
+      "object": "K=3,θ_P=0.02,h=5",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 107,
+      "object": "K=3,θ_P=0.02,h=5",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 108,
+      "object": "K=3,θ_P=0.02,h=5",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 109,
+      "object": "K=3,θ_P=0.02,h=5",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 110,
+      "object": "K=3,θ_P=0.02,h=5",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 111,
+      "object": "K=3,θ_P=0.02,h=5",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 112,
+      "object": "K=3,θ_P=0.02,h=5",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 113,
+      "object": "K=3,θ_P=0.02,h=5",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 114,
+      "object": "K=3,θ_P=0.02,h=5",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 115,
+      "object": "K=3,θ_P=0.025,h=1",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 116,
+      "object": "K=3,θ_P=0.025,h=1",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 117,
+      "object": "K=3,θ_P=0.025,h=1",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 118,
+      "object": "K=3,θ_P=0.025,h=1",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 119,
+      "object": "K=3,θ_P=0.025,h=1",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 120,
+      "object": "K=3,θ_P=0.025,h=1",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 121,
+      "object": "K=3,θ_P=0.025,h=1",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 122,
+      "object": "K=3,θ_P=0.025,h=1",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 123,
+      "object": "K=3,θ_P=0.025,h=1",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 124,
+      "object": "K=3,θ_P=0.025,h=1",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 125,
+      "object": "K=3,θ_P=0.025,h=1",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 126,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 127,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 128,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 129,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 130,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 131,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 132,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 133,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 134,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 135,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 136,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 137,
+      "object": "K=3,θ_P=0.025,h=5",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 138,
+      "object": "K=3,θ_P=0.025,h=5",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 139,
+      "object": "K=3,θ_P=0.025,h=5",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 140,
+      "object": "K=3,θ_P=0.025,h=5",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 141,
+      "object": "K=3,θ_P=0.025,h=5",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 142,
+      "object": "K=3,θ_P=0.025,h=5",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 143,
+      "object": "K=3,θ_P=0.025,h=5",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 144,
+      "object": "K=3,θ_P=0.025,h=5",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 145,
+      "object": "K=3,θ_P=0.025,h=5",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 146,
+      "object": "K=3,θ_P=0.025,h=5",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 147,
+      "object": "K=3,θ_P=0.025,h=5",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 148,
+      "object": "K=5,θ_P=0.015,h=1",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 149,
+      "object": "K=5,θ_P=0.015,h=1",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 150,
+      "object": "K=5,θ_P=0.015,h=1",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 151,
+      "object": "K=5,θ_P=0.015,h=1",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 152,
+      "object": "K=5,θ_P=0.015,h=1",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 153,
+      "object": "K=5,θ_P=0.015,h=1",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 154,
+      "object": "K=5,θ_P=0.015,h=1",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 155,
+      "object": "K=5,θ_P=0.015,h=1",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 156,
+      "object": "K=5,θ_P=0.015,h=1",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 157,
+      "object": "K=5,θ_P=0.015,h=1",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 158,
+      "object": "K=5,θ_P=0.015,h=1",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 159,
+      "object": "K=5,θ_P=0.015,h=3",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 160,
+      "object": "K=5,θ_P=0.015,h=3",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 161,
+      "object": "K=5,θ_P=0.015,h=3",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 162,
+      "object": "K=5,θ_P=0.015,h=3",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 163,
+      "object": "K=5,θ_P=0.015,h=3",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 164,
+      "object": "K=5,θ_P=0.015,h=3",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 165,
+      "object": "K=5,θ_P=0.015,h=3",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 166,
+      "object": "K=5,θ_P=0.015,h=3",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 167,
+      "object": "K=5,θ_P=0.015,h=3",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 168,
+      "object": "K=5,θ_P=0.015,h=3",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 169,
+      "object": "K=5,θ_P=0.015,h=3",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 170,
+      "object": "K=5,θ_P=0.015,h=5",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 171,
+      "object": "K=5,θ_P=0.015,h=5",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 172,
+      "object": "K=5,θ_P=0.015,h=5",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 173,
+      "object": "K=5,θ_P=0.015,h=5",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 174,
+      "object": "K=5,θ_P=0.015,h=5",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 175,
+      "object": "K=5,θ_P=0.015,h=5",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 176,
+      "object": "K=5,θ_P=0.015,h=5",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 177,
+      "object": "K=5,θ_P=0.015,h=5",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 178,
+      "object": "K=5,θ_P=0.015,h=5",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 179,
+      "object": "K=5,θ_P=0.015,h=5",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 180,
+      "object": "K=5,θ_P=0.015,h=5",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 181,
+      "object": "K=5,θ_P=0.02,h=1",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 182,
+      "object": "K=5,θ_P=0.02,h=1",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 183,
+      "object": "K=5,θ_P=0.02,h=1",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 184,
+      "object": "K=5,θ_P=0.02,h=1",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 185,
+      "object": "K=5,θ_P=0.02,h=1",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 186,
+      "object": "K=5,θ_P=0.02,h=1",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 187,
+      "object": "K=5,θ_P=0.02,h=1",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 188,
+      "object": "K=5,θ_P=0.02,h=1",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 189,
+      "object": "K=5,θ_P=0.02,h=1",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 190,
+      "object": "K=5,θ_P=0.02,h=1",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 191,
+      "object": "K=5,θ_P=0.02,h=1",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 192,
+      "object": "K=5,θ_P=0.02,h=3",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 193,
+      "object": "K=5,θ_P=0.02,h=3",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 194,
+      "object": "K=5,θ_P=0.02,h=3",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 195,
+      "object": "K=5,θ_P=0.02,h=3",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 196,
+      "object": "K=5,θ_P=0.02,h=3",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 197,
+      "object": "K=5,θ_P=0.02,h=3",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 198,
+      "object": "K=5,θ_P=0.02,h=3",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 199,
+      "object": "K=5,θ_P=0.02,h=3",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 200,
+      "object": "K=5,θ_P=0.02,h=3",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 201,
+      "object": "K=5,θ_P=0.02,h=3",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 202,
+      "object": "K=5,θ_P=0.02,h=3",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 203,
+      "object": "K=5,θ_P=0.02,h=5",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 204,
+      "object": "K=5,θ_P=0.02,h=5",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 205,
+      "object": "K=5,θ_P=0.02,h=5",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 206,
+      "object": "K=5,θ_P=0.02,h=5",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 207,
+      "object": "K=5,θ_P=0.02,h=5",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 208,
+      "object": "K=5,θ_P=0.02,h=5",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 209,
+      "object": "K=5,θ_P=0.02,h=5",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 210,
+      "object": "K=5,θ_P=0.02,h=5",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 211,
+      "object": "K=5,θ_P=0.02,h=5",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 212,
+      "object": "K=5,θ_P=0.02,h=5",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 213,
+      "object": "K=5,θ_P=0.02,h=5",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 214,
+      "object": "K=5,θ_P=0.025,h=1",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 215,
+      "object": "K=5,θ_P=0.025,h=1",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 216,
+      "object": "K=5,θ_P=0.025,h=1",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 217,
+      "object": "K=5,θ_P=0.025,h=1",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 218,
+      "object": "K=5,θ_P=0.025,h=1",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 219,
+      "object": "K=5,θ_P=0.025,h=1",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 220,
+      "object": "K=5,θ_P=0.025,h=1",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 221,
+      "object": "K=5,θ_P=0.025,h=1",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 222,
+      "object": "K=5,θ_P=0.025,h=1",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 223,
+      "object": "K=5,θ_P=0.025,h=1",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 224,
+      "object": "K=5,θ_P=0.025,h=1",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 225,
+      "object": "K=5,θ_P=0.025,h=3",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 226,
+      "object": "K=5,θ_P=0.025,h=3",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 227,
+      "object": "K=5,θ_P=0.025,h=3",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 228,
+      "object": "K=5,θ_P=0.025,h=3",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 229,
+      "object": "K=5,θ_P=0.025,h=3",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 230,
+      "object": "K=5,θ_P=0.025,h=3",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 231,
+      "object": "K=5,θ_P=0.025,h=3",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 232,
+      "object": "K=5,θ_P=0.025,h=3",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 233,
+      "object": "K=5,θ_P=0.025,h=3",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 234,
+      "object": "K=5,θ_P=0.025,h=3",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 235,
+      "object": "K=5,θ_P=0.025,h=3",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 236,
+      "object": "K=5,θ_P=0.025,h=5",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 237,
+      "object": "K=5,θ_P=0.025,h=5",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 238,
+      "object": "K=5,θ_P=0.025,h=5",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 239,
+      "object": "K=5,θ_P=0.025,h=5",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 240,
+      "object": "K=5,θ_P=0.025,h=5",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 241,
+      "object": "K=5,θ_P=0.025,h=5",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 242,
+      "object": "K=5,θ_P=0.025,h=5",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 243,
+      "object": "K=5,θ_P=0.025,h=5",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 244,
+      "object": "K=5,θ_P=0.025,h=5",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 245,
+      "object": "K=5,θ_P=0.025,h=5",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 246,
+      "object": "K=5,θ_P=0.025,h=5",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 247,
+      "object": "K=10,θ_P=0.015,h=1",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 248,
+      "object": "K=10,θ_P=0.015,h=1",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 249,
+      "object": "K=10,θ_P=0.015,h=1",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 250,
+      "object": "K=10,θ_P=0.015,h=1",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 251,
+      "object": "K=10,θ_P=0.015,h=1",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 252,
+      "object": "K=10,θ_P=0.015,h=1",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 253,
+      "object": "K=10,θ_P=0.015,h=1",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 254,
+      "object": "K=10,θ_P=0.015,h=1",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 255,
+      "object": "K=10,θ_P=0.015,h=1",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 256,
+      "object": "K=10,θ_P=0.015,h=1",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 257,
+      "object": "K=10,θ_P=0.015,h=1",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 258,
+      "object": "K=10,θ_P=0.015,h=3",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 259,
+      "object": "K=10,θ_P=0.015,h=3",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 260,
+      "object": "K=10,θ_P=0.015,h=3",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 261,
+      "object": "K=10,θ_P=0.015,h=3",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 262,
+      "object": "K=10,θ_P=0.015,h=3",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 263,
+      "object": "K=10,θ_P=0.015,h=3",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 264,
+      "object": "K=10,θ_P=0.015,h=3",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 265,
+      "object": "K=10,θ_P=0.015,h=3",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 266,
+      "object": "K=10,θ_P=0.015,h=3",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 267,
+      "object": "K=10,θ_P=0.015,h=3",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 268,
+      "object": "K=10,θ_P=0.015,h=3",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 269,
+      "object": "K=10,θ_P=0.015,h=5",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 270,
+      "object": "K=10,θ_P=0.015,h=5",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 271,
+      "object": "K=10,θ_P=0.015,h=5",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 272,
+      "object": "K=10,θ_P=0.015,h=5",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 273,
+      "object": "K=10,θ_P=0.015,h=5",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 274,
+      "object": "K=10,θ_P=0.015,h=5",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 275,
+      "object": "K=10,θ_P=0.015,h=5",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 276,
+      "object": "K=10,θ_P=0.015,h=5",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 277,
+      "object": "K=10,θ_P=0.015,h=5",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 278,
+      "object": "K=10,θ_P=0.015,h=5",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 279,
+      "object": "K=10,θ_P=0.015,h=5",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 280,
+      "object": "K=10,θ_P=0.02,h=1",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 281,
+      "object": "K=10,θ_P=0.02,h=1",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 282,
+      "object": "K=10,θ_P=0.02,h=1",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 283,
+      "object": "K=10,θ_P=0.02,h=1",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 284,
+      "object": "K=10,θ_P=0.02,h=1",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 285,
+      "object": "K=10,θ_P=0.02,h=1",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 286,
+      "object": "K=10,θ_P=0.02,h=1",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 287,
+      "object": "K=10,θ_P=0.02,h=1",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 288,
+      "object": "K=10,θ_P=0.02,h=1",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 289,
+      "object": "K=10,θ_P=0.02,h=1",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 290,
+      "object": "K=10,θ_P=0.02,h=1",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 291,
+      "object": "K=10,θ_P=0.02,h=3",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 292,
+      "object": "K=10,θ_P=0.02,h=3",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 293,
+      "object": "K=10,θ_P=0.02,h=3",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 294,
+      "object": "K=10,θ_P=0.02,h=3",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 295,
+      "object": "K=10,θ_P=0.02,h=3",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 296,
+      "object": "K=10,θ_P=0.02,h=3",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 297,
+      "object": "K=10,θ_P=0.02,h=3",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 298,
+      "object": "K=10,θ_P=0.02,h=3",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 299,
+      "object": "K=10,θ_P=0.02,h=3",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 300,
+      "object": "K=10,θ_P=0.02,h=3",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 301,
+      "object": "K=10,θ_P=0.02,h=3",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 302,
+      "object": "K=10,θ_P=0.02,h=5",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 303,
+      "object": "K=10,θ_P=0.02,h=5",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 304,
+      "object": "K=10,θ_P=0.02,h=5",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 305,
+      "object": "K=10,θ_P=0.02,h=5",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 306,
+      "object": "K=10,θ_P=0.02,h=5",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 307,
+      "object": "K=10,θ_P=0.02,h=5",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 308,
+      "object": "K=10,θ_P=0.02,h=5",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 309,
+      "object": "K=10,θ_P=0.02,h=5",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 310,
+      "object": "K=10,θ_P=0.02,h=5",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 311,
+      "object": "K=10,θ_P=0.02,h=5",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 312,
+      "object": "K=10,θ_P=0.02,h=5",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 313,
+      "object": "K=10,θ_P=0.025,h=1",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 314,
+      "object": "K=10,θ_P=0.025,h=1",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 315,
+      "object": "K=10,θ_P=0.025,h=1",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 316,
+      "object": "K=10,θ_P=0.025,h=1",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 317,
+      "object": "K=10,θ_P=0.025,h=1",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 318,
+      "object": "K=10,θ_P=0.025,h=1",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 319,
+      "object": "K=10,θ_P=0.025,h=1",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 320,
+      "object": "K=10,θ_P=0.025,h=1",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 321,
+      "object": "K=10,θ_P=0.025,h=1",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 322,
+      "object": "K=10,θ_P=0.025,h=1",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 323,
+      "object": "K=10,θ_P=0.025,h=1",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 324,
+      "object": "K=10,θ_P=0.025,h=3",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 325,
+      "object": "K=10,θ_P=0.025,h=3",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 326,
+      "object": "K=10,θ_P=0.025,h=3",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 327,
+      "object": "K=10,θ_P=0.025,h=3",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 328,
+      "object": "K=10,θ_P=0.025,h=3",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 329,
+      "object": "K=10,θ_P=0.025,h=3",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 330,
+      "object": "K=10,θ_P=0.025,h=3",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 331,
+      "object": "K=10,θ_P=0.025,h=3",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 332,
+      "object": "K=10,θ_P=0.025,h=3",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 333,
+      "object": "K=10,θ_P=0.025,h=3",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 334,
+      "object": "K=10,θ_P=0.025,h=3",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 335,
+      "object": "K=10,θ_P=0.025,h=5",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 336,
+      "object": "K=10,θ_P=0.025,h=5",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 337,
+      "object": "K=10,θ_P=0.025,h=5",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 338,
+      "object": "K=10,θ_P=0.025,h=5",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 339,
+      "object": "K=10,θ_P=0.025,h=5",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 340,
+      "object": "K=10,θ_P=0.025,h=5",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 341,
+      "object": "K=10,θ_P=0.025,h=5",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 342,
+      "object": "K=10,θ_P=0.025,h=5",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 343,
+      "object": "K=10,θ_P=0.025,h=5",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 344,
+      "object": "K=10,θ_P=0.025,h=5",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 345,
+      "object": "K=10,θ_P=0.025,h=5",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 346,
+      "object": "主参照",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 347,
+      "object": "K=3,θ_P=0.015,h=1",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 348,
+      "object": "K=3,θ_P=0.015,h=1",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 349,
+      "object": "K=3,θ_P=0.015,h=3",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 350,
+      "object": "K=3,θ_P=0.015,h=3",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 351,
+      "object": "K=3,θ_P=0.015,h=5",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 352,
+      "object": "K=3,θ_P=0.015,h=5",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 353,
+      "object": "K=3,θ_P=0.02,h=1",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 354,
+      "object": "K=3,θ_P=0.02,h=1",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 355,
+      "object": "K=3,θ_P=0.02,h=3",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 356,
+      "object": "K=3,θ_P=0.02,h=3",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 357,
+      "object": "K=3,θ_P=0.02,h=5",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 358,
+      "object": "K=3,θ_P=0.02,h=5",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 359,
+      "object": "K=3,θ_P=0.025,h=1",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 360,
+      "object": "K=3,θ_P=0.025,h=1",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 361,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 362,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 363,
+      "object": "K=3,θ_P=0.025,h=5",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 364,
+      "object": "K=3,θ_P=0.025,h=5",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 365,
+      "object": "K=5,θ_P=0.015,h=1",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 366,
+      "object": "K=5,θ_P=0.015,h=1",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 367,
+      "object": "K=5,θ_P=0.015,h=3",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 368,
+      "object": "K=5,θ_P=0.015,h=3",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 369,
+      "object": "K=5,θ_P=0.015,h=5",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 370,
+      "object": "K=5,θ_P=0.015,h=5",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 371,
+      "object": "K=5,θ_P=0.02,h=1",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 372,
+      "object": "K=5,θ_P=0.02,h=1",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 373,
+      "object": "K=5,θ_P=0.02,h=3",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 374,
+      "object": "K=5,θ_P=0.02,h=3",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 375,
+      "object": "K=5,θ_P=0.02,h=5",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 376,
+      "object": "K=5,θ_P=0.02,h=5",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 377,
+      "object": "K=5,θ_P=0.025,h=1",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 378,
+      "object": "K=5,θ_P=0.025,h=1",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 379,
+      "object": "K=5,θ_P=0.025,h=3",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 380,
+      "object": "K=5,θ_P=0.025,h=3",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 381,
+      "object": "K=5,θ_P=0.025,h=5",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 382,
+      "object": "K=5,θ_P=0.025,h=5",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 383,
+      "object": "K=10,θ_P=0.015,h=1",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 384,
+      "object": "K=10,θ_P=0.015,h=1",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 385,
+      "object": "K=10,θ_P=0.015,h=3",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 386,
+      "object": "K=10,θ_P=0.015,h=3",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 387,
+      "object": "K=10,θ_P=0.015,h=5",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 388,
+      "object": "K=10,θ_P=0.015,h=5",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 389,
+      "object": "K=10,θ_P=0.02,h=1",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 390,
+      "object": "K=10,θ_P=0.02,h=1",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 391,
+      "object": "K=10,θ_P=0.02,h=3",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 392,
+      "object": "K=10,θ_P=0.02,h=3",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 393,
+      "object": "K=10,θ_P=0.02,h=5",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 394,
+      "object": "K=10,θ_P=0.02,h=5",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 395,
+      "object": "K=10,θ_P=0.025,h=1",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 396,
+      "object": "K=10,θ_P=0.025,h=1",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 397,
+      "object": "K=10,θ_P=0.025,h=3",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 398,
+      "object": "K=10,θ_P=0.025,h=3",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 399,
+      "object": "K=10,θ_P=0.025,h=5",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 400,
+      "object": "K=10,θ_P=0.025,h=5",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 401,
+      "object": "主参照",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 402,
+      "object": "SPX、QQQ",
+      "field": "回撤",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 405,
+      "object": "选择程序",
+      "field": "选择结果",
+      "stage": "选择",
+      "event": "performance"
+    },
+    {
+      "seq": 408,
+      "object": "描述性对照",
+      "field": "均线对照",
+      "stage": "描述性对照",
+      "event": "performance"
+    },
+    {
+      "seq": 409,
+      "object": "描述性对照",
+      "field": "恒定仓位",
+      "stage": "描述性对照",
+      "event": "performance"
+    },
+    {
+      "seq": 410,
+      "object": "描述性对照",
+      "field": "状态重建",
+      "stage": "描述性对照",
+      "event": "performance"
+    },
+    {
+      "seq": 411,
+      "object": "描述性对照",
+      "field": "暴露替换",
+      "stage": "描述性对照",
+      "event": "performance"
+    },
+    {
+      "seq": 412,
+      "object": "描述性对照",
+      "field": "市场环境",
+      "stage": "描述性对照",
+      "event": "performance"
+    },
+    {
+      "seq": 413,
+      "object": "描述性对照",
+      "field": "报告统计",
+      "stage": "描述性对照",
+      "event": "performance"
+    },
+    {
+      "seq": 416,
+      "object": "对账",
+      "field": "对账结果",
+      "stage": "对账",
+      "event": "performance"
+    },
+    {
+      "seq": 419,
+      "object": "序列化",
+      "field": "汇总文件",
+      "stage": "序列化",
+      "event": "performance"
+    },
+    {
+      "seq": 420,
+      "object": "序列化",
+      "field": "汇总表",
+      "stage": "序列化",
+      "event": "performance"
+    },
+    {
+      "seq": 421,
+      "object": "序列化",
+      "field": "逐日明细",
+      "stage": "序列化",
+      "event": "performance"
+    }
+  ],
+  "performance_info_status": "已产生",
+  "stage_trace": [
+    {
+      "seq": 1,
+      "stage": "预检",
+      "action": "进入"
+    },
+    {
+      "seq": 2,
+      "stage": "预检",
+      "action": "离开"
+    },
+    {
+      "seq": 3,
+      "stage": "建暂存目录",
+      "action": "进入"
+    },
+    {
+      "seq": 4,
+      "stage": "建暂存目录",
+      "action": "离开"
+    },
+    {
+      "seq": 5,
+      "stage": "加载配置",
+      "action": "进入"
+    },
+    {
+      "seq": 6,
+      "stage": "加载配置",
+      "action": "离开"
+    },
+    {
+      "seq": 7,
+      "stage": "读取行情",
+      "action": "进入"
+    },
+    {
+      "seq": 8,
+      "stage": "读取行情",
+      "action": "离开"
+    },
+    {
+      "seq": 9,
+      "stage": "组装快照",
+      "action": "进入"
+    },
+    {
+      "seq": 10,
+      "stage": "组装快照",
+      "action": "离开"
+    },
+    {
+      "seq": 11,
+      "stage": "组合层",
+      "action": "进入"
+    },
+    {
+      "seq": 403,
+      "stage": "组合层",
+      "action": "离开"
+    },
+    {
+      "seq": 404,
+      "stage": "选择",
+      "action": "进入"
+    },
+    {
+      "seq": 406,
+      "stage": "选择",
+      "action": "离开"
+    },
+    {
+      "seq": 407,
+      "stage": "描述性对照",
+      "action": "进入"
+    },
+    {
+      "seq": 414,
+      "stage": "描述性对照",
+      "action": "离开"
+    },
+    {
+      "seq": 415,
+      "stage": "对账",
+      "action": "进入"
+    },
+    {
+      "seq": 417,
+      "stage": "对账",
+      "action": "离开"
+    },
+    {
+      "seq": 418,
+      "stage": "序列化",
+      "action": "进入"
+    },
+    {
+      "seq": 422,
+      "stage": "序列化",
+      "action": "离开"
+    },
+    {
+      "seq": 423,
+      "stage": "写出",
+      "action": "进入"
+    }
+  ],
+  "exception": null,
+  "completed_results": [
+    "run_record.json",
+    "input_snapshot.csv.gz",
+    "window.json",
+    "selection.json",
+    "reconciliation.json",
+    "descriptive.json",
+    "candidates_summary.csv",
+    "reference_summary.csv",
+    "segments.csv",
+    "environments.csv",
+    "exposure_substitution.csv",
+    "daily_signals.csv.gz",
+    "daily_targets.csv.gz",
+    "daily_nav.csv.gz",
+    "daily_policy.csv.gz",
+    "channel_events.csv.gz",
+    "system_transitions.csv.gz",
+    "switches.csv.gz",
+    "switch_stages.csv",
+    "r2_events.csv.gz",
+    "r2_judgements.csv.gz",
+    "segment_ledgers.csv.gz",
+    "diagnostics.csv.gz",
+    "report.md"
+  ],
+  "usage_restriction": [],
+  "window_coverage": {
+    "condition": "axis[j0] <= 2000-03-24",
+    "first_day": "1999-09-07",
+    "satisfied": true,
+    "status": "已判定"
+  },
+  "s21_facts": {
+    "读入行情": [
+      "QQQ",
+      "SPX"
+    ],
+    "严格解析完成": [
+      "QQQ",
+      "SPX"
+    ],
+    "诊断解析完成": [],
+    "组合层已调用": true,
+    "表现信息状态": "已产生",
+    "s21_class": "待核对"
+  }
+}

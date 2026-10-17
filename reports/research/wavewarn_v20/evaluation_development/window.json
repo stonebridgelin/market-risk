@@ -1,0 +1,380 @@
+{
+  "purpose": "开发期选参",
+  "last_day": "2016-12-30",
+  "histories": {
+    "SPX": "1990-01-02",
+    "QQQ": "1999-03-10"
+  },
+  "candidates_requested": 27,
+  "stop": null,
+  "window": {
+    "t0": 2383,
+    "t0_day": "1999-06-08",
+    "j0": 2446,
+    "j0_min": 2446,
+    "kappa_all": 2393,
+    "kappa_all_day": "1999-06-22",
+    "reference_index": 2385,
+    "reference_day": "1999-06-10",
+    "e_index": 6804,
+    "n": 4358,
+    "first_day": "1999-09-07",
+    "last_day": "2016-12-30",
+    "start_basis": "共同起点 j₀ = max(t0 + 63, κ_全 + 1)，按登记 27 组与主参照计算",
+    "history_first": "1990-01-02",
+    "history_last": "2016-12-30",
+    "convergences": [
+      {
+        "object": "K=3,θ_P=0.015,h=1",
+        "channels": {
+          "P_SPX": 2385,
+          "P_QQQ": 2385,
+          "PR_SPX": 2385,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2385,
+        "system_index": 2387,
+        "system_day": "1999-06-14"
+      },
+      {
+        "object": "K=3,θ_P=0.015,h=3",
+        "channels": {
+          "P_SPX": 2385,
+          "P_QQQ": 2385,
+          "PR_SPX": 2385,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2385,
+        "system_index": 2389,
+        "system_day": "1999-06-16"
+      },
+      {
+        "object": "K=3,θ_P=0.015,h=5",
+        "channels": {
+          "P_SPX": 2385,
+          "P_QQQ": 2385,
+          "PR_SPX": 2385,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2385,
+        "system_index": 2391,
+        "system_day": "1999-06-18"
+      },
+      {
+        "object": "K=3,θ_P=0.02,h=1",
+        "channels": {
+          "P_SPX": 2385,
+          "P_QQQ": 2385,
+          "PR_SPX": 2386,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2386,
+        "system_index": 2388,
+        "system_day": "1999-06-15"
+      },
+      {
+        "object": "K=3,θ_P=0.02,h=3",
+        "channels": {
+          "P_SPX": 2385,
+          "P_QQQ": 2385,
+          "PR_SPX": 2386,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2386,
+        "system_index": 2390,
+        "system_day": "1999-06-17"
+      },
+      {
+        "object": "K=3,θ_P=0.02,h=5",
+        "channels": {
+          "P_SPX": 2385,
+          "P_QQQ": 2385,
+          "PR_SPX": 2386,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2386,
+        "system_index": 2392,
+        "system_day": "1999-06-21"
+      },
+      {
+        "object": "K=3,θ_P=0.025,h=1",
+        "channels": {
+          "P_SPX": 2385,
+          "P_QQQ": 2385,
+          "PR_SPX": 2385,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2385,
+        "system_index": 2386,
+        "system_day": "1999-06-11"
+      },
+      {
+        "object": "K=3,θ_P=0.025,h=3",
+        "channels": {
+          "P_SPX": 2385,
+          "P_QQQ": 2385,
+          "PR_SPX": 2385,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2385,
+        "system_index": 2386,
+        "system_day": "1999-06-11"
+      },
+      {
+        "object": "K=3,θ_P=0.025,h=5",
+        "channels": {
+          "P_SPX": 2385,
+          "P_QQQ": 2385,
+          "PR_SPX": 2385,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2385,
+        "system_index": 2386,
+        "system_day": "1999-06-11"
+      },
+      {
+        "object": "K=5,θ_P=0.015,h=1",
+        "channels": {
+          "P_SPX": 2385,
+          "P_QQQ": 2385,
+          "PR_SPX": 2385,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2385,
+        "system_index": 2387,
+        "system_day": "1999-06-14"
+      },
+      {
+        "object": "K=5,θ_P=0.015,h=3",
+        "channels": {
+          "P_SPX": 2385,
+          "P_QQQ": 2385,
+          "PR_SPX": 2385,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2385,
+        "system_index": 2389,
+        "system_day": "1999-06-16"
+      },
+      {
+        "object": "K=5,θ_P=0.015,h=5",
+        "channels": {
+          "P_SPX": 2385,
+          "P_QQQ": 2385,
+          "PR_SPX": 2385,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2385,
+        "system_index": 2391,
+        "system_day": "1999-06-18"
+      },
+      {
+        "object": "K=5,θ_P=0.02,h=1",
+        "channels": {
+          "P_SPX": 2385,
+          "P_QQQ": 2385,
+          "PR_SPX": 2386,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2386,
+        "system_index": 2388,
+        "system_day": "1999-06-15"
+      },
+      {
+        "object": "K=5,θ_P=0.02,h=3",
+        "channels": {
+          "P_SPX": 2385,
+          "P_QQQ": 2385,
+          "PR_SPX": 2386,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2386,
+        "system_index": 2390,
+        "system_day": "1999-06-17"
+      },
+      {
+        "object": "K=5,θ_P=0.02,h=5",
+        "channels": {
+          "P_SPX": 2385,
+          "P_QQQ": 2385,
+          "PR_SPX": 2386,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2386,
+        "system_index": 2392,
+        "system_day": "1999-06-21"
+      },
+      {
+        "object": "K=5,θ_P=0.025,h=1",
+        "channels": {
+          "P_SPX": 2385,
+          "P_QQQ": 2385,
+          "PR_SPX": 2385,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2385,
+        "system_index": 2386,
+        "system_day": "1999-06-11"
+      },
+      {
+        "object": "K=5,θ_P=0.025,h=3",
+        "channels": {
+          "P_SPX": 2385,
+          "P_QQQ": 2385,
+          "PR_SPX": 2385,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2385,
+        "system_index": 2386,
+        "system_day": "1999-06-11"
+      },
+      {
+        "object": "K=5,θ_P=0.025,h=5",
+        "channels": {
+          "P_SPX": 2385,
+          "P_QQQ": 2385,
+          "PR_SPX": 2385,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2385,
+        "system_index": 2386,
+        "system_day": "1999-06-11"
+      },
+      {
+        "object": "K=10,θ_P=0.015,h=1",
+        "channels": {
+          "P_SPX": 2386,
+          "P_QQQ": 2385,
+          "PR_SPX": 2386,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2386,
+        "system_index": 2388,
+        "system_day": "1999-06-15"
+      },
+      {
+        "object": "K=10,θ_P=0.015,h=3",
+        "channels": {
+          "P_SPX": 2386,
+          "P_QQQ": 2385,
+          "PR_SPX": 2386,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2386,
+        "system_index": 2390,
+        "system_day": "1999-06-17"
+      },
+      {
+        "object": "K=10,θ_P=0.015,h=5",
+        "channels": {
+          "P_SPX": 2386,
+          "P_QQQ": 2385,
+          "PR_SPX": 2386,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2386,
+        "system_index": 2392,
+        "system_day": "1999-06-21"
+      },
+      {
+        "object": "K=10,θ_P=0.02,h=1",
+        "channels": {
+          "P_SPX": 2386,
+          "P_QQQ": 2385,
+          "PR_SPX": 2385,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2386,
+        "system_index": 2388,
+        "system_day": "1999-06-15"
+      },
+      {
+        "object": "K=10,θ_P=0.02,h=3",
+        "channels": {
+          "P_SPX": 2386,
+          "P_QQQ": 2385,
+          "PR_SPX": 2385,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2386,
+        "system_index": 2390,
+        "system_day": "1999-06-17"
+      },
+      {
+        "object": "K=10,θ_P=0.02,h=5",
+        "channels": {
+          "P_SPX": 2386,
+          "P_QQQ": 2385,
+          "PR_SPX": 2385,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2386,
+        "system_index": 2392,
+        "system_day": "1999-06-21"
+      },
+      {
+        "object": "K=10,θ_P=0.025,h=1",
+        "channels": {
+          "P_SPX": 2386,
+          "P_QQQ": 2385,
+          "PR_SPX": 2387,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2387,
+        "system_index": 2389,
+        "system_day": "1999-06-16"
+      },
+      {
+        "object": "K=10,θ_P=0.025,h=3",
+        "channels": {
+          "P_SPX": 2386,
+          "P_QQQ": 2385,
+          "PR_SPX": 2387,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2387,
+        "system_index": 2391,
+        "system_day": "1999-06-18"
+      },
+      {
+        "object": "K=10,θ_P=0.025,h=5",
+        "channels": {
+          "P_SPX": 2386,
+          "P_QQQ": 2385,
+          "PR_SPX": 2387,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2387,
+        "system_index": 2393,
+        "system_day": "1999-06-22"
+      }
+    ]
+  }
+}

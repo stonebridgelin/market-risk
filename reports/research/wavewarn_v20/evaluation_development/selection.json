@@ -1,0 +1,350 @@
+{
+  "outcome": "选定",
+  "tolerance": 1e-10,
+  "selected": "K=3,θ_P=0.025,h=3",
+  "feasible": [
+    "K=3,θ_P=0.015,h=5",
+    "K=3,θ_P=0.02,h=5",
+    "K=3,θ_P=0.025,h=3",
+    "K=3,θ_P=0.025,h=5",
+    "K=5,θ_P=0.02,h=3",
+    "K=5,θ_P=0.02,h=5",
+    "K=5,θ_P=0.025,h=3",
+    "K=5,θ_P=0.025,h=5",
+    "K=10,θ_P=0.015,h=3",
+    "K=10,θ_P=0.015,h=5",
+    "K=10,θ_P=0.02,h=5",
+    "K=10,θ_P=0.025,h=3",
+    "K=10,θ_P=0.025,h=5"
+  ],
+  "maximum": 0.558134861102713,
+  "tied": [
+    "K=3,θ_P=0.025,h=3"
+  ],
+  "records": [
+    {
+      "order": 0,
+      "object": "K=3,θ_P=0.015,h=1",
+      "failed": false,
+      "r1": false,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.4373019185978365,
+      "switches": 1051
+    },
+    {
+      "order": 1,
+      "object": "K=3,θ_P=0.015,h=3",
+      "failed": false,
+      "r1": false,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.1996712681422584,
+      "switches": 728
+    },
+    {
+      "order": 2,
+      "object": "K=3,θ_P=0.015,h=5",
+      "failed": false,
+      "r1": true,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.20209696788751036,
+      "switches": 558
+    },
+    {
+      "order": 3,
+      "object": "K=3,θ_P=0.02,h=1",
+      "failed": false,
+      "r1": false,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.5584436088513507,
+      "switches": 973
+    },
+    {
+      "order": 4,
+      "object": "K=3,θ_P=0.02,h=3",
+      "failed": false,
+      "r1": false,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.38215936844510756,
+      "switches": 668
+    },
+    {
+      "order": 5,
+      "object": "K=3,θ_P=0.02,h=5",
+      "failed": false,
+      "r1": true,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.4336986587695158,
+      "switches": 490
+    },
+    {
+      "order": 6,
+      "object": "K=3,θ_P=0.025,h=1",
+      "failed": false,
+      "r1": false,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.865510762499426,
+      "switches": 796
+    },
+    {
+      "order": 7,
+      "object": "K=3,θ_P=0.025,h=3",
+      "failed": false,
+      "r1": true,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.558134861102713,
+      "switches": 550
+    },
+    {
+      "order": 8,
+      "object": "K=3,θ_P=0.025,h=5",
+      "failed": false,
+      "r1": true,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.38339795646008323,
+      "switches": 435
+    },
+    {
+      "order": 9,
+      "object": "K=5,θ_P=0.015,h=1",
+      "failed": false,
+      "r1": false,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.18044282948570003,
+      "switches": 921
+    },
+    {
+      "order": 10,
+      "object": "K=5,θ_P=0.015,h=3",
+      "failed": false,
+      "r1": false,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.2579197408179951,
+      "switches": 675
+    },
+    {
+      "order": 11,
+      "object": "K=5,θ_P=0.015,h=5",
+      "failed": false,
+      "r1": false,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.07031089087404334,
+      "switches": 503
+    },
+    {
+      "order": 12,
+      "object": "K=5,θ_P=0.02,h=1",
+      "failed": false,
+      "r1": false,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.2924541134975856,
+      "switches": 852
+    },
+    {
+      "order": 13,
+      "object": "K=5,θ_P=0.02,h=3",
+      "failed": false,
+      "r1": true,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.5081955104559338,
+      "switches": 609
+    },
+    {
+      "order": 14,
+      "object": "K=5,θ_P=0.02,h=5",
+      "failed": false,
+      "r1": true,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.33116773922943027,
+      "switches": 442
+    },
+    {
+      "order": 15,
+      "object": "K=5,θ_P=0.025,h=1",
+      "failed": false,
+      "r1": false,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.5060240018313173,
+      "switches": 675
+    },
+    {
+      "order": 16,
+      "object": "K=5,θ_P=0.025,h=3",
+      "failed": false,
+      "r1": true,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.5152612095986401,
+      "switches": 507
+    },
+    {
+      "order": 17,
+      "object": "K=5,θ_P=0.025,h=5",
+      "failed": false,
+      "r1": true,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.396629354367605,
+      "switches": 400
+    },
+    {
+      "order": 18,
+      "object": "K=10,θ_P=0.015,h=1",
+      "failed": false,
+      "r1": false,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.10809933130089486,
+      "switches": 754
+    },
+    {
+      "order": 19,
+      "object": "K=10,θ_P=0.015,h=3",
+      "failed": false,
+      "r1": true,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.20117850272259183,
+      "switches": 558
+    },
+    {
+      "order": 20,
+      "object": "K=10,θ_P=0.015,h=5",
+      "failed": false,
+      "r1": true,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.18863031893960808,
+      "switches": 437
+    },
+    {
+      "order": 21,
+      "object": "K=10,θ_P=0.02,h=1",
+      "failed": false,
+      "r1": false,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.1705131442360707,
+      "switches": 677
+    },
+    {
+      "order": 22,
+      "object": "K=10,θ_P=0.02,h=3",
+      "failed": false,
+      "r1": false,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.2998596224955138,
+      "switches": 503
+    },
+    {
+      "order": 23,
+      "object": "K=10,θ_P=0.02,h=5",
+      "failed": false,
+      "r1": true,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.3021244764546698,
+      "switches": 377
+    },
+    {
+      "order": 24,
+      "object": "K=10,θ_P=0.025,h=1",
+      "failed": false,
+      "r1": false,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.5514430632055983,
+      "switches": 539
+    },
+    {
+      "order": 25,
+      "object": "K=10,θ_P=0.025,h=3",
+      "failed": false,
+      "r1": true,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.4880465249310892,
+      "switches": 414
+    },
+    {
+      "order": 26,
+      "object": "K=10,θ_P=0.025,h=5",
+      "failed": false,
+      "r1": true,
+      "r2": {
+        "SPX": true,
+        "QQQ": true
+      },
+      "log_wealth": 0.4041100905551212,
+      "switches": 329
+    }
+  ]
+}

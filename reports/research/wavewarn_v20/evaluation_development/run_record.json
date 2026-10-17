@@ -1,0 +1,353 @@
+{
+  "output_scheme": "v20-stage4-output-1",
+  "commit": "c2723ba58d1a33a657a5c56adf8d8a95bbf65235",
+  "dependency_versions": {
+    "market-risk": "0.1.0",
+    "numpy": "2.5.3",
+    "pandas": "3.0.6",
+    "pandas-market-calendars": "5.4.0",
+    "PyYAML": "6.0.3",
+    "python": "3.12.14"
+  },
+  "source_hashes": {
+    "pyproject.toml": "32b4b62af32e98f09a9cae5b5eb4b64b71c66f39df03397a248e3782e8a6a879",
+    "uv.lock": "7de8953b7304f99cc3902f7d19de946b599afb4fe21730fedbb5fac9c5009037",
+    "config/wavewarn_v20.yaml": "ad622577d6d86482dae33625e2b69696310c846233313bee9ad3da8a91ad9aeb",
+    "config/data_decisions.yaml": "077288855da5bef4b2b9813f9c660e863b731cc87e47e9e43d899f110301ea8e",
+    "src/market_risk/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/market_risk/calendar.py": "78056026c45deaaf11639a9ae7e3beee7034759ca823d0bbbb1866134f89a546",
+    "src/market_risk/config.py": "ecea7a27f73a9cc492fe500d00ba4ee21cfcdd389f5a3e601f6361f86c43a64b",
+    "src/market_risk/models.py": "a166cba86b5267f9e7f95baaff227d64f8b822353775656f6a794b34c560a2a3",
+    "src/market_risk/precision.py": "b6c9df8f007079455aa918ce3adb6a81520c2ae9373823633408db006a847c41",
+    "src/market_risk/storage/__init__.py": "96e772bccb4047e1929e2c777d036e554345fc2ccd4a1e028e524b7a92dc5901",
+    "src/market_risk/storage/paths.py": "474ecd8293303752e6b0793b3ad0368d9bb0c2edc47d36d1ff87663f8b9e9008",
+    "src/market_risk/wavewarn_v20/__init__.py": "19d24409aab78bb28d27aa0c7d70809e89ad137e9d0a9cf6e957c2adf69120e5",
+    "src/market_risk/wavewarn_v20/channels.py": "76ea34595b9d67ab92b0636117e3c10a5635175c1bb7347887e572920635831a",
+    "src/market_risk/wavewarn_v20/config_v20.py": "b0b684e78664121b868e0882d7ab8bfd4743271262c8972029fa4b711ff26127",
+    "src/market_risk/wavewarn_v20/confirmatory.py": "8b46c1ba7ae2c8d76636f9edcc08445c520128831baa839fb42ed5a4c71b1d0d",
+    "src/market_risk/wavewarn_v20/convergence.py": "cbbc8951051cb019ae7102f38079b7f28d14ae459906f6da22a57d2d154ec8c7",
+    "src/market_risk/wavewarn_v20/data_v20.py": "8eab54bf7e89091299360479b430cd287e22eff4a1b3573cd2df7d6354beec10",
+    "src/market_risk/wavewarn_v20/dataset_v20.py": "9093b9a467e3ceaa5e917670eb3930118fe6f647e25c7131d82775cf4431a482",
+    "src/market_risk/wavewarn_v20/execution.py": "2774878cfeab79ffcf7116c00e90cc3c247a483629afd3b6fb567b639e5817aa",
+    "src/market_risk/wavewarn_v20/inputs.py": "ffbe598f84c5644196a9e48222f06428a6aa603ffdad568ed9048675673dd65a",
+    "src/market_risk/wavewarn_v20/labels_r2.py": "f9bc08aa4ab90d5808496f88d3d4846ea5ec6c1169c0508d7c1ce11ad7c3e30f",
+    "src/market_risk/wavewarn_v20/nav.py": "d91b5abf08140918dd247eb447c26c82100cefe1ead8c0a3d4aaab7c244fe57c",
+    "src/market_risk/wavewarn_v20/provenance_v20.py": "7c487464c67f3562bf65e913555010d8ee07e21576ec38242a0ac6be355b6c86",
+    "src/market_risk/wavewarn_v20/r1.py": "a186ae87a6f0c270c0421f23b130c9d80381d500776aab5fd7fdfdaaf71395f6",
+    "src/market_risk/wavewarn_v20/r2.py": "f8368e14cf29c8084b9829c6e019dc1ded300420b371fb560881e3f545a4dffb",
+    "src/market_risk/wavewarn_v20/reference.py": "9c73e0702bbe0c3a830c5d183ef7c1e01a376b1fb8fe4b85fb35ca220ead4a8b",
+    "src/market_risk/wavewarn_v20/research_run.py": "6e65fdb4e3eca1cc389036051c888d32a296432bdc7c5b7f443993c5605753a3",
+    "src/market_risk/wavewarn_v20/selection.py": "cbfcad05b73acffa7f4681c322b4240ecdea9ada16982915f8fb2b5361b60f15",
+    "src/market_risk/wavewarn_v20/snapshot.py": "98c69cd1c98b1ebaec0cd16492d3d58003b0c5d32e23c4da42cc9c29eaa3e3ff",
+    "src/market_risk/wavewarn_v20/state_machine.py": "0b426c6b9a3cf6871025b21edb0e5360bdc1a3326ad089d432aa5b839a870c4f",
+    "src/market_risk/wavewarn_v20/verify_dataset.py": "c812e1598efd40fe29e16b924ee5a3c56203f52334d9e6609faad82f305fd116",
+    "src/market_risk/wavewarn_v20/registered_v20.py": "77f1e9616eb9ab6f23487fda2b4be215ba00c2ab4b6c6051f87427a98c63ff59",
+    "src/market_risk/wavewarn_v20/development_compare.py": "a5546dec43bbd576790960e266a9d91dd49af54563bba966a027c3fb9b1a2b81",
+    "src/market_risk/wavewarn_v20/development_output.py": "2983025c9868f3c9a739d4d69ad921778209bc24989401c50164a919db773d2e",
+    "src/market_risk/wavewarn_v20/development_run.py": "94a8d915cef2d3e5a88ee4a118d17a3c4910b9da40d96f8acf7d0bbdabadd831"
+  },
+  "registered_v20_sha256": "77f1e9616eb9ab6f23487fda2b4be215ba00c2ab4b6c6051f87427a98c63ff59",
+  "registered_parameters": {
+    "candidates": [
+      {
+        "order": 0,
+        "K": 3,
+        "theta_P": "0.015",
+        "h": 1
+      },
+      {
+        "order": 1,
+        "K": 3,
+        "theta_P": "0.015",
+        "h": 3
+      },
+      {
+        "order": 2,
+        "K": 3,
+        "theta_P": "0.015",
+        "h": 5
+      },
+      {
+        "order": 3,
+        "K": 3,
+        "theta_P": "0.02",
+        "h": 1
+      },
+      {
+        "order": 4,
+        "K": 3,
+        "theta_P": "0.02",
+        "h": 3
+      },
+      {
+        "order": 5,
+        "K": 3,
+        "theta_P": "0.02",
+        "h": 5
+      },
+      {
+        "order": 6,
+        "K": 3,
+        "theta_P": "0.025",
+        "h": 1
+      },
+      {
+        "order": 7,
+        "K": 3,
+        "theta_P": "0.025",
+        "h": 3
+      },
+      {
+        "order": 8,
+        "K": 3,
+        "theta_P": "0.025",
+        "h": 5
+      },
+      {
+        "order": 9,
+        "K": 5,
+        "theta_P": "0.015",
+        "h": 1
+      },
+      {
+        "order": 10,
+        "K": 5,
+        "theta_P": "0.015",
+        "h": 3
+      },
+      {
+        "order": 11,
+        "K": 5,
+        "theta_P": "0.015",
+        "h": 5
+      },
+      {
+        "order": 12,
+        "K": 5,
+        "theta_P": "0.02",
+        "h": 1
+      },
+      {
+        "order": 13,
+        "K": 5,
+        "theta_P": "0.02",
+        "h": 3
+      },
+      {
+        "order": 14,
+        "K": 5,
+        "theta_P": "0.02",
+        "h": 5
+      },
+      {
+        "order": 15,
+        "K": 5,
+        "theta_P": "0.025",
+        "h": 1
+      },
+      {
+        "order": 16,
+        "K": 5,
+        "theta_P": "0.025",
+        "h": 3
+      },
+      {
+        "order": 17,
+        "K": 5,
+        "theta_P": "0.025",
+        "h": 5
+      },
+      {
+        "order": 18,
+        "K": 10,
+        "theta_P": "0.015",
+        "h": 1
+      },
+      {
+        "order": 19,
+        "K": 10,
+        "theta_P": "0.015",
+        "h": 3
+      },
+      {
+        "order": 20,
+        "K": 10,
+        "theta_P": "0.015",
+        "h": 5
+      },
+      {
+        "order": 21,
+        "K": 10,
+        "theta_P": "0.02",
+        "h": 1
+      },
+      {
+        "order": 22,
+        "K": 10,
+        "theta_P": "0.02",
+        "h": 3
+      },
+      {
+        "order": 23,
+        "K": 10,
+        "theta_P": "0.02",
+        "h": 5
+      },
+      {
+        "order": 24,
+        "K": 10,
+        "theta_P": "0.025",
+        "h": 1
+      },
+      {
+        "order": 25,
+        "K": 10,
+        "theta_P": "0.025",
+        "h": 3
+      },
+      {
+        "order": 26,
+        "K": 10,
+        "theta_P": "0.025",
+        "h": 5
+      }
+    ],
+    "initial_states": {
+      "channels": {
+        "p_spx": "已武装未激活",
+        "p_qqq": "已武装未激活",
+        "pr_spx": "已武装未激活",
+        "pr_qqq": "已武装未激活",
+        "mr": "已武装未激活"
+      },
+      "system": {
+        "S": "NORMAL",
+        "c1": 0,
+        "c2": 0
+      },
+      "reference": "NORMAL"
+    },
+    "input_windows": {
+      "high": 63,
+      "low_prior": 19,
+      "low_minimum": 15,
+      "average": 200
+    },
+    "positions": {
+      "normal": [
+        0.6,
+        0.4
+      ],
+      "level1": [
+        0.6,
+        0.0
+      ],
+      "level2": [
+        0.3,
+        0.0
+      ],
+      "lambda": 2.0
+    },
+    "policy": {
+      "stop_ratio": 0.96,
+      "cooldown": 10
+    },
+    "r2_thresholds": {
+      "confirm": "0.95",
+      "finish": "1.05",
+      "early": "0.97"
+    },
+    "r2_rule": {
+      "numerator": 3,
+      "denominator": 5,
+      "observation": 20
+    },
+    "offset": 63,
+    "tolerance": 1e-10,
+    "r1_ratio": 0.5,
+    "diagnostics": true,
+    "cutoff": "2016-12-30",
+    "purpose": "开发期选参",
+    "first_return_day": null,
+    "continuity": "COMPLETE_TRADING_AXIS",
+    "histories": {
+      "SPX": "1990-01-02",
+      "QQQ": "1999-03-10"
+    },
+    "segments": [
+      {
+        "name": "1999—2009",
+        "start": "1998-12-31",
+        "end": "2009-12-31",
+        "basis": "登记第五节“R1 的报告边界”；收益区间按末日归属，边界 (start, end]"
+      },
+      {
+        "name": "2010—2016",
+        "start": "2009-12-31",
+        "end": "2016-12-30",
+        "basis": "登记第五节“R1 的报告边界”；收益区间按末日归属，边界 (start, end]"
+      },
+      {
+        "name": "熊市一",
+        "start": "2000-03-24",
+        "end": "2002-10-09",
+        "basis": "登记第五节“R1 的报告边界”；收益区间按末日归属，边界 (start, end]；熊市日期：波段预警研究规格_v1.4_修订登记.md 第 38 行；config/wavewarn_v14_failure_path.yaml 第 21—23 行（SPX 收盘高点 P 至低点 Tr）"
+      },
+      {
+        "name": "熊市二",
+        "start": "2007-10-09",
+        "end": "2009-03-09",
+        "basis": "登记第五节“R1 的报告边界”；收益区间按末日归属，边界 (start, end]；熊市日期：波段预警研究规格_v1.4_修订登记.md 第 38 行；config/wavewarn_v14_failure_path.yaml 第 21—23 行（SPX 收盘高点 P 至低点 Tr）"
+      }
+    ],
+    "bears": [
+      {
+        "name": "熊市一",
+        "peak": "2000-03-24",
+        "trough": "2002-10-09"
+      },
+      {
+        "name": "熊市二",
+        "peak": "2007-10-09",
+        "trough": "2009-03-09"
+      }
+    ],
+    "environment": {
+      "asset": "SPX",
+      "up": "0.10",
+      "down": "-0.10"
+    }
+  },
+  "data_files": {
+    "SPX": {
+      "bytes": 643846,
+      "raw_sha256": "6941ab293eddb8201e851d873476d64c6cbd584ec9573f5ff757447173bf0b00"
+    },
+    "QQQ": {
+      "bytes": 410106,
+      "raw_sha256": "d14e58edcab7ec94b4e6728ce65bbbf8a0a84565d53ce951a37a4e6143a56880"
+    }
+  },
+  "cutoff": "2016-12-30",
+  "usage_restriction": [],
+  "window_coverage": {
+    "condition": "axis[j0] <= 2000-03-24",
+    "first_day": "1999-09-07",
+    "satisfied": true,
+    "status": "已判定"
+  },
+  "audit_conclusion": {
+    "violation_found_until_this_file": false,
+    "note": "成功路径上任何违规都会使运行失败；完整结论以审计尾段收尾记录为准"
+  },
+  "audit_coverage": {
+    "coverage_end": "尾段文件关闭前最后一次取事件",
+    "not_covered": [
+      "钩子安装之前的解释器启动与入口导入（runpy、包初始化与本模块自身）",
+      "原生代码直接读取",
+      "子进程（预检中的 git 子进程在读取行情之前执行，其文件访问不在覆盖范围）",
+      "尾段关闭之后至进程结束（含封存状态下被阻止的尝试，只见于标准错误）",
+      "main 返回之后的解释器关闭阶段（被阻止的尝试只留在标准错误，不改变退出码）"
+    ]
+  }
+}

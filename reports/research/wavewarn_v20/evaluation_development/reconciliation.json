@@ -1,0 +1,725 @@
+{
+  "tolerance_scope": "只用于两类对数净值对账；日期、状态、分类、计数、出口、哈希一律精确相等",
+  "rows": [
+    {
+      "kind": "单一路径",
+      "object": "K=3,θ_P=0.015,h=1",
+      "path": "信号模拟",
+      "difference": 8.881784197001252e-16,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=3,θ_P=0.015,h=1",
+      "path": "执行政策研究模拟",
+      "difference": 2.55351295663786e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=3,θ_P=0.015,h=3",
+      "path": "信号模拟",
+      "difference": 3.3584246494910985e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=3,θ_P=0.015,h=3",
+      "path": "执行政策研究模拟",
+      "difference": 2.525757381022231e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=3,θ_P=0.015,h=5",
+      "path": "信号模拟",
+      "difference": 2.220446049250313e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=3,θ_P=0.015,h=5",
+      "path": "执行政策研究模拟",
+      "difference": 2.6922908347160046e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=3,θ_P=0.02,h=1",
+      "path": "信号模拟",
+      "difference": 2.220446049250313e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=3,θ_P=0.02,h=1",
+      "path": "执行政策研究模拟",
+      "difference": 8.548717289613705e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=3,θ_P=0.02,h=3",
+      "path": "信号模拟",
+      "difference": 4.884981308350689e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=3,θ_P=0.02,h=3",
+      "path": "执行政策研究模拟",
+      "difference": 3.6637359812630166e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=3,θ_P=0.02,h=5",
+      "path": "信号模拟",
+      "difference": 6.106226635438361e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=3,θ_P=0.02,h=5",
+      "path": "执行政策研究模拟",
+      "difference": 5.6343818499726694e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=3,θ_P=0.025,h=1",
+      "path": "信号模拟",
+      "difference": 2.1094237467877974e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=3,θ_P=0.025,h=1",
+      "path": "执行政策研究模拟",
+      "difference": 1.1102230246251565e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=3,θ_P=0.025,h=3",
+      "path": "信号模拟",
+      "difference": 6.328271240363392e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=3,θ_P=0.025,h=3",
+      "path": "执行政策研究模拟",
+      "difference": 2.220446049250313e-16,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=3,θ_P=0.025,h=5",
+      "path": "信号模拟",
+      "difference": 1.4432899320127035e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=3,θ_P=0.025,h=5",
+      "path": "执行政策研究模拟",
+      "difference": 8.298917109073045e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=5,θ_P=0.015,h=1",
+      "path": "信号模拟",
+      "difference": 2.4147350785597155e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=5,θ_P=0.015,h=1",
+      "path": "执行政策研究模拟",
+      "difference": 1.9116652705264414e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=5,θ_P=0.015,h=3",
+      "path": "信号模拟",
+      "difference": 2.0539125955565396e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=5,θ_P=0.015,h=3",
+      "path": "执行政策研究模拟",
+      "difference": 4.690692279041286e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=5,θ_P=0.015,h=5",
+      "path": "信号模拟",
+      "difference": 1.8596235662471372e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=5,θ_P=0.015,h=5",
+      "path": "执行政策研究模拟",
+      "difference": 1.457167719820518e-16,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=5,θ_P=0.02,h=1",
+      "path": "信号模拟",
+      "difference": 1.0547118733938987e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=5,θ_P=0.02,h=1",
+      "path": "执行政策研究模拟",
+      "difference": 5.10702591327572e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=5,θ_P=0.02,h=3",
+      "path": "信号模拟",
+      "difference": 1.4432899320127035e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=5,θ_P=0.02,h=3",
+      "path": "执行政策研究模拟",
+      "difference": 3.552713678800501e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=5,θ_P=0.02,h=5",
+      "path": "信号模拟",
+      "difference": 1.27675647831893e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=5,θ_P=0.02,h=5",
+      "path": "执行政策研究模拟",
+      "difference": 1.0824674490095276e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=5,θ_P=0.025,h=1",
+      "path": "信号模拟",
+      "difference": 1.3322676295501878e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=5,θ_P=0.025,h=1",
+      "path": "执行政策研究模拟",
+      "difference": 9.43689570931383e-16,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=5,θ_P=0.025,h=3",
+      "path": "信号模拟",
+      "difference": 6.439293542825908e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=5,θ_P=0.025,h=3",
+      "path": "执行政策研究模拟",
+      "difference": 3.941291737419306e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=5,θ_P=0.025,h=5",
+      "path": "信号模拟",
+      "difference": 3.552713678800501e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=5,θ_P=0.025,h=5",
+      "path": "执行政策研究模拟",
+      "difference": 1.942890293094024e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=10,θ_P=0.015,h=1",
+      "path": "信号模拟",
+      "difference": 9.575673587391975e-16,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=10,θ_P=0.015,h=1",
+      "path": "执行政策研究模拟",
+      "difference": 2.886579864025407e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=10,θ_P=0.015,h=3",
+      "path": "信号模拟",
+      "difference": 2.9976021664879227e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=10,θ_P=0.015,h=3",
+      "path": "执行政策研究模拟",
+      "difference": 3.608224830031759e-16,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=10,θ_P=0.015,h=5",
+      "path": "信号模拟",
+      "difference": 2.942091015256665e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=10,θ_P=0.015,h=5",
+      "path": "执行政策研究模拟",
+      "difference": 3.7795287732844685e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=10,θ_P=0.02,h=1",
+      "path": "信号模拟",
+      "difference": 1.915134717478395e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=10,θ_P=0.02,h=1",
+      "path": "执行政策研究模拟",
+      "difference": 5.856426454897701e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=10,θ_P=0.02,h=3",
+      "path": "信号模拟",
+      "difference": 5.773159728050814e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=10,θ_P=0.02,h=3",
+      "path": "执行政策研究模拟",
+      "difference": 2.3175905639050143e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=10,θ_P=0.02,h=5",
+      "path": "信号模拟",
+      "difference": 4.107825191113079e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=10,θ_P=0.02,h=5",
+      "path": "执行政策研究模拟",
+      "difference": 2.275957200481571e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=10,θ_P=0.025,h=1",
+      "path": "信号模拟",
+      "difference": 1.6653345369377348e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=10,θ_P=0.025,h=1",
+      "path": "执行政策研究模拟",
+      "difference": 1.2212453270876722e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=10,θ_P=0.025,h=3",
+      "path": "信号模拟",
+      "difference": 1.6653345369377348e-16,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=10,θ_P=0.025,h=3",
+      "path": "执行政策研究模拟",
+      "difference": 5.245803791353865e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=10,θ_P=0.025,h=5",
+      "path": "信号模拟",
+      "difference": 5.10702591327572e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=10,θ_P=0.025,h=5",
+      "path": "执行政策研究模拟",
+      "difference": 4.718447854656915e-16,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "主参照",
+      "path": "信号模拟",
+      "difference": 6.661338147750939e-16,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "主参照",
+      "path": "执行政策研究模拟",
+      "difference": 3.164135620181696e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "一直持有",
+      "path": "一直持有",
+      "difference": 1.887379141862766e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "200 日均线一级版",
+      "path": "信号模拟",
+      "difference": 7.993605777301127e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "200 日均线一级版",
+      "path": "执行政策研究模拟",
+      "difference": 7.216449660063518e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "带缓冲带的 200 日均线二级版（101%/99%）",
+      "path": "信号模拟",
+      "difference": 5.551115123125783e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "带缓冲带的 200 日均线二级版（101%/99%）",
+      "path": "执行政策研究模拟",
+      "difference": 1.2212453270876722e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "主参照",
+      "path": "恒定仓位",
+      "difference": 4.440892098500626e-16,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "单一路径",
+      "object": "K=3,θ_P=0.025,h=3",
+      "path": "恒定仓位",
+      "difference": 5.551115123125783e-16,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=3,θ_P=0.015,h=1",
+      "path": "信号模拟",
+      "difference": 1.1102230246251565e-16,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=3,θ_P=0.015,h=3",
+      "path": "信号模拟",
+      "difference": 2.6645352591003757e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=3,θ_P=0.015,h=5",
+      "path": "信号模拟",
+      "difference": 1.5543122344752192e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=3,θ_P=0.02,h=1",
+      "path": "信号模拟",
+      "difference": 1.5543122344752192e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=3,θ_P=0.02,h=3",
+      "path": "信号模拟",
+      "difference": 5.551115123125783e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=3,θ_P=0.02,h=5",
+      "path": "信号模拟",
+      "difference": 6.8833827526759706e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=3,θ_P=0.025,h=1",
+      "path": "信号模拟",
+      "difference": 2.7755575615628914e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=3,θ_P=0.025,h=3",
+      "path": "信号模拟",
+      "difference": 6.994405055138486e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=3,θ_P=0.025,h=5",
+      "path": "信号模拟",
+      "difference": 7.771561172376096e-16,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=5,θ_P=0.015,h=1",
+      "path": "信号模拟",
+      "difference": 1.6653345369377348e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=5,θ_P=0.015,h=3",
+      "path": "信号模拟",
+      "difference": 2.6645352591003757e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=5,θ_P=0.015,h=5",
+      "path": "信号模拟",
+      "difference": 1.1102230246251565e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=5,θ_P=0.02,h=1",
+      "path": "信号模拟",
+      "difference": 1.7763568394002505e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=5,θ_P=0.02,h=3",
+      "path": "信号模拟",
+      "difference": 7.216449660063518e-16,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=5,θ_P=0.02,h=5",
+      "path": "信号模拟",
+      "difference": 1.887379141862766e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=5,θ_P=0.025,h=1",
+      "path": "信号模拟",
+      "difference": 6.661338147750939e-16,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=5,θ_P=0.025,h=3",
+      "path": "信号模拟",
+      "difference": 7.16093850883226e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=5,θ_P=0.025,h=5",
+      "path": "信号模拟",
+      "difference": 4.3298697960381105e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=10,θ_P=0.015,h=1",
+      "path": "信号模拟",
+      "difference": 1.6653345369377348e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=10,θ_P=0.015,h=3",
+      "path": "信号模拟",
+      "difference": 3.6637359812630166e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=10,θ_P=0.015,h=5",
+      "path": "信号模拟",
+      "difference": 2.3314683517128287e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=10,θ_P=0.02,h=1",
+      "path": "信号模拟",
+      "difference": 2.6645352591003757e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=10,θ_P=0.02,h=3",
+      "path": "信号模拟",
+      "difference": 6.439293542825908e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=10,θ_P=0.02,h=5",
+      "path": "信号模拟",
+      "difference": 4.773959005888173e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=10,θ_P=0.025,h=1",
+      "path": "信号模拟",
+      "difference": 9.43689570931383e-16,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=10,θ_P=0.025,h=3",
+      "path": "信号模拟",
+      "difference": 5.551115123125783e-16,
+      "tolerance": 1e-10,
+      "passed": true
+    },
+    {
+      "kind": "相对主参照",
+      "object": "K=10,θ_P=0.025,h=5",
+      "path": "信号模拟",
+      "difference": 5.88418203051333e-15,
+      "tolerance": 1e-10,
+      "passed": true
+    }
+  ]
+}

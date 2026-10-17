@@ -13,3 +13,5 @@ patches/** -text
 reports/research/wavewarn_v14/correction_rerun/recovery/** -text
 docs/product/** -text
 docs/research/波段预警研究规格_v2.0_登记.md -text
+# 波段预警 v2.0 正式输出目录（M3 等）须保持生成时的原始字节（MANIFEST 记录了 SHA-256），git 不做换行转换
+reports/research/wavewarn_v20/** -text
