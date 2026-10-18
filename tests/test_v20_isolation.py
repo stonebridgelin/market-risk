@@ -41,12 +41,16 @@ STAGE_FOUR = ("research_run",)
 # 边界侧两个新模块另成一组（不并入 BOUNDARY，既有按行登记的 BOUNDARY_EXCEPTIONS 不改）。
 STAGE_FOUR_OUTER = ("registered_v20", "development_compare")
 BOUNDARY_STAGE_FOUR = ("development_output", "development_run")
+# 阶段五 V2（V2 执行指令定稿第四节第 10 条；裁决第（4）项）：F1、F2 并入算法侧（不做文件与网络操作）；
+# F3、F4 另成“阶段五边界”一组，参照 BOUNDARY_STAGE_FOUR 的做法。既有登记不改、不放宽。
+STAGE_FIVE = ("registered_v20_validation", "validation_diagnostics")
+BOUNDARY_STAGE_FIVE = ("validation_output", "validation_run")
 
 # ---------------------------------------------------------------------------
 # 模块职责表（定稿第一节第 1 部分）
 # ---------------------------------------------------------------------------
 
-ALGORITHM = (*PURE, *STAGE_TWO, *STAGE_FOUR, "dataset_v20", "provenance_v20", *STAGE_FOUR_OUTER)
+ALGORITHM = (*PURE, *STAGE_TWO, *STAGE_FOUR, "dataset_v20", "provenance_v20", *STAGE_FOUR_OUTER, *STAGE_FIVE)
 BOUNDARY = ("data_v20", "config_v20", "verify_dataset")
 INITIALIZERS = (ROOT / "src" / "market_risk" / "__init__.py", PACKAGE / "__init__.py")
 
@@ -64,6 +68,12 @@ OUTSIDE: dict[str, frozenset[str]] = {
     "development_compare": frozenset({"market_risk"}),
     "development_output": frozenset({"market_risk", "market_risk.storage", "market_risk.storage.paths"}),
     "development_run": frozenset({"market_risk"}),
+    # 阶段五 V2（第四节第 10 条；以实现后的实际导入为准，交项目负责人确认）。
+    "registered_v20_validation": frozenset({"market_risk", "market_risk.precision"}),
+    "validation_diagnostics": frozenset({"market_risk"}),
+    "validation_output": frozenset({"market_risk", "market_risk.precision", "market_risk.storage",
+                                    "market_risk.storage.paths"}),
+    "validation_run": frozenset({"market_risk"}),
 }
 # 实际加载的本包模块（不含包本身；每个集合都包含被检查模块自己）。
 INSIDE: dict[str, frozenset[str]] = {name: frozenset(items.split()) for name, items in {
@@ -95,6 +105,15 @@ INSIDE: dict[str, frozenset[str]] = {name: frozenset(items.split()) for name, it
     "development_output": "channels confirmatory convergence development_compare development_output execution "
                           "inputs labels_r2 nav r1 r2 reference research_run selection snapshot state_machine",
     "development_run": "development_run",
+    # 阶段五 V2（第四节第 10 条；以实现后的实际导入为准，交项目负责人确认）。
+    "registered_v20_validation": "channels confirmatory convergence execution inputs labels_r2 nav provenance_v20 "
+                                 "r1 r2 reference registered_v20 registered_v20_validation research_run selection "
+                                 "snapshot state_machine",
+    "validation_diagnostics": "channels inputs labels_r2 r2 snapshot state_machine validation_diagnostics",
+    "validation_output": "channels confirmatory convergence development_compare development_output execution inputs "
+                         "labels_r2 nav provenance_v20 r1 r2 reference registered_v20 registered_v20_validation "
+                         "research_run selection snapshot state_machine validation_output",
+    "validation_run": "development_run validation_run",
 }.items()}
 
 # ---------------------------------------------------------------------------
@@ -124,6 +143,11 @@ TEST_DUTIES: dict[str, tuple[str, ...]] = {
     # 集成 N1—N4（可集成通知第三次交付第三节第 2 条）：N4 追加到“回算脚本测试”；待负责人核对。
     "回算脚本测试": ("test_v20_recompute_integration.py", "test_v20_recompute.py"),
     "序列接线测试": ("v20_sequence_wiring.py", "test_v20_sequence_wiring.py", "test_v20_prerun_check.py"),
+    # 阶段五 V2（第四节第 10 条；交项目负责人确认）：F5、F6、F8 为纯算法测试（适用算法侧文本检查，例外为空）；
+    # F7 为入口的子进程测试（适用测试侧检查，逐处登记）。
+    "阶段五纯算法测试": ("test_wavewarn_v20_validation_registered.py", "test_wavewarn_v20_validation_diagnostics.py",
+                  "test_wavewarn_v20_validation_output.py"),
+    "阶段五子进程测试": ("test_wavewarn_v20_validation_run.py",),
 }
 
 
@@ -563,6 +587,24 @@ TEST_EXCEPTIONS: frozenset[Allowed] = frozenset({
             "（指令修订六第五节第 3 小节）",
             "只以 sys.executable 运行 NEW_TOOL 检出目录中哈希已核对的 audit_v20.py；参数为序列场景文件与 "
             "V20_COMPARE_SEQUENCE_OUT 下的工具输出文件；带 timeout", 1, 1),
+    # 阶段五 V2（第四节第 10 条；逐处登记，交项目负责人确认）：入口测试的五处，写法与开发期入口测试相同。
+    Allowed("test_wavewarn_v20_validation_run.py", "<module>", "import subprocess", "subprocess",
+            "入口的演习必须在新的解释器里执行（钩子安装不可撤销；V1 设计稿第三节第 1 条）",
+            "只供本文件的 run_process 使用", 1, 1),
+    Allowed("test_wavewarn_v20_validation_run.py", "put", "path.write_bytes(data)", "write_bytes",
+            WRITE_REASON, "只写 tmp_path 下按仓库布局放置的构造源码占位、构造配置、构造行情与构造基准文件", 1, 1),
+    Allowed("test_wavewarn_v20_validation_run.py", "get", "return path.read_bytes()", "read_bytes",
+            "须读取演习输出，核对工程完成状态、文件清单、拒绝记录与失败证据（V2 指令第五节）",
+            "只读 tmp_path 构造根下 reports/research/wavewarn_v20 中的演习输出", 1, 1),
+    Allowed("test_wavewarn_v20_validation_run.py", "present", "return path.exists()", "exists",
+            "外部判定与失败处置断言须检查正式目录、失败目录与包外文件是否存在",
+            "只检查 tmp_path 构造根下 reports/research/wavewarn_v20 中的路径", 1, 1),
+    Allowed("test_wavewarn_v20_validation_run.py", "run_process",
+            "return subprocess.run(arguments, cwd=cwd, env=environment, capture_output=True, text=True, "
+            "encoding=\"utf-8\",\n                          errors=\"replace\", check=False)",
+            "subprocess.run", "入口的演习必须在新的解释器里执行；构造根须以 git 建立并提交（V2 指令第五节）",
+            "只启动 git（构造根内的 init、add、commit、rm）与 sys.executable（-m 入口或 -c 注入脚本），"
+            "工作目录均为 tmp_path 下的构造根", 1, 1),
 })
 
 # 阶段四边界侧（M2 第一部分指令第一节第 9 小节第 4 条）：完整源码片段规则；网络导入与受保护目录字面路径没有例外。
@@ -594,6 +636,22 @@ STAGE_FOUR_BOUNDARY_EXCEPTIONS: frozenset[Allowed] = frozenset({
     Allowed("development_run.py", "main", "sys.addaudithook(audit := Audit())", "addaudithook",
             "设计稿第七节：读取审计钩子在入口函数的第一条语句安装", "development_run.main 中唯一一处", 1, 1),
 })
+# 阶段五边界侧（V2 指令第四节第 10 条；交项目负责人确认）：规则与阶段四相同（STAGE_FOUR_BOUNDARY_RULES）；
+# 输出、清单、发布与失败证据的文件操作经 development_output 的基本函数，本组只新增下列四处。
+STAGE_FIVE_BOUNDARY_EXCEPTIONS: frozenset[Allowed] = frozenset({
+    Allowed("validation_output.py", "PreflightReader.read", "content = path.read_bytes()", "read_bytes",
+            "V1 设计稿第三节第 1 条：预检只读入口（开发期入口的预检集合不含阶段五模块，故另写）",
+            "只读 PREFLIGHT_FILES 中的相对路径（规范化后位于 root 之下、不位于 root/data 之下）；只在第 1 步", 1, 1),
+    Allowed("validation_run.py", "_git", "import subprocess", "subprocess",
+            "预检中的 git 集中在一个函数（与开发期入口相同）", "只供 _git 使用", 1, 1),
+    Allowed("validation_run.py", "_git",
+            'done = subprocess.run(["git", *arguments], cwd=root, capture_output=True, check=False)',
+            "subprocess.run", "预检中的 git 集中在一个函数（与开发期入口相同）",
+            "只调用 git rev-parse HEAD、git status --porcelain --untracked-files=all、git diff --cached --name-only",
+            1, 1),
+    Allowed("validation_run.py", "main", "sys.addaudithook(audit := Audit())", "addaudithook",
+            "V1 设计稿第三节第 1 条：读取审计钩子在入口函数的第一条语句安装", "validation_run.main 中唯一一处", 1, 1),
+})
 
 
 def module_file(name: str) -> Path:
@@ -606,7 +664,7 @@ def duty_files(duty: str) -> list[Path]:
 
 def algorithm_files() -> list[Path]:
     return [*(module_file(name) for name in ALGORITHM), *INITIALIZERS, *duty_files("纯算法测试"),
-            *duty_files("辅助文件")]
+            *duty_files("辅助文件"), *duty_files("阶段五纯算法测试")]
 
 
 def boundary_files() -> list[Path]:
@@ -617,10 +675,16 @@ def boundary_stage_four_files() -> list[Path]:
     return [module_file(name) for name in BOUNDARY_STAGE_FOUR]
 
 
+def boundary_stage_five_files() -> list[Path]:
+    return [module_file(name) for name in BOUNDARY_STAGE_FIVE]
+
+
 def constructed_test_files() -> list[Path]:
     return [*duty_files("构造文件读写测试"), *duty_files("子进程测试"), *duty_files("比对接线"),
             # 阶段四 M2 第二部分（指令修订六第三节 M3）：两个新职责同样适用测试侧检查（收紧；待负责人核对）。
-            *duty_files("回算脚本测试"), *duty_files("序列接线测试")]
+            *duty_files("回算脚本测试"), *duty_files("序列接线测试"),
+            # 阶段五 V2：入口的子进程测试同样适用测试侧检查。
+            *duty_files("阶段五子进程测试")]
 
 
 def source_of(path: Path) -> str:
@@ -676,9 +740,10 @@ def text_scan(paths: list[Path], banned: tuple[str, ...]) -> list[tuple[str, str
 def test_static_check_covers_the_expected_files() -> None:
     """检查范围由模块职责表与测试职责表确定，两表覆盖包内全部模块与 tests/ 下全部含 v20 的文件。"""
     stems = {path.stem for path in PACKAGE.glob("*.py")}
-    assert stems == {*ALGORITHM, *BOUNDARY, *BOUNDARY_STAGE_FOUR, "__init__"}
+    assert stems == {*ALGORITHM, *BOUNDARY, *BOUNDARY_STAGE_FOUR, *BOUNDARY_STAGE_FIVE, "__init__"}
     assert not set(ALGORITHM) & set(BOUNDARY) and set(OUTSIDE) == set(INSIDE) == {*ALGORITHM, *BOUNDARY,
-                                                                                  *BOUNDARY_STAGE_FOUR}
+                                                                                  *BOUNDARY_STAGE_FOUR,
+                                                                                  *BOUNDARY_STAGE_FIVE}
     registered = [name for names in TEST_DUTIES.values() for name in names]
     assert len(registered) == len(set(registered))                                # 每个文件恰好登记一次
     assert set(registered) == {path.name for path in TESTS.glob("*.py") if "v20" in path.name}
@@ -759,6 +824,12 @@ def test_banned_list_is_the_registered_one() -> None:
         ("test_wavewarn_v20_development_run.py", "present", "exists", 1, 1),
         ("test_wavewarn_v20_development_run.py", "put", "write_bytes", 1, 1),
         ("test_wavewarn_v20_development_run.py", "run_process", "subprocess.run", 1, 1),
+        # 阶段五 V2 新增条目（交项目负责人确认）：
+        ("test_wavewarn_v20_validation_run.py", "<module>", "subprocess", 1, 1),
+        ("test_wavewarn_v20_validation_run.py", "get", "read_bytes", 1, 1),
+        ("test_wavewarn_v20_validation_run.py", "present", "exists", 1, 1),
+        ("test_wavewarn_v20_validation_run.py", "put", "write_bytes", 1, 1),
+        ("test_wavewarn_v20_validation_run.py", "run_process", "subprocess.run", 1, 1),
         ("test_wavewarn_v20_verify_dataset.py", "<module>", "subprocess", 1, 1),
         ("test_wavewarn_v20_verify_dataset.py", "put", "write_bytes", 1, 1),
         ("test_wavewarn_v20_verify_dataset.py", "run", "subprocess.run", 1, 1),
@@ -914,7 +985,8 @@ def test_addaudithook_is_called_only_in_the_entry_function() -> None:
         found += [(path.stem, scope.get(id(node))) for node in ast.walk(tree)
                   if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                   and node.func.attr == "addaudithook"]
-    assert found == [("development_run", "main"), ("verify_dataset", "main")]      # 阶段四实施（第 9 小节第 6 条）
+    # 阶段四实施（第 9 小节第 6 条）；阶段五 V2 登记 validation_run.main（第四节第 10 条）。
+    assert found == [("development_run", "main"), ("validation_run", "main"), ("verify_dataset", "main")]
 
 
 GUARD = TESTS / "v20_data_guard.py"
@@ -1254,3 +1326,39 @@ def test_stage_four_registration_consistency() -> None:
     for path in boundary_stage_four_files():
         assert path.is_file(), path.name
     assert not {item.item for item in STAGE_FOUR_BOUNDARY_EXCEPTIONS} & set(TEST_NEVER)
+
+
+# ---------------------------------------------------------------------------
+# 阶段五 V2 新增（V2 执行指令定稿第四节第 10 条）：阶段五边界组的检查与阶段四相同，例外另列
+# ---------------------------------------------------------------------------
+
+
+def test_stage_five_boundary_files_have_only_registered_hits() -> None:
+    for path in boundary_stage_five_files():
+        assert stage_four_problems(path.name, source_of(path), STAGE_FIVE_BOUNDARY_EXCEPTIONS) == [], path.name
+    assert {item.file for item in STAGE_FIVE_BOUNDARY_EXCEPTIONS} == {path.name for path in boundary_stage_five_files()}
+    assert sorted((item.file, item.function, item.item, item.in_function, item.in_file)
+                  for item in STAGE_FIVE_BOUNDARY_EXCEPTIONS) == [
+        ("validation_output.py", "PreflightReader.read", "read_bytes", 1, 1),
+        ("validation_run.py", "_git", "subprocess", 1, 1),
+        ("validation_run.py", "_git", "subprocess.run", 1, 1),
+        ("validation_run.py", "main", "addaudithook", 1, 1),
+    ]
+
+
+def test_algorithm_modules_do_not_import_stage_five_boundary_modules() -> None:
+    for name in ALGORITHM:
+        assert boundary_reference(imported_names(module_file(name)), BOUNDARY_STAGE_FIVE) == [], name
+
+
+def test_stage_five_registration_consistency() -> None:
+    assert not set(BOUNDARY_STAGE_FIVE) & {*ALGORITHM, *BOUNDARY, *BOUNDARY_STAGE_FOUR}
+    assert set(STAGE_FIVE) <= set(ALGORITHM)
+    for path in (*boundary_stage_five_files(), *(module_file(name) for name in STAGE_FIVE)):
+        assert path.is_file(), path.name
+    assert not {item.item for item in STAGE_FIVE_BOUNDARY_EXCEPTIONS} & set(TEST_NEVER)
+    # 入口模块顶层只导入标准库与 development_run（钩子装好后才在函数内导入业务模块）。
+    tree = ast.parse(source_of(module_file("validation_run")))
+    project = [node.module for node in tree.body if isinstance(node, ast.ImportFrom) and node.module
+               and node.module.startswith("market_risk")]
+    assert project == ["market_risk.wavewarn_v20.development_run"]
