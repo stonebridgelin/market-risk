@@ -2312,3 +2312,330 @@ def test_wiring_b8_duplicate_object_table_is_inconsistent(monkeypatch: pytest.Mo
     _, _, tool = b8_built()
     _, record = b8_compare(monkeypatch, copy.deepcopy(tool), b8_project_tables())
     assert support.DUPLICATE_OBJECT_ITEM in b8_inconsistent_items(record)
+
+
+# ---------------------------------------------------------------------------
+# 阶段五 V3（《阶段五 V3 实施执行指令定稿》第四节第 2、3 条）：只追加。
+# test_v3_confirm_case 只在设置 V20_V3_OUT 时参数化 11 个场景，否则参数化为空、不读取任何外部材料。
+# V3 运行中 V20_COMPARE_OUT、V20_COMPARE_B、V20_COMPARE_ONLY、V20_COMPARE_FROM、V20_COMPARE_A2、V20_COMPARE_TOOL_FROM
+# 必须未设置。其余为接线自检（内存构造，不读外部材料，不运行工具）。
+# ---------------------------------------------------------------------------
+
+import math  # noqa: E402
+
+V3_ENV = "V20_V3_OUT"
+V3_CASES = list(support.V3_NAMES) if os.environ.get(V3_ENV) else []
+
+
+def v3_read(path: Path) -> object | None:
+    return support.parse_json(support.get_bytes(path)) if path.is_file() else None
+
+
+def v3_project(formal: Path) -> dict:
+    """项目侧（正式目录）：confirmatory.json、date_assertions.json、window.json、run_record.json、""" \
+        """v3_axis.json 与清单。"""
+    files = {name.removesuffix(".json"): v3_read(formal / name)
+             for name in ("confirmatory.json", "date_assertions.json", "window.json", "run_record.json",
+                          "v3_axis.json")}
+    manifest = support.get_bytes(formal / "MANIFEST.sha256").decode("utf-8") if (formal / "MANIFEST.sha256").is_file() \
+        else ""
+    return {**files, "manifest": manifest}
+
+
+def v3_copy(source: Path, target: Path) -> list[str]:
+    """把构造运行的输出目录逐文件复制到比对输出目录（证据留存；只读源目录）。"""
+    names = sorted(item.name for item in source.iterdir() if item.is_file())
+    for name in names:
+        support.put_bytes(target / name, support.get_bytes(source / name))
+    return names
+
+
+@pytest.mark.parametrize("name", V3_CASES, ids=V3_CASES)
+def test_v3_confirm_case(name: str, tmp_path: Path) -> None:
+    """一个 V3 丙场景：生成场景价格 → 工具场景文件 → 子进程运行新工具（不传 B、seeds）→ 构造 M3 基准 →
+    tmp_path 下的构造根 → run_v3（登记检验参数，不注入）→ 完成状态、阶段五对齐断言、逐字段比较 → 写出记录。"""
+    value = os.environ.get(V3_ENV)
+    if not value:
+        pytest.skip(f"未设置 {V3_ENV}：V3 丙不运行")
+    out = Path(value)
+    for variable in (OUT_ENV, B_ENV, ONLY_ENV, FROM_ENV, A2_ENV, TOOL_FROM_ENV):
+        assert variable not in os.environ, f"V3 运行中 {variable} 必须未设置"
+    assert support.sha256(support.get_bytes(NEW_AUDIT)) == support.NEW_TOOL.audit_sha256, "audit_v20.py 哈希不符"
+    started = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    scenario = support.v3_scenario(name)
+    tool_scenario = support.v3_tool_scenario(scenario)
+    scenario_path = support.put_bytes(out / "构造输入" / name / f"{name}.json", support.dump_json(tool_scenario))
+    tool_out = out / "工具输出" / f"{name}.json"
+    tool_out.parent.mkdir(parents=True, exist_ok=True)
+    exit_code, tool_seconds, stderr = run_tool(scenario_path, tool_out, NEW_AUDIT, Path(support.NEW_TOOL.root))
+    tool = v3_read(tool_out)
+    project_started = time.perf_counter()
+    signals, baseline_info = support.v3_baseline(scenario)
+    project, project_exit, source, copied = None, None, None, []
+    if signals is not None:
+        root = support.build_root_v3(tmp_path / "root", scenario, signals)
+        done = support.run_v3(root, signals)
+        project_exit = done.returncode
+        research = root / "reports" / "research" / "wavewarn_v20"
+        formal = research / "evaluation_validation"
+        failed = sorted(item for item in research.iterdir() if item.name.startswith("evaluation_validation_failed_"))
+        source = formal if formal.is_dir() else (failed[0] if failed else None)
+        if source is not None:
+            copied = v3_copy(source, out / "项目输出" / name / source.name)
+        if formal.is_dir() and (formal / "confirmatory.json").is_file():
+            project = v3_project(formal)
+    project_seconds = time.perf_counter() - project_started
+    completion = support.v3_completion(project, tool, exit_code)
+    record = support.Recorder()
+    alignment = None
+    if completion != support.V3_UNFINISHED:
+        alignment = support.v3_alignment(tool_scenario, project, tool)
+        if completion == support.V3_FULL:
+            assert all(item is True for item in alignment.values()), f"{name} 阶段五对齐断言不成立：{alignment}"
+        else:
+            window_items = [key for key in alignment if key.startswith("工具 ")]
+            assert all(alignment[key] is True for key in window_items), f"{name} 窗口字段不成立：{alignment}"
+            assert all(item is not False for item in alignment.values()), f"{name} 对齐断言不成立：{alignment}"
+        support.compare_v3_confirm(record, tool, tool_scenario, scenario, project["confirmatory"])
+    registered_doc = json.loads(support.dump_json(support.v3_registered.describe(
+        support.v3_registered.VALIDATION)["confirmatory"]))
+    record_file = None if source is None else source / "run_record.json"
+    parameters = (json.loads(support.get_bytes(record_file).decode("utf-8"))["registered_parameters"]["confirmatory"]
+                  if project is not None and record_file is not None and record_file.is_file() else None)
+    exports = [line for line in (project or {}).get("manifest", "").splitlines()
+               if line.split(" ")[-1] in support.V3_EXPORTS]
+    counts = {status: record.total(status) for status in support.B_STATUSES}
+    confirmed = None if project is None else project["confirmatory"]
+    payload = {
+        "name": name, "kind": "v3", "started": started, "完成状态": completion, "对齐断言": alignment,
+        "工具": {"exit_code": exit_code, "seconds": round(tool_seconds, 3), "stderr_tail": stderr[-2000:],
+               "output_sha256": support.sha256(support.get_bytes(tool_out)) if tool_out.is_file() else None,
+               "registered_settings": None if tool is None else tool.get("registered_settings"),
+               "valid": None if tool is None else tool.get("valid"),
+               "category": None if tool is None else tool.get("category"),
+               "invalid_reasons": None if tool is None else tool.get("invalid_reasons")},
+        "项目": {"baseline": baseline_info, "exit_code": project_exit, "seconds": round(project_seconds, 3),
+               "output_dir": None if source is None else str(source), "copied": copied,
+               "valid": None if confirmed is None else confirmed.get("valid"),
+               "reason": None if confirmed is None else confirmed.get("reason"),
+               "category": None if confirmed is None else confirmed.get("category")},
+        "V3-5 登记参数": {"run_record": parameters, "登记模块": registered_doc,
+                      "逐项相同": None if parameters is None else parameters == registered_doc},
+        "V3-9 导出清单行": exports,
+        "场景": {"meta": scenario["meta"], "half_split": tool_scenario["half_split"],
+               "scenario_sha256": support.sha256(support.get_bytes(scenario_path)),
+               "support_sha256": support.sha256(support.get_bytes(HERE / "v20_compare_support.py"))},
+        "counts": counts, "by_layer": record.summary(), "details": record.details}
+    record_path = out / "逐场景比对" / f"{name}.json"
+    support.put_bytes(record_path, support.dump_json(payload))
+    assert counts["不一致"] == 0, f"{name} 有 {counts['不一致']} 处不一致，见 {record_path}"
+    if tool is not None and "registered_settings" in tool:
+        assert tool["registered_settings"] is True, f"{name} 工具 registered_settings 为 false"
+    reason = "" if confirmed is None else (confirmed.get("reason") or "")
+    assert not reason.startswith(support.RECONCILIATION_TEXT), f"{name} 项目对账不符实际发生"
+    assert tool is None or not support.b_tool_reconciliation(tool), f"{name} 工具对账不符实际发生"
+    if parameters is not None:
+        assert parameters == registered_doc, f"{name} 运行记录的检验参数与登记值不同"
+    if project is not None:
+        assert len(exports) == len(support.V3_EXPORTS), f"{name} 导出文件不在 MANIFEST.sha256 中"
+
+
+def v3_reconciliation_reasons() -> tuple[str, str]:
+    """两种对账不符原因：由 confirmatory_test 在构造输入上实际产生（不手写原因文字）。"""
+    days = tuple(dt.date(2017, 1, 3) + dt.timedelta(days=index) for index in range(60))
+    returns = tuple(math.expm1(1e-4) for _ in days)
+    total = math.fsum(math.log1p(item) for item in returns)
+
+    def outcome(mine: float, theirs: float) -> str:
+        data = support.confirmatory.ConfirmatoryInput("验证期", days, returns, (0.0,) * len(days), mine, theirs, 0.0,
+                                                      True, {"SPX": True, "QQQ": True}, {}, dt.date(2016, 12, 29))
+        result = support.confirmatory.confirmatory_test(data, support.confirm_parameters(dt.date(2017, 2, 1)))
+        assert result.valid is False
+        return result.reason
+
+    first = outcome(total + 1e-6, 0.0)                          # Σ ln(1 + R) 与 ln W_末 之差超出容差
+    second = outcome(total + 0.9e-10, -0.9e-10)                 # 各自对账在容差内，Σ d_j 与 Δ 之差 1.8e-10 超出容差
+    return first, second
+
+
+def test_wiring_v3_reconciliation_mapping() -> None:
+    """V3 乙第 2 条：映射成立两例（项目两种对账不符原因各一；工具两种表示各一）→ 接口差异；映射不成立两例
+    （项目对账不符而工具为其他计算失败；项目为其他计算无效而工具为对账不符）→ 不一致。
+    只证明比较器识别映射，不称两侧实际触发对账失败（N176）。"""
+    first, second = v3_reconciliation_reasons()
+    assert first.startswith("对账不符：Σ ln(1 + R_j)") and second.startswith("对账不符：Σ d_j")
+    listed = {"invalid_reasons": [{"reason": "对账不符", "object": "候选"}]}
+    stopped = {"exit_code": 3, "stop_reason": {"reason": "计算失败"},
+               "failures": [{"object": "候选", "type": "对账不符"}]}
+    leverage = {"exit_code": 3, "stop_reason": {"reason": "计算失败"},
+                "failures": [{"object": "候选", "type": "杠杆因子不为正"}]}
+    record = support.Recorder()
+    support.compare_b_reasons(record, listed["invalid_reasons"], first, (), {}, {})
+    assert record.counts == {("检验层", support.RECONCILIATION_ITEM, "接口差异"): 1}
+    record = support.Recorder()
+    assert support.compare_b_reconciliation(record, stopped, second) == "接口差异"
+    assert record.total("接口差异") == 1 and record.total("不一致") == 0
+    record = support.Recorder()
+    assert support.compare_b_reconciliation(record, leverage, first) == "不一致"
+    assert record.total("不一致") == 1 and record.total("接口差异") == 0
+    record = support.Recorder()
+    support.compare_b_reasons(record, listed["invalid_reasons"], "R2 无法计算", (), {}, {})
+    assert record.total("不一致") == 1 and record.total("接口差异") == 0
+
+
+def test_wiring_v3_run_script_injects_no_parameters() -> None:
+    """run_v3 的子进程脚本只替换三个构造 M3 基准常量（照 V2 INJECT 的前两条赋值）并包装 stable_files；
+    不含任何检验参数注入（重抽样次数、α、警示 p、分界、主设定、敏感性设定、种子）。"""
+    lines = support.V3_SCRIPT.splitlines()
+    assignments = [line for line in lines if "=" in line and not line.startswith(("from ", "import "))]
+    assert assignments == ["ROOT = Path(sys.argv[1])",
+                           "registered.M3_MANIFEST_SHA256, registered.M3_SIGNALS_SHA256 = sys.argv[2], sys.argv[3]",
+                           "registered.M3_SIGNALS_BYTES = int(sys.argv[4])",
+                           "output.stable_files = support.v3_wrap_stable_files(output.stable_files)"]
+    for word in ("PERIODS", "VALIDATION", "confirmatory", "resamples", "alpha", "warning", "split", "seed", "block",
+                 "replace"):
+        assert word not in support.V3_SCRIPT, word
+    assert lines[-1] == "sys.exit(validation_run.main(['--root', str(ROOT)]))"
+
+
+def test_wiring_v3_generation_is_deterministic() -> None:
+    """场景生成两次逐字节相同；11 个场景；缺价场景的空价格恰在登记日期；工具场景的 QQQ 在 1999-03-10 之前为 null、
+    half_split 为轴上第一个不早于 2020-01-01 的交易日（2020-01-02）、window_start 2016-12-30。"""
+    assert len(support.V3_NAMES) == 11
+    for name in ("v3_000", "v3_004", "v3_缺价_窗口内", "v3_缺价_窗口前"):
+        first, second = support.v3_scenario(name), support.v3_scenario(name)
+        assert support.v3_market_files(first) == support.v3_market_files(second)
+        assert support.dump_json(support.v3_tool_scenario(first)) == support.dump_json(support.v3_tool_scenario(second))
+    window = support.v3_scenario("v3_缺价_窗口内")
+    base = support.v3_scenario("v3_000")
+    assert [day for day, value in window["prices"]["SPX"] if value is None] == [
+        dt.date(2019, 6, 3), dt.date(2019, 6, 4), dt.date(2019, 6, 5)]
+    assert window["prices"]["QQQ"] == base["prices"]["QQQ"]
+    tool = support.v3_tool_scenario(support.v3_scenario("v3_缺价_窗口前"))
+    axis = tool["axis"]
+    assert axis[0] == "1990-01-02" and axis[-1] == "2022-12-30" and tool["half_split"] == "2020-01-02"
+    assert tool["window_start"] == "2016-12-30" and tool["params"] == [3, "0.025", 3] and "B" not in tool
+    first_qqq = next(index for index, item in enumerate(tool["prices"]["QQQ"]) if item is not None)
+    assert axis[first_qqq] == "1999-03-10"
+    assert [axis[index] for index, item in enumerate(tool["prices"]["QQQ"]) if item is None and index > first_qqq] == [
+        "2010-06-01", "2010-06-02", "2010-06-03"]
+
+
+def v3_constructed_window(missing: bool = False) -> tuple[object, object]:
+    """构造轴（2002—2005，固定起点 2003-12-31）上组合层的冻结候选结果（只在内存中）。"""
+    from wavewarn_v20_helpers import random_closes
+
+    axis = tuple(support.stock_trading_days(dt.date(2002, 1, 2), dt.date(2005, 12, 30)))
+    closes = {"SPX": random_closes(2, len(axis)), "QQQ": random_closes(3, len(axis))}
+    if missing:
+        closes["SPX"][axis.index(dt.date(2005, 6, 1))] = None
+    prices = {asset: {day: value for day, value in zip(axis, values, strict=True) if value is not None}
+              for asset, values in closes.items()}
+    snapshot = support.make_snapshot(axis, prices, axis[-1], dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
+                                     {"SPX": "0" * 64, "QQQ": "0" * 64})
+    spec = support.research_run.WindowSpec(
+        support.research_run.Purpose.FROZEN, dt.date(2003, 12, 31), axis[-1], {"SPX": axis[0], "QQQ": axis[0]},
+        support.v3_registered.INITIAL, support.research_run.Continuity.COMPLETE_TRADING_AXIS)
+    result = support.research_run.run_window(snapshot, spec, support.v3_registered.run_parameters(),
+                                             (support.v3_registered.FROZEN_CANDIDATE,))
+    assert result.stop is None
+    return snapshot, result
+
+
+def v3_rows(data: bytes) -> list[list[str]]:
+    import csv
+    import io
+
+    return list(csv.reader(io.StringIO(gzip.decompress(data).decode("utf-8"))))
+
+
+def test_wiring_v3_exports_follow_the_contract() -> None:
+    """导出契约（第 3.4 条）：v3_states 两列、日期恰为 [f 的前一交易日, E]；v3_axis 的 f = axis[j₀−1]；v3_nav 的日期为
+    [j₀, E]、首值为 1；净值不可计算时只写表头与一行“status=净值不可用,,”。包装函数不改变原有文件的字节。"""
+    snapshot, result = v3_constructed_window()
+    axis = snapshot.days
+    j0 = axis.index(dt.date(2003, 12, 31))
+    files = support.v3_exports(snapshot, result)
+    assert set(files) == set(support.V3_EXPORTS)
+    states = v3_rows(files["v3_states.csv.gz"])
+    assert states[0] == ["date", "risk"] and [row[0] for row in states[1:]] == [day.isoformat()
+                                                                                  for day in axis[j0 - 2:]]
+    assert {row[1] for row in states[1:]} <= {"正常", "一级", "二级"}
+    document = json.loads(files["v3_axis.json"])
+    assert (document["f_prev"], document["f"], document["E"]) == (axis[j0 - 2].isoformat(), axis[j0 - 1].isoformat(),
+                                                                 axis[-1].isoformat())
+    assert document["days"] == [day.isoformat() for day in axis[j0 - 2:]]
+    rows = v3_rows(files["v3_nav.csv.gz"])
+    assert rows[0] == ["date", "signal_wealth", "hold_wealth"] and rows[1] == [axis[j0].isoformat(), "1.0", "1.0"]
+    assert [row[0] for row in rows[1:]] == [day.isoformat() for day in axis[j0:]]
+    gap_snapshot, gap_result = v3_constructed_window(missing=True)
+    gap_rows = gzip.decompress(support.v3_exports(gap_snapshot, gap_result)["v3_nav.csv.gz"]).decode("utf-8")
+    assert gap_rows == "date,signal_wealth,hold_wealth\nstatus=净值不可用,,\n"
+    original = {"a.json": b"1", "b.csv": b"2"}
+    wrapped = support.v3_wrap_stable_files(lambda snap, res, *rest, **keys: dict(original))(snapshot, result, "x")
+    assert {name: wrapped[name] for name in original} == original and set(wrapped) == {*original, *support.V3_EXPORTS}
+
+
+def test_wiring_v3_completion_and_alignment() -> None:
+    """完成状态三选一；对齐断言在工具 window.start 不同时为 False，缺工具键时为 None（未比较）。"""
+    tool = {"valid": True, "registered_settings": True, "n": 3,
+            "window": {"start": "2016-12-30", "first_signal_day": "2016-12-29", "half_split": "2020-01-02",
+                       "E": "2017-01-05"}}
+    scenario = {"axis": ["2016-12-28", "2016-12-29", "2016-12-30", "2017-01-03", "2017-01-04", "2017-01-05"],
+                "half_split": "2020-01-02"}
+    dates = {"passed": True, "checks": [{"item": "j₀（first_return_day）", "actual": "2016-12-30"},
+                                        {"item": "f（候选首条净值模拟信号）", "actual": "2016-12-29"}]}
+    project = {"confirmatory": {"valid": True, "n": 3}, "date_assertions": dates,
+               "v3_axis": {"days": scenario["axis"], "E": "2017-01-05"}}
+    assert support.v3_completion(project, tool, 0) == support.V3_FULL
+    assert support.v3_completion({**project, "confirmatory": {"valid": False}}, tool, 0) == support.V3_STAGED
+    assert support.v3_completion(None, tool, 0) == support.v3_completion(project, tool, 3) == support.V3_UNFINISHED
+    assert all(value is True for value in support.v3_alignment(scenario, project, tool).values())
+    shifted = {**tool, "window": {**tool["window"], "start": "2016-12-29"}}
+    assert support.v3_alignment(scenario, project, shifted)["工具 window.start == 2016-12-30"] is False
+    early = {key: value for key, value in tool.items() if key != "n"}
+    assert support.v3_alignment(scenario, project, early)["两侧 n 精确相等"] is None
+
+
+# 补充一第三节第 3 条：名称遮蔽缺陷的三条接线自检（只证明接线，不证明比较结果）。
+
+
+def test_wiring_v3_construct_csv_bytes_is_not_shadowed() -> None:
+    """（a）support.csv_bytes 仍是既有的“场景 → 构造 CSV”函数：参数名恰为 scenario、asset。"""
+    import inspect
+
+    assert list(inspect.signature(support.csv_bytes).parameters) == ["scenario", "asset"]
+
+
+def test_wiring_v3_construct_runs_on_a_b_shaped_scenario(tmp_path: Path) -> None:
+    """（b）以与第一个 B 场景同构的构造数据（confirm 类、交易日轴 2003-01-02 起约三年、两资产价格文字；在内存中生成，
+    不读取外部材料）调用 support.construct：不抛异常；返回 ConstructedInputs，CSV 与既有 csv_bytes 的结果逐字节相同，
+    表头为八列，行数为轴长加一，元数据核对无错误。"""
+    axis = [day.isoformat() for day in support.stock_trading_days(dt.date(2003, 1, 2), dt.date(2006, 1, 6))]
+    prices = {"SPX": [f"{1000 + index * 0.25:.2f}" for index in range(len(axis))],
+              "QQQ": [f"{50 + index * 0.01:.2f}" for index in range(len(axis))]}
+    data = {"name": "接线自检", "kind": "confirm", "axis": axis, "calendar": "NYSE", "prices": prices,
+            "params": [3, "0.015", 1], "window_start": "2004-08-31", "half_split": "2005-05-05", "meta": {}}
+    constructed = support.construct(data, tmp_path / "root")
+    assert isinstance(constructed, support.ConstructedInputs) and constructed.metadata_error is None
+    assert dict(constructed.csv) == {asset: support.csv_bytes(data, asset) for asset in support.ASSETS}
+    for asset in support.ASSETS:
+        lines = constructed.csv[asset].decode("utf-8").splitlines()
+        assert lines[0] == "date,value,open,high,low,close,volume,source" and len(lines) == len(axis) + 1
+
+
+def test_wiring_v3_exports_use_the_development_output_functions() -> None:
+    """（c）V3 导出写出函数（v3_exports）写出的是开发期输出函数的结果：表头与列数；字节与 development_output 的
+    csv_bytes、gzip_bytes 对同一行重新写出的结果相同。"""
+    from market_risk.wavewarn_v20 import development_output
+
+    snapshot, result = v3_constructed_window()
+    files = support.v3_exports(snapshot, result)
+    for name, header in (("v3_states.csv.gz", ["date", "risk"]),
+                         ("v3_nav.csv.gz", ["date", "signal_wealth", "hold_wealth"])):
+        rows = v3_rows(files[name])
+        assert rows[0] == header and all(len(row) == len(header) for row in rows[1:]), name
+        rewritten = development_output.gzip_bytes(development_output.csv_bytes(tuple(header), [tuple(row) for row in
+                                                                                             rows[1:]]))
+        assert files[name] == rewritten, name
+    assert files["v3_axis.json"] == development_output.json_bytes(json.loads(files["v3_axis.json"]))

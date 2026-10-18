@@ -2090,6 +2090,14 @@ B_TOOL_EARLY = "未比较（工具提前返回未输出）"
 B_PROJECT_SHORT = "未比较（项目无效分支短路未计算）"
 B_NOT_PROVIDED = "未比较（项目接口未提供）"
 B_UNREGISTERED_EXIT = "未登记的出口组合"
+# V3 乙第 1 条（发起人 2026-10-17 裁决第 4 项甲）：D15 两例以项目口径为准；状态名 D15_STATUS 不变。
+D15_ITEM = "预热不足（D15，项目口径为准（发起人 2026-10-17 裁决）；真实验证期是否触发由 V2 的 T-D15 与入口断言核验）"
+# V3 乙第 2 条（裁决第 3 项）：对账不符 ↔ 工具对账不符的表示，记“接口差异”（不计一致、不计不一致）；只适用于这一种情形。
+# 工具表示（README 1709880）：确认性检验 invalid_reasons 的 reason 含“对账不符”（第 345 行）；或退出码 3、
+# stop_reason.reason 为“计算失败”且所附失败条目的类别为“对账不符”
+# （第 59 行；条目写法见第 323 行 {object, type, idx?}）。
+RECONCILIATION_ITEM = "第 3 项映射：计算无效 ↔ 计算失败（对账不符）"
+RECONCILIATION_TEXT = "对账不符"
 
 
 def confirm_parameters(split: dt.date) -> confirmatory.ConfirmatoryParameters:
@@ -2201,14 +2209,51 @@ def b_expected_reasons(project_reason: str, nav_missing: Sequence[tuple[str, dt.
     return None
 
 
+def b_tool_reconciliation(tool: Mapping) -> bool:
+    """工具是否以登记的表示给出对账不符（README 1709880 第 59、323、345 行）：invalid_reasons 中某条 reason 含
+    “对账不符”；或退出码 3、stop_reason.reason 为“计算失败”且失败条目（顶层或 stop_reason 内的 failures）中
+    某条的 type 或 reason 为“对账不符”。其他计算失败（杠杆因子不为正、非有限值）不算。"""
+    reasons = tool.get("invalid_reasons") or []
+    if any(isinstance(item, Mapping) and RECONCILIATION_TEXT in str(item.get("reason", "")) for item in reasons):
+        return True
+    stop = tool.get("stop_reason") if isinstance(tool.get("stop_reason"), Mapping) else {}
+    if tool.get("exit_code") != 3 or stop.get("reason") != "计算失败":
+        return False
+    failures = [*(tool.get("failures") or []), *(stop.get("failures") or [])]
+    return any(isinstance(item, Mapping)
+               and RECONCILIATION_TEXT in (str(item.get("type", "")) + str(item.get("reason", "")))
+               for item in failures)
+
+
+def compare_b_reconciliation(record: Recorder, tool: Mapping, project_reason: str | None) -> str:
+    """V3 乙第 2 条（裁决第 3 项）：项目 valid = false 且原因以“对账不符”开头，且工具给出对账不符的登记表示 →
+    记“接口差异”（项目 RECONCILIATION_ITEM），不计一致、不计不一致；只一侧为对账不符 → 不一致。返回记下的状态。
+    自检只证明比较器识别映射，不表示两侧实际触发了对账失败（N176）。"""
+    layer = "检验层"
+    mine = project_reason is not None and project_reason.startswith(RECONCILIATION_TEXT)
+    theirs = b_tool_reconciliation(tool)
+    where = "invalid_reasons／stop_reason"
+    shown = {key: tool.get(key) for key in ("exit_code", "invalid_reasons", "stop_reason", "failures") if key in tool}
+    if mine and theirs:
+        record.add(layer, RECONCILIATION_ITEM, "接口差异", where, shown, project_reason,
+                   "裁决第 3 项映射：项目“计算无效（对账不符）”↔ 工具“计算失败（对账不符）”")
+        return "接口差异"
+    if mine:
+        record.add(layer, "对账不符（项目）↔ 工具不是对账不符的表示", "不一致", where, shown, project_reason)
+    else:
+        record.add(layer, "对账不符（工具）↔ 项目原因不是对账不符", "不一致", where, shown, project_reason)
+    return "不一致"
+
+
 def compare_b_reasons(record: Recorder, tool_reasons: Sequence[Mapping], project_reason: str,
                       nav_missing: Sequence[tuple[str, dt.date]], events: Mapping, r2: Mapping) -> None:
     """设计第二节第 2 项：项目短路只报一条；把项目原因映射为工具（类别, 对象[, 缺价日期]），在工具列表中找到全同的
-    一条才记一致；工具其余原因逐条“未比较（工具多报原因，项目短路未检查）”；找不到即不一致。对账不符待裁决，不记一致。"""
+    一条才记一致；工具其余原因逐条“未比较（工具多报原因，项目短路未检查）”；找不到即不一致。对账不符按 V3 乙第 2 条的
+    映射处理（compare_b_reconciliation），不记一致。"""
     layer = "检验层"
-    if project_reason.startswith("对账不符"):
-        record.add(layer, "对账不符（待裁决口径，实际发生即停）", "不一致", "invalid_reasons", tool_reasons,
-                   project_reason)
+    if project_reason.startswith(RECONCILIATION_TEXT) or b_tool_reconciliation({"invalid_reasons": tool_reasons}):
+        # V3 乙第 2 条：只有“项目对账不符 ↔ 工具对账不符”记接口差异；任一侧单独出现对账不符都记不一致。
+        compare_b_reconciliation(record, {"invalid_reasons": tool_reasons}, project_reason)
         return
     expected = b_expected_reasons(project_reason, nav_missing, events, r2)
     if expected is None:
@@ -2277,8 +2322,12 @@ def compare_b_exit(record: Recorder, tool: Mapping, stop: research_run.StopRecor
           and stop.exit is research_run.Exit.FIXED_START_UNMET and facts is not None
           and facts.get("t0") is not None and facts.get("kappa") is not None and j0 is not None
           and facts["kappa"] + 1 <= j0 < facts["t0"] + COMMON_START_OFFSET):
-        record.add(layer, "预热不足（D15，口径未统一；本批未核验真实验证期是否触发）", D15_STATUS, "场景",
-                   "正常运行", project, json.dumps({"t0": facts["t0"], "kappa": facts["kappa"], "j0": j0}))
+        # V3 乙第 1 条：项名按发起人 2026-10-17 裁决改写；状态名不变。记录补写 j₀_min 与双方出口（V3-2），比较规则不变。
+        record.add(layer, D15_ITEM, D15_STATUS, "场景",
+                   "正常运行", project, json.dumps({"t0": facts["t0"], "kappa": facts["kappa"], "j0": j0,
+                                                     "j0_min": stop.detail.get("j0_min_index"),
+                                                     "tool_exit": f"退出码 {tool.get('exit_code')}（正常运行）",
+                                                     "project_exit": project}, ensure_ascii=False, default=str))
         return "D15"
     else:
         record.add(layer, B_UNREGISTERED_EXIT, "不一致", "场景", {"exit_code": tool.get("exit_code"), **reason_info},
@@ -3142,3 +3191,420 @@ def compare_event_files(record: Recorder, tool: Mapping, snapshot: Snapshot, res
             "文件 SHA-256": {name: sha256(files[name]) for name in EVENT_FILES},
             "行数": {name: len(parsed[name][1]) for name in EVENT_FILES},
             "失败零切换（输出一致，失败状态保留）": failed_zero_ok, "失败零切换（不一致）": failed_zero_bad}
+
+
+# ---------------------------------------------------------------------------
+# 阶段五 V3 丙：阶段五入口的输出比对（《阶段五 V3 实施执行指令定稿》第四节第 3 条；V3 设计稿定稿第二节丙）。只追加。
+# 构造根、行情文件与子进程都经 V2 F7（tests/test_wavewarn_v20_validation_run.py）的公共辅助（put、git、run_process、
+# csv_text、registered_yaml、baseline_files、DECISIONS），照 build_root 同一做法（偏二）；V2 测试文件不改。
+# 项目侧取值一律来自入口写出的文件；不重新运行检验。
+# ---------------------------------------------------------------------------
+
+import random  # noqa: E402  只追加：导入放在追加段内，既有导入段不改
+import sys  # noqa: E402
+
+import test_wavewarn_v20_validation_run as v2_run  # noqa: E402
+
+from market_risk.wavewarn_v20 import registered_v20_validation as v3_registered  # noqa: E402
+from market_risk.wavewarn_v20 import validation_output as v3_output  # noqa: E402
+from market_risk.wavewarn_v20.development_output import csv_bytes as output_csv_bytes  # noqa: E402
+from market_risk.wavewarn_v20.development_output import gzip_bytes as output_gzip_bytes  # noqa: E402
+from market_risk.wavewarn_v20.development_output import json_bytes as output_json_bytes  # noqa: E402
+from market_risk.wavewarn_v20.development_output import serialize_daily as output_serialize_daily  # noqa: E402
+
+V3_TESTS_DIR = Path(__file__).resolve().parent
+V3_FIRST = {"SPX": dt.date(1990, 1, 2), "QQQ": dt.date(1999, 3, 10)}      # 与 V2 F7 相同
+V3_LAST = dt.date(2026, 10, 30)
+V3_CUTOFF = dt.date(2022, 12, 30)                                          # 验证期截止日（工具轴的末日）
+# 构造 M3 基准的截止日（照 V2 的 baseline 夹具）
+V3_BASELINE_CUTOFF = dt.date(2016, 12, 30)
+V3_WINDOW_START = "2016-12-30"
+V3_FIRST_SIGNAL = "2016-12-29"
+V3_SPLIT_FROM = dt.date(2020, 1, 1)                 # 工具 half_split = 轴上第一个不早于此日的交易日；项目分界不改
+V3_SEEDS = {"SPX": 20261300, "QQQ": 20261350}
+V3_TRENDS = ("平稳上涨", "宽幅震荡", "长期下跌")
+V3_DRIFTS = (0.0003, 0.0, -0.0002)
+V3_SIGMAS = (0.006, 0.012, 0.020)
+V3_SWING, V3_PERIOD_DAYS = 0.15, 750
+# 两个缺价场景：（派生自，资产，空价格的交易日）。
+V3_GAPS: dict[str, tuple[str, str, tuple[dt.date, ...]]] = {
+    "v3_缺价_窗口内": ("v3_000", "SPX", (dt.date(2019, 6, 3), dt.date(2019, 6, 4), dt.date(2019, 6, 5))),
+    "v3_缺价_窗口前": ("v3_001", "QQQ", (dt.date(2010, 6, 1), dt.date(2010, 6, 2), dt.date(2010, 6, 3))),
+}
+V3_NAMES = (*(f"v3_{index:03d}" for index in range(9)), *V3_GAPS)          # 共 11 个；不追加、不搜索（裁决第（3）项）
+V3_EXPORTS = ("v3_states.csv.gz", "v3_axis.json", "v3_nav.csv.gz")
+V3_NAV_UNAVAILABLE = "status=净值不可用"
+V3_FULL, V3_STAGED, V3_UNFINISHED = "完整对齐", "分阶段", "未完成（覆盖缺口）"
+
+
+def v3_series(index: int, asset: str) -> list[tuple[dt.date, str]]:
+    """第四节第 3.1 条：random.Random(种子)；走势 index // 3（漂移 +0.0003、0、−0.0002；宽幅震荡另加
+    0.15 × sin(2π × k ÷ 750)）；扰动幅度 index % 3（σ = 0.006、0.012、0.020）；
+    第 k 日价格 100 × exp(Σ_{m≤k}(漂移 + gauss(0, σ)_m) + 震荡_k)，写为 f"{max(1.0, 价格):.2f}"。"""
+    days = stock_trading_days(V3_FIRST[asset], V3_LAST)
+    generator = random.Random(V3_SEEDS[asset] + index)
+    trend, size = index // 3, index % 3
+    drift, sigma = V3_DRIFTS[trend], V3_SIGMAS[size]
+    total, rows = 0.0, []
+    for k, day in enumerate(days):
+        total += drift + generator.gauss(0.0, sigma)
+        swing = V3_SWING * math.sin(2 * math.pi * k / V3_PERIOD_DAYS) if trend == 1 else 0.0
+        rows.append((day, f"{max(1.0, 100 * math.exp(total + swing)):.2f}"))
+    return rows
+
+
+def v3_scenario(name: str) -> dict:
+    """一个 V3 场景的构造价格：{资产: [(日期, 收盘价文字或 None)]}；缺价场景在登记日期上为 None。"""
+    base, asset_gap, gap_days = V3_GAPS.get(name, (name, None, ()))
+    index = int(base.removeprefix("v3_"))
+    prices = {asset: v3_series(index, asset) for asset in ASSETS}
+    if asset_gap is not None:
+        on_axis = {day for day, _ in prices[asset_gap]}
+        assert all(day in on_axis for day in gap_days), f"{name} 的缺价日不在交易日轴上"
+        prices[asset_gap] = [(day, None if day in gap_days else value) for day, value in prices[asset_gap]]
+    meta = {"出处": "V3 丙", "种子": {asset: V3_SEEDS[asset] + index for asset in ASSETS},
+            "走势": V3_TRENDS[index // 3], "幅度": V3_SIGMAS[index % 3], "派生自": None if base == name else base,
+            "缺价": [] if asset_gap is None else [{"资产": asset_gap, "日期": day_text(day)} for day in gap_days]}
+    return {"name": name, "prices": prices, "gaps": {asset_gap: gap_days} if asset_gap else {}, "meta": meta}
+
+
+def v3_market_files(scenario: Mapping) -> dict[str, bytes]:
+    """八列行情（V2 csv_text 的写法；空价格写为 {日期},,x,x,x,x,x,yahoo）。"""
+    files = {}
+    for asset in ASSETS:
+        rows = [(day, value if value is not None else "") for day, value in scenario["prices"][asset]]
+        changes = {day: f"{day},,x,x,x,x,x,yahoo" for day, value in scenario["prices"][asset] if value is None}
+        files[asset] = v2_run.csv_text(rows, changes)
+    return files
+
+
+def v3_baseline(scenario: Mapping) -> tuple[bytes | None, dict]:
+    """构造 M3 基准（照 V2 的 baseline 夹具）：截止 2016-12-30、构造验收用途、只含冻结候选、经 serialize_daily 写出；
+    组合层停止即无法生成（返回 None 与停止记录）。"""
+    axis = tuple(stock_trading_days(V3_FIRST["SPX"], V3_BASELINE_CUTOFF))
+    prices = {asset: {day: Decimal(value) for day, value in scenario["prices"][asset]
+                      if day <= axis[-1] and value is not None} for asset in ASSETS}
+    snapshot = make_snapshot(axis, prices, axis[-1], dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
+                             {"SPX": "0" * 64, "QQQ": "0" * 64})
+    spec = research_run.WindowSpec(research_run.Purpose.CONSTRUCTED, None, axis[-1], V3_FIRST, v3_registered.INITIAL,
+                                   research_run.Continuity.COMPLETE_TRADING_AXIS)
+    result = research_run.run_window(snapshot, spec, v3_registered.run_parameters(),
+                                     (v3_registered.FROZEN_CANDIDATE,))
+    if result.stop is not None:
+        return None, {"stop": result.stop.exit.value, "stage": result.stop.stage, "message": result.stop.message}
+    return output_serialize_daily(result, None)["daily_signals.csv.gz"], {"stop": None, "j0": result.window.first_day}
+
+
+def build_root_v3(root: Path, scenario: Mapping, signals: bytes) -> Path:
+    """照 V2 build_root 同一做法：预检文件占位、两份配置、两份八列行情、构造 M3 基准；""" \
+        """构造根内 git init／add／commit。"""
+    files = v3_market_files(scenario)
+    for relative in v3_output.PREFLIGHT_FILES:
+        if not relative.startswith("config/"):
+            v2_run.put(root.joinpath(*relative.split("/")), f"# 构造占位：{relative}\n".encode())
+    v2_run.put(root.joinpath("config", "wavewarn_v20.yaml"), v2_run.registered_yaml(files))
+    v2_run.put(root.joinpath("config", "data_decisions.yaml"), v2_run.DECISIONS.encode("utf-8"))
+    for asset, raw in files.items():
+        v2_run.put(v2_run.market_file(root, asset), raw)
+    for name, data in v2_run.baseline_files(signals).items():
+        v2_run.put(v2_run.research_dir(root).joinpath("evaluation_development", name), data)
+    v2_run.git(root, "init", "-q")
+    v2_run.git(root, "add", "-A")
+    v2_run.git(root, "commit", "-q", "-m", "构造")
+    return root
+
+
+# 子进程脚本（第四节第 3.3 条，偏离 run_injected）：只做两件事——（i）照 V2 INJECT 的前两条赋值替换三个构造 M3 基准
+# 常量；（ii）把 validation_output.stable_files 换成包装函数。不注入任何检验参数（重抽样次数、α、警示 p、分界、主设定、
+# 敏感性设定、种子全部取登记值）。
+V3_SCRIPT = (
+    "import sys\n"
+    f"sys.path.insert(0, {str(V3_TESTS_DIR)!r})\n"
+    "from pathlib import Path\n"
+    "from market_risk.wavewarn_v20 import validation_run\n"
+    "from market_risk.wavewarn_v20 import registered_v20_validation as registered\n"
+    "from market_risk.wavewarn_v20 import validation_output as output\n"
+    "import v20_compare_support as support\n"
+    "ROOT = Path(sys.argv[1])\n"
+    "registered.M3_MANIFEST_SHA256, registered.M3_SIGNALS_SHA256 = sys.argv[2], sys.argv[3]\n"
+    "registered.M3_SIGNALS_BYTES = int(sys.argv[4])\n"
+    "output.stable_files = support.v3_wrap_stable_files(output.stable_files)\n"
+    "sys.exit(validation_run.main(['--root', str(ROOT)]))\n"
+)
+
+
+def run_v3(root: Path, signals: bytes) -> object:
+    """在新进程中运行 validation_run.main(['--root', 构造根])（--mode validation，默认）；""" \
+        """子进程经 V2 的 run_process。"""
+    files = v2_run.baseline_files(signals)
+    return v2_run.run_process([sys.executable, "-B", "-c", V3_SCRIPT, str(root),
+                               sha256(files["MANIFEST.sha256"]), sha256(signals), str(len(signals))], root)
+
+
+def v3_exports(snapshot: Snapshot, result: research_run.WindowResult) -> dict[str, bytes]:
+    """第四节第 3.4 条（丁第 2 条）：从同一个 WindowResult 写出三个构造专用导出文件。"""
+    candidate = v3_registered.FROZEN_CANDIDATE
+    outcome, window = result.candidates[candidate], result.window
+    axis = snapshot.days
+    f_prev, first, last = outcome.system[0].day, axis[window.j0 - 1], window.last_day
+    days = [day for day in axis if f_prev <= day <= last]
+    states = [(item.day, None if item.risk is None else v3_output.risk_text(item.risk)) for item in outcome.system]
+    assert [day for day, _ in states] == days, "v3_states 的日期不是 [f 的前一交易日, E]"
+    signal, hold = outcome.outcome.signal_nav, None if result.common is None else result.common.hold
+    if isinstance(signal, nav.NavResult) and isinstance(hold, nav.NavResult):
+        rows = []
+        for mine, held in zip(signal.executions, hold.executions, strict=True):
+            assert mine.day == held.day, "两条净值的日期不对应"
+            rows.append((mine.day, mine.wealth, held.wealth))
+        assert rows[0][0] == window.first_day and rows[-1][0] == last, "v3_nav 的日期不是 [j₀, E]"
+    else:
+        rows = [(V3_NAV_UNAVAILABLE, None, None)]
+    return {"v3_states.csv.gz": output_gzip_bytes(output_csv_bytes(("date", "risk"), states)),
+            "v3_axis.json": output_json_bytes({"f_prev": f_prev, "f": first, "E": last, "days": days}),
+            "v3_nav.csv.gz": output_gzip_bytes(output_csv_bytes(("date", "signal_wealth", "hold_wealth"), rows))}
+
+
+def v3_wrap_stable_files(original: object) -> object:
+    """包装 validation_output.stable_files：调用原函数后，从同一个 result 追加三个导出文件；原有文件的字节不变。"""
+
+    def wrapped(snapshot: Snapshot, result: research_run.WindowResult, *rest: object, **keywords: object) -> dict:
+        files = original(snapshot, result, *rest, **keywords)            # type: ignore[operator]
+        extra = v3_exports(snapshot, result)
+        assert not set(files) & set(extra), "导出文件名与正式输出重名"
+        return {**files, **extra}
+
+    return wrapped
+
+
+def v3_tool_scenario(scenario: Mapping) -> dict:
+    """第四节第 3.5 条：axis 为构造轴中 ≤ 2022-12-30 的全部交易日；prices 两资产（null 为缺价；QQQ 在其历史起点之前
+    为 null——工具以最早收盘价为该资产标签史的起点，README 第 81、279 行）；params [3, "0.025", 3]；window_start
+    2016-12-30；half_split 为轴上第一个不早于 2020-01-01 的交易日；calendar NYSE；不写 B、seeds。"""
+    axis = list(stock_trading_days(V3_FIRST["SPX"], V3_CUTOFF))
+    lookup = {asset: dict(scenario["prices"][asset]) for asset in ASSETS}
+    half = next(day for day in axis if day >= V3_SPLIT_FROM)
+    candidate = v3_registered.FROZEN_CANDIDATE
+    return {"name": scenario["name"], "kind": "confirm", "axis": [day_text(day) for day in axis], "calendar": "NYSE",
+            "prices": {asset: [lookup[asset].get(day) for day in axis] for asset in ASSETS},
+            "params": [candidate.k, str(candidate.theta), candidate.h], "window_start": V3_WINDOW_START,
+            "half_split": day_text(half), "meta": scenario["meta"]}
+
+
+def v3_end_days(days: Sequence[str], start: str, last: str) -> list[str]:
+    """区间末日：轴上晚于起点、不晚于末日的交易日（区间以末日标记）。"""
+    return [day for day in days if start < day <= last]
+
+
+def v3_alignment(tool_scenario: Mapping, project: Mapping, tool: Mapping) -> dict[str, bool | None]:
+    """第四节第 3.6 条：阶段五对齐断言。None 为未比较（缺所需的工具键或项目导出）。工具未输出逐区间日期，
+    工具侧区间末日由场景轴、window.start 与 window.E 确定（来源写入记录）。"""
+    window = tool.get("window") or {}
+    dates = project.get("date_assertions") or {}
+    by_item = {row["item"]: row for row in dates.get("checks", [])}
+    confirmed = project.get("confirmatory") or {}
+    axis_doc = project.get("v3_axis")
+    checks: dict[str, bool | None] = {
+        "项目 date_assertions 全部通过": dates.get("passed") is True if dates else None,
+        "项目 j₀ = 2016-12-30": (by_item.get("j₀（first_return_day）", {}).get("actual") == V3_WINDOW_START
+                                if dates else None),
+        "项目 f = 2016-12-29": (by_item.get("f（候选首条净值模拟信号）", {}).get("actual") == V3_FIRST_SIGNAL
+                               if dates else None),
+        "工具 window.start == 2016-12-30": window.get("start") == V3_WINDOW_START if window else None,
+        "工具 window.first_signal_day == 2016-12-29": (window.get("first_signal_day") == V3_FIRST_SIGNAL
+                                                     if window else None),
+        "工具 window.half_split == 场景": (window.get("half_split") == tool_scenario["half_split"]
+                                        if window else None),
+        "工具 registered_settings 为 true": (tool.get("registered_settings") is True
+                                          if "registered_settings" in tool else None),
+        "两侧 n 精确相等": (b_float(tool["n"]) == b_float(confirmed.get("n"))
+                        if "n" in tool and confirmed.get("n") is not None else None),
+    }
+    if axis_doc is not None and window.get("E") is not None and window.get("start") is not None:
+        mine = v3_end_days(axis_doc["days"], V3_WINDOW_START, axis_doc["E"])
+        theirs = v3_end_days(tool_scenario["axis"], window["start"], window["E"])
+        split = day_text(V3_SPLIT_FROM)
+        checks["E 相同"] = axis_doc["E"] == window["E"]
+        checks["区间末日集合相同"] = mine == theirs
+        checks["前一半区间末日集合相同"] = ([day for day in mine if day < split]
+                                         == [day for day in theirs if day < tool_scenario["half_split"]])
+        checks["后一半区间末日集合相同"] = ([day for day in mine if day >= split]
+                                         == [day for day in theirs if day >= tool_scenario["half_split"]])
+    else:
+        for name in ("E 相同", "区间末日集合相同", "前一半区间末日集合相同", "后一半区间末日集合相同"):
+            checks[name] = None
+    return checks
+
+
+def v3_completion(project: Mapping | None, tool: Mapping | None, tool_exit: int | None) -> str:
+    """完成状态三选一：未完成（构造基准无法生成、项目入口未写出 confirmatory.json、工具非 0 退出或未写出输出）；
+    完整对齐（项目有效结果且工具有效、完整输出）；其余为分阶段。"""
+    if project is None or project.get("confirmatory") is None or tool is None or tool_exit != 0:
+        return V3_UNFINISHED
+    if project["confirmatory"].get("valid") is True and tool.get("valid") is True:
+        return V3_FULL
+    return V3_STAGED
+
+
+def v3_expected_reasons(reason: str, scenario: Mapping) -> list[tuple[object, str]] | None:
+    """项目无效原因 → 工具应列出的原因条目（既有 B 第二节第 2 项的对应规则；缺价日期取自场景登记）。表外返回 None。"""
+    gaps = {asset: [day_text(day) for day in days] for asset, days in scenario["gaps"].items()}
+    if reason == "净值所需价格缺失，收益无法计算":
+        days = [day for asset in ASSETS for day in gaps.get(asset, []) if day > V3_WINDOW_START]
+        pairs = [[asset, day] for asset in ASSETS for day in gaps.get(asset, []) if day > V3_WINDOW_START]
+        return [(lambda e, d=days, p=pairs: e.get("reason") == "缺少必需价格" and e.get("object") == "净值"
+                 and b_tool_missing(e) in (d, p), f"缺少必需价格 / 净值 / {days}")]
+    if reason == "R2 无法计算":
+        expected = [(lambda e, a=asset, d=days: e.get("reason") == "缺少必需价格" and e.get("object") == f"R2 {a}"
+                     and b_tool_missing(e) == d, f"缺少必需价格 / R2 {asset} / {days}")
+                    for asset, days in gaps.items()]
+        return expected or None
+    return None
+
+
+def v3_bootstrap(record: Recorder, tool_rows: Sequence[Mapping], rows: Sequence[Mapping]) -> None:
+    """自助法行（compare_b_bootstrap 同一规则，项目侧为 confirmatory.json 的 main 与 sensitivities）：按 b 对应；
+    b、seed、valid 精确；无效时 note 只比无效类别；p 精确；q025 ↔ low、q975 ↔ high 容差规则；tail_count、delta_star、
+    tail 未比较。"""
+    layer = "检验层"
+    theirs = {b_float(item.get("b")): item for item in tool_rows}
+    numeric = lambda value: math.inf if value is None else float(value)          # noqa: E731  按数值排序
+    record.exact(layer, "bootstrap 行（b 集合）", "场景", sorted(theirs, key=numeric),
+                 sorted((b_float(row.get("block")) for row in rows), key=numeric))
+    for row in rows:
+        block = b_float(row.get("block"))
+        left = theirs.get(block)
+        if left is None:
+            continue
+        where = f"b={block}"
+        record.exact(layer, "bootstrap.seed ↔ seed", where, b_float(left.get("seed")), b_float(row.get("seed")))
+        record.exact(layer, "bootstrap.valid ↔ valid", where, left.get("valid"), row.get("valid"))
+        if not row.get("valid") or not left.get("valid"):
+            record.exact(layer, "bootstrap.note ↔ note（无效类别）", where, b_note_class(left.get("note")),
+                         b_note_class(row.get("note")))
+        if row.get("valid") and left.get("valid"):
+            record.exact(layer, "bootstrap.p ↔ p_value（精确）", where, b_float(left.get("p")),
+                         b_float(row.get("p_value")))
+            b_number(record, layer, "bootstrap.q025 ↔ low", where, left.get("q025"), row.get("low"))
+            b_number(record, layer, "bootstrap.q975 ↔ high", where, left.get("q975"), row.get("high"))
+        for name in ("tail_count", "delta_star", "tail"):
+            if name in left:
+                record.add(layer, f"bootstrap.{name}", "未比较", where, None, None, B_NOT_PROVIDED)
+
+
+def compare_v3_confirm(record: Recorder, tool: Mapping, tool_scenario: Mapping, scenario: Mapping,
+                       confirmed: Mapping) -> None:
+    """第四节第 3.7 条：项目侧取值一律来自 confirmatory.json；工具字段与项目字段的对应见接线说明第二十节。
+    状态与停止沿用 B（精确、容差、未比较、接口差异）。"""
+    layer = "检验层"
+    candidate = v3_registered.FROZEN_CANDIDATE
+    compare_b_common_top(record, tool, tool_scenario)
+    compare_b_top(record, tool, tool_scenario, candidate)
+    tool_valid, mine_valid = tool.get("valid"), confirmed.get("valid")
+    record.exact(layer, "valid ↔ valid", "valid", tool_valid, mine_valid)
+    reason = confirmed.get("reason") or ""
+    reasons = list(tool.get("invalid_reasons") or [])
+    if reason.startswith(RECONCILIATION_TEXT) or b_tool_reconciliation(tool):
+        compare_b_reconciliation(record, tool, reason if not mine_valid else None)
+    elif not mine_valid:
+        expected = v3_expected_reasons(reason, scenario)
+        if expected is None:
+            record.add(layer, "invalid_reasons ↔ reason（项目原因不在映射表内）", "不一致", "invalid_reasons", reasons,
+                       reason)
+        else:
+            used: set[int] = set()
+            for predicate, label in expected:
+                found = next((index for index, entry in enumerate(reasons)
+                              if index not in used and isinstance(entry, Mapping) and predicate(entry)), None)
+                if found is None:
+                    record.add(layer, "invalid_reasons ↔ reason（找不到）", "不一致", label, reasons, reason)
+                else:
+                    used.add(found)
+                    record.add(layer, "invalid_reasons ↔ reason（类别、对象、缺价日期全同）", "一致", label,
+                               reasons[found], reason)
+            for index, entry in enumerate(reasons):
+                if index not in used:
+                    record.add(layer, "invalid_reasons（工具多报原因）", "未比较", str(entry.get("object")), entry,
+                               None, "未比较（工具多报原因，项目短路未检查）")
+    elif reasons:
+        record.add(layer, "invalid_reasons（项目有效而工具列出原因）", "不一致", "invalid_reasons", reasons, None)
+    ok, value = b_pair(record, layer, "n ↔ n", tool, "n", confirmed.get("n"), tool_valid, True)
+    if ok:
+        record.exact(layer, "n ↔ n", "n", b_float(value), b_float(confirmed.get("n")))
+    if mine_valid:
+        record.exact(layer, "category ↔ category", "category", tool.get("category"), confirmed.get("category"))
+        record.exact(layer, "conclusion ↔ conclusion（有效结果精确）", "conclusion", tool.get("conclusion"),
+                     confirmed.get("conclusion"))
+    else:
+        record.check(layer, "category ↔ category（计算无效 ↔ null）", tool.get("category") == confirmatory.INVALID
+                     and confirmed.get("category") is None, "category", tool.get("category"), confirmed.get("category"))
+        record.check(layer, "conclusion ↔ conclusion（无效结果按列明映射）",
+                     b_invalid_conclusion_ok(tool.get("conclusion"), confirmed.get("conclusion")), "conclusion",
+                     tool.get("conclusion"), confirmed.get("conclusion"))
+    for tool_key, mine_key in (("delta", "delta"), ("delta_min", "delta_min"),
+                               ("annual_relative_growth", "annual_growth")):
+        mine = confirmed.get(mine_key) if mine_valid else None
+        ok, value = b_pair(record, layer, f"{tool_key} ↔ {mine_key}", tool, tool_key, mine, tool_valid,
+                           bool(mine_valid))
+        if ok:
+            b_number(record, layer, f"{tool_key} ↔ {mine_key}", tool_key, value, mine)
+    rows = [] if not mine_valid or confirmed.get("main") is None else [confirmed["main"],
+                                                                         *confirmed.get("sensitivities", [])]
+    ok, value = b_pair(record, layer, "bootstrap ↔ main、sensitivities", tool, "bootstrap", rows or None, tool_valid,
+                       bool(mine_valid))
+    if ok:
+        v3_bootstrap(record, list(value or []), rows)
+    for tool_key, mine_key in (("unstable", "unstable"), ("judgement_test_pass", "improvement_passed"),
+                               ("judgement_point_estimate", "magnitude_reached")):
+        mine = confirmed.get(mine_key) if mine_valid else None
+        ok, value = b_pair(record, layer, f"{tool_key} ↔ {mine_key}", tool, tool_key, mine, tool_valid,
+                           bool(mine_valid))
+        if ok:
+            record.exact(layer, f"{tool_key} ↔ {mine_key}", tool_key, value, mine)
+    mine = confirmed.get("warnings") if mine_valid else None
+    ok, value = b_pair(record, layer, "warnings ↔ warnings", tool, "warnings", mine, tool_valid, bool(mine_valid))
+    if ok:
+        record.exact(layer, "warnings ↔ warnings（文字映射后集合）", "warnings", b_mapped_warnings(value or []),
+                     sorted(mine or []))
+    halves = confirmed.get("halves") if mine_valid else None
+    ok, value = b_pair(record, layer, "halves ↔ halves", tool, "halves", halves, tool_valid, bool(mine_valid))
+    if ok:
+        theirs = value if isinstance(value, Mapping) else {}
+        b_number(record, layer, "halves.first ↔ halves.first", "first", theirs.get("first"), halves.get("first"))
+        b_number(record, layer, "halves.second ↔ halves.second", "second", theirs.get("second"), halves.get("second"))
+        record.exact(layer, "halves.consistent ↔ 由 halves 判定", "consistent", theirs.get("consistent"),
+                     confirmatory.halves_consistent(float(halves["first"]), float(halves["second"])))
+    zeroed = confirmed.get("zeroed") if mine_valid else None
+    ok, value = b_pair(record, layer, "event_zeroing ↔ zeroed", tool, "event_zeroing", zeroed, tool_valid,
+                       bool(mine_valid))
+    if ok:
+        theirs = {(item.get("asset"), item.get("P")): item for item in value or []}
+        mine_items = {(item.get("asset"), item.get("peak")): item for item in zeroed or []}
+        record.exact(layer, "event_zeroing ↔ zeroed 事件集合（资产、高点）", "场景", sorted(map(list, theirs)),
+                     sorted(map(list, mine_items)))
+        record.check(layer, "event_zeroing ↔ zeroed 无 P ≤ f 的事件",
+                     all(str(key[1]) > V3_FIRST_SIGNAL for key in (*theirs, *mine_items)), "场景",
+                     sorted(str(key[1]) for key in theirs), sorted(str(key[1]) for key in mine_items))
+        for key in sorted(set(theirs) & set(mine_items), key=str):
+            where = " ".join(map(str, key))
+            b_number(record, layer, "event_zeroing.delta_zeroed ↔ zeroed.delta", where,
+                     theirs[key].get("delta_zeroed"), mine_items[key].get("delta"))
+            record.exact(layer, "event_zeroing.not_positive ↔ zeroed.delta ≤ 0", where, theirs[key].get("not_positive"),
+                         float(mine_items[key]["delta"]) <= 0)
+        record.add(layer, "event_zeroing.Tr 与置零范围", "未比较", "场景", None, None,
+                   "未比较（项目 confirmatory.json 不含低点日与置零范围）")
+    own = confirmed.get("own_result") if mine_valid else None
+    ok, value = b_pair(record, layer, "own_loss_text ↔ own_result", tool, "own_loss_text", own, tool_valid,
+                       bool(mine_valid))
+    if ok:
+        record.exact(layer, "own_loss_text ↔ own_result 是否为 null", "own_loss_text", value is None, own is None)
+        if value is not None and own is not None:
+            record.exact(layer, "own_loss_text ↔ own_result “相对参照少亏”有无", "own_loss_text",
+                         "相对参照少亏" in str(value), "相对参照少亏" in own)
+            status, checks = b_tool_own_loss(str(value), tool)
+            record.add(layer, "own_loss_text 文字与工具本侧数值（工具侧）", status, "own_loss_text", str(value), checks,
+                       B_TEXT_UNREGISTERED if status == "未比较" else "")
+    for key in ("lnW", "r1", "r2", "r2_ok"):
+        if key in tool:
+            record.add(layer, f"{key}（项目 confirmatory.json 未输出）", "未比较", key, None, None, B_NOT_PROVIDED)
+    record.add(layer, "候选、参照、一直持有逐日净值路径", "未比较", "场景",
+               note="未比较（工具 confirm 接口未输出逐日路径）")

@@ -587,6 +587,12 @@ TEST_EXCEPTIONS: frozenset[Allowed] = frozenset({
             "（指令修订六第五节第 3 小节）",
             "只以 sys.executable 运行 NEW_TOOL 检出目录中哈希已核对的 audit_v20.py；参数为序列场景文件与 "
             "V20_COMPARE_SEQUENCE_OUT 下的工具输出文件；带 timeout", 1, 1),
+    # 阶段五 V3（V3 执行指令定稿表 3-1 G4；交项目负责人确认）：G1、G2 未新增任何测试侧规则内的导入或调用（命中为 0，
+    # 不新增登记条目）。既有登记的对象范围另含：v20_compare_support.py 的 get_bytes、put_bytes 另读写 V20_V3_OUT
+    # 给出的 V3 丙输出目录，get_bytes 另读 tmp_path 构造根中 V3 构造运行的输出目录（原文不改，范围扩展在此注明）；
+    # v20_compare_support.py 导入 test_wavewarn_v20_validation_run.py 的公共辅助（put、git、run_process、
+    # csv_text、registered_yaml、baseline_files、research_dir、market_file、DECISIONS），按其已登记的范围使用
+    # （只写、只在 tmp_path 构造根内运行 git 与 sys.executable -c 脚本）。
     # 阶段五 V2（第四节第 10 条；逐处登记，交项目负责人确认）：入口测试的五处，写法与开发期入口测试相同。
     Allowed("test_wavewarn_v20_validation_run.py", "<module>", "import subprocess", "subprocess",
             "入口的演习必须在新的解释器里执行（钩子安装不可撤销；V1 设计稿第三节第 1 条）",
