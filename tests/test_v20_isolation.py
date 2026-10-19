@@ -148,6 +148,9 @@ TEST_DUTIES: dict[str, tuple[str, ...]] = {
     "阶段五纯算法测试": ("test_wavewarn_v20_validation_registered.py", "test_wavewarn_v20_validation_diagnostics.py",
                   "test_wavewarn_v20_validation_output.py"),
     "阶段五子进程测试": ("test_wavewarn_v20_validation_run.py",),
+    # 阶段五 V4（V4 执行指令定稿表 3-1 D3、第四节第 9 条；交项目负责人确认）：D1 演习测试适用测试侧检查；
+    # D1 本身没有测试侧规则内的导入或调用（命中为 0），演习的子进程与文件操作都经 v20_compare_support.py。
+    "阶段五演习测试": ("test_v20_validation_drill.py",),
 }
 
 
@@ -611,6 +614,19 @@ TEST_EXCEPTIONS: frozenset[Allowed] = frozenset({
             "subprocess.run", "入口的演习必须在新的解释器里执行；构造根须以 git 建立并提交（V2 指令第五节）",
             "只启动 git（构造根内的 init、add、commit、rm）与 sys.executable（-m 入口或 -c 注入脚本），"
             "工作目录均为 tmp_path 下的构造根", 1, 1),
+    # 阶段五 V4（V4 执行指令定稿第四节第 9 条；逐处登记，交项目负责人确认）：D2 run_v4 的子进程两处。另：run_v4 读取
+    # os.environ（去掉以 V20_ 开头的变量后传给子进程，第四节第 3 条；不在测试侧规则内，此处一并注明）；D1、D2 对演习目录
+    # O（D:\temp_claude\v20\v20_V4_drill_1）下文件的读写只经既有登记的 get_bytes、put_bytes 与 V2 的 put，目录遍历
+    # 用 rglob、iterdir（第四节第 2、3、8 条；两条既有登记原文不改，对象范围另含 O，范围扩展在此注明）。
+    Allowed("v20_compare_support.py", "<module>", "import subprocess", "subprocess",
+            "V4 演习须在新的解释器里运行演习包装脚本（钩子安装不可撤销；V4 执行指令第四节第 3 条）",
+            "只供本文件的 run_v4 使用", 1, 1),
+    Allowed("v20_compare_support.py", "run_v4",
+            "done = subprocess.run(command, cwd=root, env=environment, capture_output=True, timeout=V4_TIMEOUT)",
+            "subprocess.run",
+            "V4 演习须在新的解释器里运行演习包装脚本，并以 3600 秒限时（V4 执行指令第四节第 3 条、偏六）",
+            "只以 sys.executable -B -X pycache_prefix=<O 下新建空目录> -c V4_DRILL_SCRIPT 运行；"
+            "工作目录与 --root 为 O 下的构造根；环境去掉以 V20_ 开头的变量；带 timeout", 1, 1),
 })
 
 # 阶段四边界侧（M2 第一部分指令第一节第 9 小节第 4 条）：完整源码片段规则；网络导入与受保护目录字面路径没有例外。
@@ -690,7 +706,9 @@ def constructed_test_files() -> list[Path]:
             # 阶段四 M2 第二部分（指令修订六第三节 M3）：两个新职责同样适用测试侧检查（收紧；待负责人核对）。
             *duty_files("回算脚本测试"), *duty_files("序列接线测试"),
             # 阶段五 V2：入口的子进程测试同样适用测试侧检查。
-            *duty_files("阶段五子进程测试")]
+            *duty_files("阶段五子进程测试"),
+            # 阶段五 V4：演习测试同样适用测试侧检查。
+            *duty_files("阶段五演习测试")]
 
 
 def source_of(path: Path) -> str:
@@ -839,8 +857,11 @@ def test_banned_list_is_the_registered_one() -> None:
         ("test_wavewarn_v20_verify_dataset.py", "<module>", "subprocess", 1, 1),
         ("test_wavewarn_v20_verify_dataset.py", "put", "write_bytes", 1, 1),
         ("test_wavewarn_v20_verify_dataset.py", "run", "subprocess.run", 1, 1),
+        # 阶段五 V4 新增条目（交项目负责人确认）：
+        ("v20_compare_support.py", "<module>", "subprocess", 1, 1),
         ("v20_compare_support.py", "get_bytes", "read_bytes", 1, 1),
         ("v20_compare_support.py", "put_bytes", "write_bytes", 1, 1),
+        ("v20_compare_support.py", "run_v4", "subprocess.run", 1, 1),
         ("v20_sequence_wiring.py", "read_run_record", "open", 1, 1),
         ("v20_sequence_wiring.py", "read_snapshot_csv", "read_bytes", 1, 1),
         ("v20_sequence_wiring.py", "write_scenario", "exists", 1, 1),

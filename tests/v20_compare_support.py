@@ -3608,3 +3608,667 @@ def compare_v3_confirm(record: Recorder, tool: Mapping, tool_scenario: Mapping, 
             record.add(layer, f"{key}（项目 confirmatory.json 未输出）", "未比较", key, None, None, B_NOT_PROVIDED)
     record.add(layer, "候选、参照、一直持有逐日净值路径", "未比较", "场景",
                note="未比较（工具 confirm 接口未输出逐日路径）")
+
+
+# ---------------------------------------------------------------------------
+# 阶段五 V4：构造演习（V4 执行指令定稿第四节第 1—7 条；只用构造数据，构造根在仓库外的演习目录 O 下）。
+# 只追加；V3 及以前的函数与常量一字不改。构造根内的 git 操作只经 V2 的 v2_run.git；O 下的文件读写只经
+# get_bytes、put_bytes 与目录遍历；入口只经 run_v4 以子进程运行演习包装脚本。
+# ---------------------------------------------------------------------------
+
+import os  # noqa: E402  只追加：导入放在追加段内，既有导入段不改
+import subprocess  # noqa: E402
+import time  # noqa: E402
+
+from market_risk.wavewarn_v20 import validation_run as v4_validation_run  # noqa: E402
+
+# 第 1 条：演习包装脚本（逐字照执行指令，UTF-8 1425 字节，SHA-256 cd787d8b…597e；全文 ASCII）。
+V4_DRILL_SCRIPT = (
+    "import sys\n"
+    "from pathlib import Path\n"
+    "from market_risk.wavewarn_v20 import validation_run\n"
+    "from market_risk.wavewarn_v20 import registered_v20_validation as registered\n"
+    "ROOT, MODE = Path(sys.argv[1]), sys.argv[2]\n"
+    'if MODE not in ("const", "none", "rename", "tail"):\n'
+    '    sys.exit("V4 drill wrapper: unknown mode " + MODE)\n'
+    'if MODE != "none":\n'
+    "    registered.M3_MANIFEST_SHA256, registered.M3_SIGNALS_SHA256 = sys.argv[3], sys.argv[4]\n"
+    "    registered.M3_SIGNALS_BYTES = int(sys.argv[5])\n"
+    'if MODE == "rename":\n'
+    "    from market_risk.wavewarn_v20 import validation_output as output\n"
+    "    _rename, _count = output.rename_directory, [0]\n"
+    "\n"
+    "    def _rename_first_fails(source, target):\n"
+    "        _count[0] += 1\n"
+    "        if _count[0] == 1:\n"
+    '            sys.stderr.write("V4 drill injection: rename " + Path(target).name + "\\n")\n'
+    '            raise OSError("V4 drill injection: first rename fails")\n'
+    "        return _rename(source, target)\n"
+    "\n"
+    "    output.rename_directory = _rename_first_fails\n"
+    'if MODE == "tail":\n'
+    "    _tail, _calls = validation_run._write_tail, [0]\n"
+    "\n"
+    "    def _tail_first_fails(*arguments, **keywords):\n"
+    "        _calls[0] += 1\n"
+    "        if _calls[0] == 1:\n"
+    '            sys.stderr.write("V4 drill injection: audit tail\\n")\n'
+    '            raise OSError("V4 drill injection: first audit tail write fails")\n'
+    "        return _tail(*arguments, **keywords)\n"
+    "\n"
+    "    validation_run._write_tail = _tail_first_fails\n"
+    'sys.exit(validation_run.main(["--root", str(ROOT)]))\n'
+)
+V4_DRILL_SHA256 = "cd787d8b020f42ab10d90cd5645d02131974ee74462fcd473f7c5b4fdafd597e"
+V4_MODES = ("const", "none", "rename", "tail")
+V4_SCENARIO = "v3_001"                                         # 主场景（设计稿第二部分第二节第 1 条）
+V4_TIMEOUT = 3600                                              # 偏六：D1 子进程以 Python 限时
+V4_FORMAL = "evaluation_validation"
+# 第 7 条：文件划分（稳定文件 17 个、环境与审计文件 2 个、清单 1 个）。
+V4_STABLE_FILES = (
+    "run_record.json", "input_snapshot.csv.gz", "window.json", "date_assertions.json", "overlap_check.json",
+    "confirmatory.json", "diagnostics_validation.json", "descriptive.json", "daily_signals.csv.gz",
+    "daily_targets.csv.gz", "daily_nav.csv.gz", "daily_policy.csv.gz", "r2_events.csv.gz", "r2_judgements.csv.gz",
+    "segment_ledgers.csv.gz", "report.md", "information_state.json")
+V4_ENV_FILES = ("run_environment.json", "audit_log.jsonl")
+V4_MANIFEST = "MANIFEST.sha256"
+V4_FAILURE_MANIFEST = "FAILURE_MANIFEST.sha256"
+# run_environment.json：可以不同的键；做路径替换后须相同的键（其余键须原样相同）。
+V4_ENV_FREE_KEYS = ("acquired_at", "started_at", "ended_at", "seconds")
+V4_ENV_PATH_KEYS = ("root", "staging", "formal")
+# 暂存时间戳只在研究目录下的这四种路径段中替换：（前缀, 后缀）。
+V4_STAMPED = ((f".staging_{V4_FORMAL}_", ""), (f"{V4_FORMAL}_failed_", ""), (f"{V4_FORMAL}_audit_tail_", ".jsonl"),
+              (f"{V4_FORMAL}_publish_failure_", ".json"))
+V4_RESEARCH_PARTS = ("reports", "research", "wavewarn_v20")
+V4_CASES = ("v4_det", "v4_2", "v4_3", "v4_4", "v4_5a", "v4_5b", "v4_5c", "v4_5d", "v4_6", "v4_prepare_frame")
+V4_FRAME_CASES = ("normal", "timeout", "kfail")
+V4_PREFLIGHT_STAGE = "预检"
+V4_FORBIDDEN_WORDS = ("stable_files", "resamples", "PERIODS", "dataclasses")
+
+
+# ---------------------------------------------------------------------------
+# 第 2 条：构造根
+# ---------------------------------------------------------------------------
+
+
+def v4_constants(signals: bytes) -> tuple[str, str, str]:
+    """三个注入常量：构造基准清单的 SHA-256、逐日信号的 SHA-256 与字节数。"""
+    return sha256(v2_run.baseline_files(signals)["MANIFEST.sha256"]), sha256(signals), str(len(signals))
+
+
+def v4_main_scenario() -> tuple[Mapping, bytes]:
+    """主场景 v3_001 与其构造 M3 基准（基准为 None 即停止）。"""
+    scenario = v3_scenario(V4_SCENARIO)
+    signals, note = v3_baseline(scenario)
+    assert signals is not None, f"主场景的构造 M3 基准无法生成：{note}"
+    return scenario, signals
+
+
+def v4_source_market_files(scenario: Mapping) -> dict[str, bytes]:
+    """V4-2（B85、N210）：不在建根后改行情。SPX 一份照 V2 原例重新生成：2000-01-03 一行的来源标识为 other。"""
+    files = v3_market_files(scenario)
+    rows = [(day, value if value is not None else "") for day, value in scenario["prices"]["SPX"]]
+    changes = {day: f"{day},,x,x,x,x,x,yahoo" for day, value in scenario["prices"]["SPX"] if value is None}
+    day = dt.date(2000, 1, 3)
+    assert day not in changes and any(item == day for item, _ in rows), "2000-01-03 须为 SPX 轴上的有价交易日"
+    changes = {**changes, day: f"{day},100.00,x,x,x,x,x,other"}
+    return {**files, "SPX": v2_run.csv_text(rows, changes)}
+
+
+def build_root_v4(root: Path, scenario: Mapping, signals: bytes, market_files: Mapping[str, bytes]) -> Path:
+    """与 build_root_v3 步骤逐项相同；唯一区别：行情字节与配置中登记的行情元数据都取自传入的 market_files
+    （配置仍由 v2_run.registered_yaml(market_files) 生成）。"""
+    assert set(market_files) == set(ASSETS), sorted(market_files)
+    files = dict(market_files)
+    for relative in v3_output.PREFLIGHT_FILES:
+        if not relative.startswith("config/"):
+            v2_run.put(root.joinpath(*relative.split("/")), f"# 构造占位：{relative}\n".encode())
+    v2_run.put(root.joinpath("config", "wavewarn_v20.yaml"), v2_run.registered_yaml(files))
+    v2_run.put(root.joinpath("config", "data_decisions.yaml"), v2_run.DECISIONS.encode("utf-8"))
+    for asset, raw in files.items():
+        v2_run.put(v2_run.market_file(root, asset), raw)
+    for name, data in v2_run.baseline_files(signals).items():
+        v2_run.put(v2_run.research_dir(root).joinpath("evaluation_development", name), data)
+    v2_run.git(root, "init", "-q")
+    v2_run.git(root, "add", "-A")
+    v2_run.git(root, "commit", "-q", "-m", "构造")
+    return root
+
+
+def v4_commit(root: Path, message: str) -> None:
+    v2_run.git(root, "add", "-A")
+    v2_run.git(root, "commit", "-q", "-m", message)
+
+
+def v4_head(root: Path) -> str:
+    done = v2_run.run_process(["git", "-c", "core.autocrlf=false", "rev-parse", "HEAD"], root)
+    assert done.returncode == 0, done.stderr
+    return done.stdout.strip()
+
+
+def v4_fresh(path: Path) -> Path:
+    """新建、不覆盖：目标（文件或目录）事先不得存在。"""
+    assert not v2_run.present(path), f"已存在，不覆盖：{path}"
+    return path
+
+
+def v4_files(root: Path) -> list[Path]:
+    """目录树中的全部文件（含 .git），按相对路径排序。"""
+    return sorted((item for item in root.rglob("*") if item.is_file()), key=lambda item: item.relative_to(root).parts)
+
+
+def v4_copy_tree(source: Path, target: Path) -> int:
+    """把 source 中全部文件（含 .git 目录）逐个复制到新目录 target，复制后核对逐文件字节相同；返回文件数。"""
+    v4_fresh(target)
+    files = v4_files(source)
+    for item in files:
+        put_bytes(target.joinpath(*item.relative_to(source).parts), get_bytes(item))
+    copied = v4_files(target)
+    assert [item.relative_to(target).parts for item in copied] == [item.relative_to(source).parts for item in files]
+    assert all(get_bytes(item) == get_bytes(target.joinpath(*item.relative_to(source).parts)) for item in files)
+    return len(files)
+
+
+def v4_build(out: Path, name: str, kind: str = "main") -> tuple[Path, tuple[str, str, str]]:
+    """建一个演习根 O\\roots\\<名称>，返回（根, 三个注入常量）。kind：main 主场景；source V4-2；formal V4-5 甲；
+    untracked V4-5 乙；missing V4-5 丙；altered V4-6。"""
+    scenario, signals = v4_main_scenario()
+    root = v4_fresh(out / "roots" / name)
+    if kind == "altered":
+        signals = v2_run.altered(signals)
+    if kind == "source":
+        build_root_v4(root, scenario, signals, v4_source_market_files(scenario))
+    else:
+        build_root_v3(root, scenario, signals)
+    if kind == "formal":
+        put_bytes(v2_run.research_dir(root) / V4_FORMAL / "placeholder.txt", b"V4-5\n")
+        v4_commit(root, "构造：V4-5 甲（正式目录内已提交文件）")
+    elif kind == "untracked":
+        put_bytes(root / "untracked_v4.txt", b"V4-5\n")
+    elif kind == "missing":
+        v2_run.git(root, "rm", "-q", "src/market_risk/wavewarn_v20/validation_run.py")
+        v2_run.git(root, "commit", "-q", "-m", "构造：V4-5 丙（删去一个预检文件）")
+    return root, v4_constants(signals)
+
+
+def v4_det_source(out: Path) -> tuple[Path, tuple[str, str, str]]:
+    """T-DET 与框架演习共用的源根 O\\roots\\v4_1_src（不运行）；已建则只取常量。"""
+    root = out / "roots" / "v4_1_src"
+    if v2_run.present(root):
+        return root, v4_constants(v4_main_scenario()[1])
+    return v4_build(out, "v4_1_src")
+
+
+# ---------------------------------------------------------------------------
+# 第 3 条：运行函数
+# ---------------------------------------------------------------------------
+
+
+def v4_decode(data: bytes) -> str | None:
+    try:
+        return data.decode("utf-8", "strict")
+    except UnicodeDecodeError:
+        return None
+
+
+def v4_report(stdout: str | None) -> dict | None:
+    """标准输出最后一行的入口结构化报告。"""
+    lines = [line for line in (stdout or "").splitlines() if line.strip()]
+    if not lines:
+        return None
+    try:
+        report = json.loads(lines[-1])
+    except ValueError:
+        return None
+    return report if isinstance(report, dict) else None
+
+
+def run_v4(out: Path, name: str, root: Path, mode: str, constants: tuple[str, str, str]) -> dict:
+    """第 3 条：子进程运行演习包装脚本（只给 --root），限时 3600 秒；完整原始输出与摘要写入 O\\records。"""
+    assert mode in V4_MODES, mode
+    pycache, temporary = v4_fresh(out / "pycache" / name), v4_fresh(out / "tmp" / name)
+    pycache.mkdir(parents=True)
+    temporary.mkdir(parents=True)
+    records = out / "records"
+    paths = {key: v4_fresh(records / f"{name}.{key}") for key in ("stdout.bin", "stderr.bin", "json")}
+    command = [sys.executable, "-B", "-X", f"pycache_prefix={pycache}", "-c", V4_DRILL_SCRIPT, str(root), mode,
+               *(() if mode == "none" else constants)]
+    environment = {key: value for key, value in os.environ.items() if not key.upper().startswith("V20_")}
+    environment.update({"TMP": str(temporary), "TEMP": str(temporary), "TMPDIR": str(temporary),
+                        "PYTHONIOENCODING": "utf-8"})
+    started = time.monotonic()
+    timed_out, code = False, None
+    try:
+        done = subprocess.run(command, cwd=root, env=environment, capture_output=True, timeout=V4_TIMEOUT)
+        stdout, stderr, code = done.stdout, done.stderr, done.returncode
+    except subprocess.TimeoutExpired as expired:
+        timed_out = True
+        stdout, stderr = expired.stdout, expired.stderr
+    seconds = time.monotonic() - started
+    put_bytes(paths["stdout.bin"], stdout or b"")
+    put_bytes(paths["stderr.bin"], stderr or b"")
+    stdout_text, stderr_text = v4_decode(stdout or b""), v4_decode(stderr or b"")
+    summary = {
+        "name": name, "root": str(root), "mode": mode, "exit_code": code, "seconds": round(seconds, 3),
+        "timeout": f"D1 子进程超时（{V4_TIMEOUT} 秒，Python 已终止子进程）" if timed_out else None,
+        "stdout_obtained": stdout is not None, "stderr_obtained": stderr is not None,
+        "stdout_utf8_strict": stdout_text is not None, "stderr_utf8_strict": stderr_text is not None,
+        "stdout_report": v4_report(stdout_text), "stderr_tail": None if stderr_text is None else stderr_text[-2000:],
+        "stdout_sha256": sha256(stdout or b""), "stderr_sha256": sha256(stderr or b""),
+        "pycache_empty_after": not any(pycache.iterdir()),
+        "pycache": str(pycache), "tmp": str(temporary)}
+    if stdout is None or stderr is None:
+        summary["note"] = "未取得的输出写为空文件：" + "、".join(
+            label for label, value in (("标准输出", stdout), ("标准错误", stderr)) if value is None)
+    put_bytes(paths["json"], dump_json(summary))
+    summary["stdout_text"], summary["stderr_text"] = stdout_text, stderr_text
+    return summary
+
+
+# ---------------------------------------------------------------------------
+# 第 4—6 条：输出的只读核对
+# ---------------------------------------------------------------------------
+
+
+def v4_manifest_verdict(listed: Mapping[str, tuple[str, int]], actual: Mapping[str, bytes | None],
+                        expected: set[str]) -> dict:
+    """B88：清单判定分两项——所列集合恰为 expected；所列各项的哈希与字节数逐项相符（actual 中 None 为文件不存在）。"""
+    exact = set(listed) == set(expected)
+    match = all(actual.get(item) is not None and sha256(actual[item]) == digest and len(actual[item]) == size
+                for item, (digest, size) in listed.items())
+    return {"listed": sorted(listed), "listed_exact": exact, "match": match}
+
+
+def v4_manifest_check(directory: Path, name: str, expected: set[str]) -> dict:
+    """读取清单与所列文件，交 v4_manifest_verdict 判定（B88）。"""
+    listed = v3_output.parse_manifest(get_bytes(directory / name))
+    actual = {item: get_bytes(directory / item) if v2_run.present(directory / item) else None for item in listed}
+    return v4_manifest_verdict(listed, actual, expected)
+
+
+def v4_tail_records(root: Path) -> list[dict] | None:
+    found = v2_run.listing(root)
+    return v2_run.lines_of(v2_run.research_dir(root) / found["tail"][0]) if len(found.get("tail", [])) == 1 else None
+
+
+def v4_common_run(summary: dict) -> dict[str, bool]:
+    return {"标准输出严格 UTF-8 解码": summary["stdout_utf8_strict"],
+            "标准错误严格 UTF-8 解码": summary["stderr_utf8_strict"],
+            "未超时": summary["timeout"] is None, "字节码前缀目录运行后为空": summary["pycache_empty_after"]}
+
+
+def v4_failure_checks(root: Path, files: set[str], exit_stage: tuple[str, str]) -> tuple[dict[str, bool], dict]:
+    """失败目录恰一个、无正式目录与暂存目录、文件集合、出口与阶段、尾段（收尾“失败”、衔接失败清单）。"""
+    found = v2_run.listing(root)
+    conditions = {"失败目录恰一个": len(found.get("failed", [])) == 1,
+                  "无正式目录": found.get("formal") == [], "无暂存目录": found.get("staging") == []}
+    failure: dict = {}
+    if conditions["失败目录恰一个"]:
+        directory = v2_run.research_dir(root) / found["failed"][0]
+        failure = json.loads(get_bytes(directory / "failure.json")) if v2_run.present(
+            directory / "failure.json") else {}
+        conditions["失败目录文件集合"] = v2_run.files_in(directory) == files
+        conditions["failure.json 出口与阶段"] = (failure.get("exit"), failure.get("stage")) == exit_stage
+        check = v4_manifest_check(directory, V4_FAILURE_MANIFEST, files - {V4_FAILURE_MANIFEST}) if v2_run.present(
+            directory / V4_FAILURE_MANIFEST) else {"listed": [], "listed_exact": False, "match": False}
+        conditions["FAILURE_MANIFEST.sha256 恰列失败目录其余文件"] = (
+            V4_FAILURE_MANIFEST in files and check["listed_exact"])
+        conditions["FAILURE_MANIFEST.sha256 逐项相符"] = check["match"] and bool(check["listed"])
+        failure = {**failure, "_directory": str(directory), "_failure_manifest_listed": check["listed"]}
+    tail = v4_tail_records(root)
+    conditions["尾段恰一个"] = tail is not None
+    conditions["尾段收尾记录为失败"] = bool(tail) and tail[-1].get("record") == "close" and tail[-1].get(
+        "outcome") == "失败"
+    conditions["衔接记录 manifest_file 为 FAILURE_MANIFEST.sha256"] = bool(tail) and tail[0].get(
+        "record") == "link" and tail[0].get("manifest_file") == V4_FAILURE_MANIFEST
+    return conditions, failure
+
+
+def v4_data_market_event(root: Path, path: str) -> bool:
+    """事件路径是否位于构造根的行情目录（data 下的 market）之下（比较前把 / 统一为 \\）；
+    按段拼接，不写受保护目录的字面路径。"""
+    value = path.replace("/", "\\").lower()
+    protected = "\\".join(("data", "market", ""))
+    base = str(root).replace("/", "\\").rstrip("\\").lower() + "\\" + protected
+    return value.startswith(base) or value.startswith(protected)
+
+
+def v4_open_events_checks(root: Path, report: Mapping) -> dict[str, bool]:
+    """B89：先验审计事件的结构，再查构造根行情目录访问；结构无效时“无行情目录访问”判假（缺证据不当作零访问）。
+    非空要求（N221）：本次四个既定拒绝场景应保留非空审计事件；空列表视为证据缺失。不以具体事件数为门槛。"""
+    events = report.get("open_events")
+    present = isinstance(events, list) and bool(events)
+    valid = present and all(isinstance(item, dict) and isinstance(item.get("path"), str) and bool(item["path"])
+                            for item in events)
+    return {"open_events 存在、为列表且非空": present,
+            "open_events 每项为对象且 path 为非空字符串": valid,
+            "open_events 无构造根行情目录下的事件": valid and not any(
+                v4_data_market_event(root, item["path"]) for item in events)}
+
+
+def v4_rejected(root: Path, summary: dict, reason: str, exact: bool) -> dict[str, bool]:
+    """V4-5 共同验收与拒绝原因。"""
+    report = summary["stdout_report"] or {}
+    state = report.get("information_state") or {}
+    found = v2_run.listing(root)
+    actual = report.get("reason")
+    return {"退出码 2": summary["exit_code"] == 2,
+            "报告 exit_code 为 2": report.get("exit_code") == 2,
+            "报告 outcome 为预检拒绝": report.get("outcome") == "预检拒绝",
+            "data_read 为空": state.get("data_read") == {},
+            "performance_info_status 为未产生": state.get("performance_info_status") == "未产生",
+            "阶段轨迹只有预检": bool(state.get("stage_trace")) and {item.get("stage") for item in state["stage_trace"]}
+            == {V4_PREFLIGHT_STAGE},
+            **v4_open_events_checks(root, report),
+            "无暂存、失败、尾段与发布失败说明": not any(found.get(key)
+                                          for key in ("staging", "failed", "tail", "note")),
+            "拒绝原因": isinstance(actual, str) and (actual == reason if exact else actual.startswith(reason))}
+
+
+# ---------------------------------------------------------------------------
+# 第 7 条：T-DET 的替换与比较（替换只用于比较，不改原件）
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class V4Context:
+    """一次运行的路径与暂存时间戳：构造根、字节码前缀目录、临时目录与 YYYYMMDDTHHMMSSZ_<7 位提交号>。"""
+
+    root: str
+    pycache: str
+    tmp: str
+    stamp: str
+
+
+def v4_stamp(report: Mapping | None) -> str | None:
+    """标准输出报告 staging 目录名中的时间戳。"""
+    staging = (report or {}).get("staging")
+    if not isinstance(staging, str):
+        return None
+    name = staging.replace("/", "\\").rsplit("\\", 1)[-1]
+    prefix = V4_STAMPED[0][0]
+    stamp = name.removeprefix(prefix)
+    return stamp if name.startswith(prefix) and re.fullmatch(r"\d{8}T\d{6}Z_[0-9a-f]{7}", stamp) else None
+
+
+def v4_replace_path(value: str, context: V4Context) -> str:
+    """路径边界替换（N205）：比较前把 / 统一为 \\；值等于根、前缀目录或临时目录，或以它们加分隔符开头时，把前缀换为
+    <ROOT>、<PYC>、<TMP>；研究目录下四种路径段中等于本次时间戳的部分换为 <STAMP>。"""
+    text = value.replace("/", "\\")
+    for base, label in ((context.root, "<ROOT>"), (context.pycache, "<PYC>"), (context.tmp, "<TMP>")):
+        base = base.replace("/", "\\")
+        if text == base or text.startswith(base + "\\"):
+            text = label + text[len(base):]
+            break
+    research = "\\".join(("<ROOT>", *V4_RESEARCH_PARTS)) + "\\"
+    if text.startswith(research):
+        rest = text[len(research):]
+        segment, separator, tail = rest.partition("\\")
+        for prefix, suffix in V4_STAMPED:
+            if segment == f"{prefix}{context.stamp}{suffix}":
+                text = research + f"{prefix}<STAMP>{suffix}" + separator + tail
+                break
+    return text
+
+
+def v4_environment_view(document: Mapping, context: V4Context) -> dict:
+    """run_environment.json 的比较视图：去掉可以不同的四个键；root、staging、formal 与 argv 各元素做替换。"""
+    view = {key: value for key, value in document.items() if key not in V4_ENV_FREE_KEYS}
+    for key in V4_ENV_PATH_KEYS:
+        if isinstance(view.get(key), str):
+            view[key] = v4_replace_path(view[key], context)
+    if isinstance(view.get("argv"), list):
+        view["argv"] = [v4_replace_path(item, context) if isinstance(item, str) else item for item in view["argv"]]
+    return view
+
+
+def v4_audit_view(data: bytes, context: V4Context) -> list[dict]:
+    """audit_log.jsonl 的比较视图：逐行解析；仅 path 值做替换，其余字段原样（N209）。"""
+    rows = [json.loads(line) for line in data.decode("utf-8").splitlines()]
+    return [{**row, "path": v4_replace_path(row["path"], context)} if isinstance(row.get("path"), str) else row
+            for row in rows]
+
+
+def v4_compare_environment(left: bytes, right: bytes, contexts: tuple[V4Context, V4Context]) -> dict:
+    """两份 run_environment.json：键集合相同；比较视图相同。差异逐处列出（原值）。"""
+    a, b = json.loads(left), json.loads(right)
+    views = v4_environment_view(a, contexts[0]), v4_environment_view(b, contexts[1])
+    raw = [{"key": key, "left": a.get(key), "right": b.get(key)} for key in sorted(set(a) | set(b))
+           if a.get(key) != b.get(key)]
+    unexplained = sorted(key for key in set(views[0]) | set(views[1]) if views[0].get(key) != views[1].get(key))
+    return {"same": set(a) == set(b) and views[0] == views[1], "raw_differences": raw, "unexplained": unexplained}
+
+
+def v4_compare_audit(left: bytes, right: bytes, contexts: tuple[V4Context, V4Context]) -> dict:
+    """两份 audit_log.jsonl：行数相同、逐行键与值在替换后相同。差异逐处列出（原值）。"""
+    raw_a = [json.loads(line) for line in left.decode("utf-8").splitlines()]
+    raw_b = [json.loads(line) for line in right.decode("utf-8").splitlines()]
+    views = v4_audit_view(left, contexts[0]), v4_audit_view(right, contexts[1])
+    raw = [{"line": number, "fields": sorted(key for key in set(x) | set(y) if x.get(key) != y.get(key)),
+            "left": x, "right": y} for number, (x, y) in enumerate(zip(raw_a, raw_b, strict=False), start=1) if x != y]
+    unexplained = [number for number, (x, y) in enumerate(zip(*views, strict=False), start=1) if x != y]
+    same = len(views[0]) == len(views[1]) and not unexplained
+    return {"same": same, "lines": [len(raw_a), len(raw_b)], "raw_differences": raw, "unexplained": unexplained}
+
+
+def v4_text_of(name: str, data: bytes) -> str:
+    """稳定文件的文本（.gz 先解压），用于查找构造根路径。"""
+    raw = _gzip.decompress(data) if name.endswith(".gz") else data
+    return raw.decode("utf-8", errors="replace")
+
+
+def v4_formal_checks(root: Path, summary: dict) -> tuple[dict[str, bool], Path]:
+    """成功运行（照 V2 judge）与正式目录：文件集合 20 个、清单恰列其余 19 个且逐项相符。"""
+    judged = v2_run.judge(summary["exit_code"] if summary["exit_code"] is not None else -1,
+                          summary["stderr_text"] or "", root)
+    formal = v2_run.research_dir(root) / V4_FORMAL
+    conditions = {f"judge：{key}": value for key, value in judged["条件"].items()}
+    conditions["正式目录文件集合为 20 个"] = v2_run.present(formal) and v2_run.files_in(formal) == v2_run.EXPECTED_FILES
+    if conditions["正式目录文件集合为 20 个"]:
+        check = v4_manifest_check(formal, V4_MANIFEST, v2_run.EXPECTED_FILES - {V4_MANIFEST})
+        conditions["清单恰列其余 19 个文件"] = check["listed_exact"]
+        conditions["清单逐项相符"] = check["match"]
+    return conditions, formal
+
+
+# ---------------------------------------------------------------------------
+# 演习项目（第 4 条表；每项返回验收各条件的真假，并写入 O\records\<名称>.verdict.json）
+# ---------------------------------------------------------------------------
+
+
+def v4_verdict(out: Path, name: str, conditions: Mapping[str, bool], extra: Mapping | None = None) -> dict:
+    verdict = {"name": name, "conditions": dict(conditions), "passed": all(conditions.values()), **(extra or {})}
+    put_bytes(v4_fresh(out / "records" / f"{name}.verdict.json"), dump_json(verdict))
+    return verdict
+
+
+def v4_drill_det(out: Path) -> dict:
+    """V4-1 T-DET：两个复制根各以 const 方式运行一次，比对稳定文件、清单与环境审计文件。"""
+    source, constants = v4_det_source(out)
+    roots = {}
+    for name in ("v4_1a", "v4_1b"):
+        roots[name] = out / "roots" / name
+        v4_copy_tree(source, roots[name])
+    heads = {name: v4_head(root) for name, root in roots.items()}
+    runs = {name: run_v4(out, name, root, "const", constants) for name, root in roots.items()}
+    conditions: dict[str, bool] = {"两根提交号相同": len(set(heads.values())) == 1}
+    formals = {}
+    for name, root in roots.items():
+        summary = runs[name]
+        conditions.update({f"{name} {key}": value for key, value in v4_common_run(summary).items()})
+        checks, formals[name] = v4_formal_checks(root, summary)
+        conditions.update({f"{name} {key}": value for key, value in checks.items()})
+    left, right = formals["v4_1a"], formals["v4_1b"]
+    comparison: dict = {}
+    if all(v2_run.present(item) and v2_run.files_in(item) == v2_run.EXPECTED_FILES for item in (left, right)):
+        stable = {name: get_bytes(left / name) == get_bytes(right / name) for name in V4_STABLE_FILES}
+        conditions["17 个稳定文件两根逐字节相同"] = all(stable.values())
+        manifests = [v3_output.parse_manifest(get_bytes(item / V4_MANIFEST)) for item in (left, right)]
+        conditions["两份清单中 17 个稳定文件的条目相同"] = all(
+            manifests[0].get(name) == manifests[1].get(name) for name in V4_STABLE_FILES)
+        rooted = [name for name in V4_STABLE_FILES for root in roots.values()
+                  if str(root) in v4_text_of(name, get_bytes(left / name))
+                  or str(root).replace("\\", "/") in v4_text_of(name, get_bytes(left / name))]
+        conditions["稳定文件中不含构造根路径"] = not rooted
+        contexts = []
+        for name in ("v4_1a", "v4_1b"):
+            summary = runs[name]
+            contexts.append(V4Context(str(roots[name]), summary["pycache"], summary["tmp"],
+                                      v4_stamp(summary["stdout_report"]) or "<无时间戳>"))
+        conditions["两根时间戳可取得"] = all(item.stamp != "<无时间戳>" for item in contexts)
+        environment = v4_compare_environment(get_bytes(left / "run_environment.json"),
+                                             get_bytes(right / "run_environment.json"), (contexts[0], contexts[1]))
+        audit = v4_compare_audit(get_bytes(left / "audit_log.jsonl"), get_bytes(right / "audit_log.jsonl"),
+                                 (contexts[0], contexts[1]))
+        conditions["run_environment.json 差异全部在允许位置"] = environment["same"]
+        conditions["audit_log.jsonl 差异全部在允许位置"] = audit["same"]
+        comparison = {"stable": stable, "manifest_entries": {
+            name: [manifests[0].get(name), manifests[1].get(name)] for name in (*V4_STABLE_FILES, *V4_ENV_FILES)},
+            "rooted_stable": rooted, "contexts": [v4_context_dict(item) for item in contexts],
+            "run_environment": environment, "audit_log": audit}
+        put_bytes(v4_fresh(out / "records" / "v4_det.compare.json"), dump_json(comparison))
+    else:
+        conditions["两根正式目录均为 20 个文件"] = False
+    return v4_verdict(out, "v4_det", conditions, {
+        "heads": heads, "seconds": {name: runs[name]["seconds"] for name in runs},
+        "exit_codes": {name: runs[name]["exit_code"] for name in runs}})
+
+
+def v4_context_dict(context: V4Context) -> dict:
+    return {"root": context.root, "pycache": context.pycache, "tmp": context.tmp, "stamp": context.stamp}
+
+
+def v4_drill_failure_input(out: Path) -> dict:
+    """V4-2 T-FAIL-1：SPX 来源标识改动 → 严格读取失败（清单生成之前）。"""
+    root, constants = v4_build(out, "v4_2", "source")
+    summary = run_v4(out, "v4_2", root, "const", constants)
+    conditions = {**v4_common_run(summary), "退出码 1": summary["exit_code"] == 1}
+    checks, failure = v4_failure_checks(root, set(v2_run.FAILURE_FILES), ("输入校验失败", "严格读取"))
+    conditions.update(checks)
+    message = (failure.get("exception") or {}).get("message") or ""
+    conditions["异常原因为来源标识不在允许清单内：'other'"] = "来源标识不在允许清单内：'other'" in message
+    return v4_verdict(out, "v4_2", conditions, {"seconds": summary["seconds"], "exit_code": summary["exit_code"],
+                                                "failure_exception": failure.get("exception")})
+
+
+def v4_drill_rename(out: Path) -> dict:
+    """V4-3 T-FAIL-2：首次改名（暂存→正式）失败 → 清单生成之后、改名之前失败的完整处置。"""
+    root, constants = v4_build(out, "v4_3")
+    summary = run_v4(out, "v4_3", root, "rename", constants)
+    expected = set(v2_run.EXPECTED_FILES) | {"failure.json", "information_state_final.json", V4_FAILURE_MANIFEST}
+    conditions = {**v4_common_run(summary), "退出码 1": summary["exit_code"] == 1,
+                  "标准错误含改名注入行": "V4 drill injection: rename evaluation_validation" in (
+                      summary["stderr_text"] or "")}
+    checks, failure = v4_failure_checks(root, expected, ("未预期异常", "清单生成之后"))
+    conditions.update(checks)
+    conditions["失败目录共 23 个文件"] = len(expected) == 23 and checks.get("失败目录文件集合", False)
+    if failure.get("_directory"):
+        directory = Path(failure["_directory"])
+        check = v4_manifest_check(directory, V4_MANIFEST, v2_run.EXPECTED_FILES - {V4_MANIFEST}) if v2_run.present(
+            directory / V4_MANIFEST) else {"listed": [], "listed_exact": False, "match": False}
+        conditions["MANIFEST.sha256 恰列其余 19 个原正式文件"] = check["listed_exact"]
+        conditions["MANIFEST.sha256 逐项相符"] = check["match"]
+        conditions["failure.json 顶层 manifest_sha256 等于清单实算哈希"] = v2_run.present(
+            directory / V4_MANIFEST) and failure.get("manifest_sha256") == sha256(get_bytes(directory / V4_MANIFEST))
+    return v4_verdict(out, "v4_3", conditions, {"seconds": summary["seconds"], "exit_code": summary["exit_code"]})
+
+
+def v4_drill_tail(out: Path) -> dict:
+    """V4-4 T-FAIL-3：首次写尾段失败 → 发布后失败（正式目录保持原状、写发布失败说明、再尽力写一次尾段）。"""
+    root, constants = v4_build(out, "v4_4")
+    summary = run_v4(out, "v4_4", root, "tail", constants)
+    report = summary["stdout_report"] or {}
+    found = v2_run.listing(root)
+    formal = v2_run.research_dir(root) / V4_FORMAL
+    conditions = {**v4_common_run(summary), "退出码 1": summary["exit_code"] == 1,
+                  "报告 outcome 为发布后失败": report.get("outcome") == "发布后失败",
+                  "标准错误含尾段注入行": "V4 drill injection: audit tail" in (summary["stderr_text"] or ""),
+                  "正式目录存在且为 20 个文件": v2_run.present(formal)
+                  and v2_run.files_in(formal) == v2_run.EXPECTED_FILES,
+                  "发布失败说明恰一个": len(found.get("note", [])) == 1,
+                  "无暂存目录、无失败目录": found.get("staging") == [] and found.get("failed") == []}
+    if conditions["正式目录存在且为 20 个文件"]:
+        check = v4_manifest_check(formal, V4_MANIFEST, v2_run.EXPECTED_FILES - {V4_MANIFEST})
+        conditions["MANIFEST.sha256 恰列其余 19 个文件"] = check["listed_exact"]
+        conditions["MANIFEST.sha256 逐项相符"] = check["match"]
+    if conditions["发布失败说明恰一个"]:
+        note = json.loads(get_bytes(v2_run.research_dir(root) / found["note"][0]))
+        conditions["说明 statement 为 NOT_A_SUCCESS"] = note.get("statement") == v3_output.NOT_A_SUCCESS
+        conditions["说明 stage 为审计尾段"] = note.get("stage") == "审计尾段"
+    tail = v4_tail_records(root)
+    conditions["尾段恰一个"] = tail is not None
+    conditions["尾段收尾记录为失败"] = bool(tail) and tail[-1].get("record") == "close" and tail[-1].get(
+        "outcome") == "失败"
+    return v4_verdict(out, "v4_4", conditions, {"seconds": summary["seconds"], "exit_code": summary["exit_code"]})
+
+
+V4_REJECTIONS = {
+    "v4_5a": ("formal", "const", "正式目录已存在", False),
+    "v4_5b": ("untracked", "const", "工作区不干净", False),
+    "v4_5c": ("missing", "const", "预检文件缺失或不可读：src/market_risk/wavewarn_v20/validation_run.py", False),
+    "v4_5d": ("main", "none", "M3 清单的 SHA-256 与登记值不符", True),
+}
+
+
+def v4_drill_rejected(out: Path, name: str) -> dict:
+    """V4-5 甲—丁：预检拒绝（未读入任何行情）。"""
+    kind, mode, reason, exact = V4_REJECTIONS[name]
+    root, constants = v4_build(out, name, kind)
+    summary = run_v4(out, name, root, mode, constants)
+    conditions = {**v4_common_run(summary), **v4_rejected(root, summary, reason, exact)}
+    return v4_verdict(out, name, conditions, {"seconds": summary["seconds"], "exit_code": summary["exit_code"],
+                                              "reason": (summary["stdout_report"] or {}).get("reason")})
+
+
+def v4_drill_overlap(out: Path) -> dict:
+    """V4-6 T-OVLF：改动后的构造基准 → 重叠状态比对不符，不进入确认性检验与必报诊断。"""
+    root, constants = v4_build(out, "v4_6", "altered")
+    summary = run_v4(out, "v4_6", root, "const", constants)
+    conditions = {**v4_common_run(summary), "退出码 1": summary["exit_code"] == 1}
+    checks, failure = v4_failure_checks(root, set(v2_run.FAILURE_FILES), ("重叠状态比对不符", "重叠比对"))
+    conditions.update(checks)
+    conditions["detail.statement 为验证期措辞"] = (failure.get("detail") or {}).get(
+        "statement") == v4_validation_run.OVERLAP_STATEMENT["validation"]
+    if failure.get("_directory"):
+        state = json.loads(get_bytes(Path(failure["_directory"]) / "information_state_final.json"))
+        stages = [item.get("stage") for item in state.get("stage_trace", [])]
+        conditions["阶段轨迹含重叠比对、不含确认性检验与必报诊断"] = (
+            "重叠比对" in stages and "确认性检验" not in stages and "必报诊断" not in stages)
+    return v4_verdict(out, "v4_6", conditions, {"seconds": summary["seconds"], "exit_code": summary["exit_code"]})
+
+
+def v4_prepare_frame(out: Path) -> dict:
+    """三个框架根（v4_1_src 的复制）与 O\\frame 下三个文件；三个框架根的 HEAD 相同。"""
+    source, constants = v4_det_source(out)
+    heads = {}
+    for case in V4_FRAME_CASES:
+        target = out / "frame_roots" / case
+        v4_copy_tree(source, target)
+        heads[case] = v4_head(target)
+    frame = out / "frame"
+    put_bytes(v4_fresh(frame / "drill.py"), V4_DRILL_SCRIPT.encode("utf-8"))
+    put_bytes(v4_fresh(frame / "constants.txt"), (" ".join(constants) + "\n").encode("utf-8"))
+    put_bytes(v4_fresh(frame / "commit.txt"), (heads["normal"] + "\n").encode("utf-8"))
+    conditions = {"三个框架根的 HEAD 相同": len(set(heads.values())) == 1,
+                  "源根 HEAD 与框架根相同": v4_head(source) == heads["normal"],
+                  "drill.py 哈希": sha256(get_bytes(frame / "drill.py")) == V4_DRILL_SHA256}
+    return v4_verdict(out, "v4_prepare_frame", conditions, {"heads": heads, "constants": list(constants)})
+
+
+def v4_drill(out: Path, name: str) -> dict:
+    """D1 演习用例的入口：按名称运行一项并返回验收记录。"""
+    if name == "v4_det":
+        return v4_drill_det(out)
+    if name == "v4_2":
+        return v4_drill_failure_input(out)
+    if name == "v4_3":
+        return v4_drill_rename(out)
+    if name == "v4_4":
+        return v4_drill_tail(out)
+    if name in V4_REJECTIONS:
+        return v4_drill_rejected(out, name)
+    if name == "v4_6":
+        return v4_drill_overlap(out)
+    if name == "v4_prepare_frame":
+        return v4_prepare_frame(out)
+    raise ValueError(f"未登记的演习项：{name}")
