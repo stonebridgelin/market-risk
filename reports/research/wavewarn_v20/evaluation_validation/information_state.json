@@ -1,0 +1,465 @@
+{
+  "data_read": {
+    "SPX": {
+      "read": true,
+      "bytes": 643846,
+      "raw_sha256": "6941ab293eddb8201e851d873476d64c6cbd584ec9573f5ff757447173bf0b00",
+      "read_event_seq": 1355,
+      "layers": {
+        "byte_read": "整份文件",
+        "price_parse": "≤ 2022-12-30",
+        "compute": "≤ 2022-12-30"
+      },
+      "normalized_sha256_verified": "68af03b356689641a07f53966d6518dafba6e47eab0ac51765ed933dd2fb586f"
+    },
+    "QQQ": {
+      "read": true,
+      "bytes": 410106,
+      "raw_sha256": "d14e58edcab7ec94b4e6728ce65bbbf8a0a84565d53ce951a37a4e6143a56880",
+      "read_event_seq": 1356,
+      "layers": {
+        "byte_read": "整份文件",
+        "price_parse": "≤ 2022-12-30",
+        "compute": "≤ 2022-12-30"
+      },
+      "normalized_sha256_verified": "7d0a431f79d50fe86cc2d6893beb3b786924ea041144becbe3eded94a9e44a30"
+    }
+  },
+  "evaluation_prices_parsed": {
+    "SPX": {
+      "strict_started": true,
+      "strict_completed": true,
+      "diagnosis_started": false,
+      "diagnosis_completed": false,
+      "rows": 8315,
+      "first_day": "1990-01-02",
+      "last_day": "2022-12-30"
+    },
+    "QQQ": {
+      "strict_started": true,
+      "strict_completed": true,
+      "diagnosis_started": false,
+      "diagnosis_completed": false,
+      "rows": 5994,
+      "first_day": "1999-03-10",
+      "last_day": "2022-12-30"
+    }
+  },
+  "derived_inputs": [
+    {
+      "seq": 12,
+      "object": "公共",
+      "field": "输入派生量",
+      "stage": "输入派生量",
+      "event": "derived"
+    },
+    {
+      "seq": 13,
+      "object": "公共",
+      "field": "t0",
+      "stage": "t0",
+      "event": "derived"
+    },
+    {
+      "seq": 17,
+      "object": "公共",
+      "field": "R2 事件",
+      "stage": "R2 事件",
+      "event": "derived"
+    }
+  ],
+  "performance_info": [
+    {
+      "seq": 14,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "通道与系统收敛日（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 15,
+      "object": "主参照",
+      "field": "收敛（含状态路径）",
+      "stage": "收敛",
+      "event": "performance"
+    },
+    {
+      "seq": 16,
+      "object": "一直持有",
+      "field": "净值",
+      "stage": "一直持有",
+      "event": "performance"
+    },
+    {
+      "seq": 18,
+      "object": "主参照",
+      "field": "逐日状态",
+      "stage": "主参照",
+      "event": "performance"
+    },
+    {
+      "seq": 19,
+      "object": "主参照",
+      "field": "信号",
+      "stage": "主参照",
+      "event": "performance"
+    },
+    {
+      "seq": 20,
+      "object": "主参照",
+      "field": "计划目标",
+      "stage": "主参照",
+      "event": "performance"
+    },
+    {
+      "seq": 21,
+      "object": "主参照",
+      "field": "净值",
+      "stage": "主参照",
+      "event": "performance"
+    },
+    {
+      "seq": 22,
+      "object": "主参照",
+      "field": "执行政策",
+      "stage": "主参照",
+      "event": "performance"
+    },
+    {
+      "seq": 23,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "系统逐日记录",
+      "stage": "通道与状态机",
+      "event": "performance"
+    },
+    {
+      "seq": 24,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "信号与计划目标",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 25,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "信号模拟净值",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 26,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "执行政策",
+      "stage": "信号模拟与执行政策",
+      "event": "performance"
+    },
+    {
+      "seq": 27,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "R2：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 28,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "段账：SPX",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 29,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "R2：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 30,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "段账：QQQ",
+      "stage": "R2",
+      "event": "performance"
+    },
+    {
+      "seq": 31,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "R1",
+      "stage": "R1",
+      "event": "performance"
+    },
+    {
+      "seq": 32,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "分段",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 33,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "候选记录",
+      "stage": "分段",
+      "event": "performance"
+    },
+    {
+      "seq": 34,
+      "object": "主参照",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 35,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "杠杆因子",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 36,
+      "object": "K=3,θ_P=0.025,h=3",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 37,
+      "object": "主参照",
+      "field": "收敛枚举",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 38,
+      "object": "SPX、QQQ",
+      "field": "回撤",
+      "stage": "诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 41,
+      "object": "日期断言",
+      "field": "日期与 D15 断言",
+      "stage": "日期断言",
+      "event": "performance"
+    },
+    {
+      "seq": 44,
+      "object": "重叠比对",
+      "field": "重算记录",
+      "stage": "重叠比对",
+      "event": "performance"
+    },
+    {
+      "seq": 45,
+      "object": "重叠比对",
+      "field": "已发布字段比对",
+      "stage": "重叠比对",
+      "event": "performance"
+    },
+    {
+      "seq": 48,
+      "object": "确认性检验",
+      "field": "检验结果",
+      "stage": "确认性检验",
+      "event": "performance"
+    },
+    {
+      "seq": 51,
+      "object": "必报诊断",
+      "field": "D-1—D-3",
+      "stage": "必报诊断",
+      "event": "performance"
+    },
+    {
+      "seq": 54,
+      "object": "描述性对照",
+      "field": "描述性对照",
+      "stage": "描述性对照",
+      "event": "performance"
+    },
+    {
+      "seq": 57,
+      "object": "序列化",
+      "field": "汇总文件",
+      "stage": "序列化",
+      "event": "performance"
+    },
+    {
+      "seq": 58,
+      "object": "序列化",
+      "field": "逐日明细",
+      "stage": "序列化",
+      "event": "performance"
+    }
+  ],
+  "performance_info_status": "已产生",
+  "stage_trace": [
+    {
+      "seq": 1,
+      "stage": "预检",
+      "action": "进入"
+    },
+    {
+      "seq": 2,
+      "stage": "预检",
+      "action": "离开"
+    },
+    {
+      "seq": 3,
+      "stage": "建暂存目录",
+      "action": "进入"
+    },
+    {
+      "seq": 4,
+      "stage": "建暂存目录",
+      "action": "离开"
+    },
+    {
+      "seq": 5,
+      "stage": "加载配置",
+      "action": "进入"
+    },
+    {
+      "seq": 6,
+      "stage": "加载配置",
+      "action": "离开"
+    },
+    {
+      "seq": 7,
+      "stage": "读取行情",
+      "action": "进入"
+    },
+    {
+      "seq": 8,
+      "stage": "读取行情",
+      "action": "离开"
+    },
+    {
+      "seq": 9,
+      "stage": "组装快照",
+      "action": "进入"
+    },
+    {
+      "seq": 10,
+      "stage": "组装快照",
+      "action": "离开"
+    },
+    {
+      "seq": 11,
+      "stage": "组合层",
+      "action": "进入"
+    },
+    {
+      "seq": 39,
+      "stage": "组合层",
+      "action": "离开"
+    },
+    {
+      "seq": 40,
+      "stage": "日期断言",
+      "action": "进入"
+    },
+    {
+      "seq": 42,
+      "stage": "日期断言",
+      "action": "离开"
+    },
+    {
+      "seq": 43,
+      "stage": "重叠比对",
+      "action": "进入"
+    },
+    {
+      "seq": 46,
+      "stage": "重叠比对",
+      "action": "离开"
+    },
+    {
+      "seq": 47,
+      "stage": "确认性检验",
+      "action": "进入"
+    },
+    {
+      "seq": 49,
+      "stage": "确认性检验",
+      "action": "离开"
+    },
+    {
+      "seq": 50,
+      "stage": "必报诊断",
+      "action": "进入"
+    },
+    {
+      "seq": 52,
+      "stage": "必报诊断",
+      "action": "离开"
+    },
+    {
+      "seq": 53,
+      "stage": "描述性对照",
+      "action": "进入"
+    },
+    {
+      "seq": 55,
+      "stage": "描述性对照",
+      "action": "离开"
+    },
+    {
+      "seq": 56,
+      "stage": "序列化",
+      "action": "进入"
+    },
+    {
+      "seq": 59,
+      "stage": "序列化",
+      "action": "离开"
+    },
+    {
+      "seq": 60,
+      "stage": "写出",
+      "action": "进入"
+    }
+  ],
+  "exception": null,
+  "completed_results": [
+    "run_record.json",
+    "input_snapshot.csv.gz",
+    "window.json",
+    "date_assertions.json",
+    "overlap_check.json",
+    "confirmatory.json",
+    "diagnostics_validation.json",
+    "descriptive.json",
+    "daily_signals.csv.gz",
+    "daily_targets.csv.gz",
+    "daily_nav.csv.gz",
+    "daily_policy.csv.gz",
+    "r2_events.csv.gz",
+    "r2_judgements.csv.gz",
+    "segment_ledgers.csv.gz",
+    "report.md"
+  ],
+  "usage_restriction": [],
+  "window_coverage": {
+    "condition": null,
+    "first_day": null,
+    "satisfied": null,
+    "status": "不适用：开发窗口覆盖条件只对开发期截止日定义"
+  },
+  "s21_facts": {
+    "读入行情": [
+      "QQQ",
+      "SPX"
+    ],
+    "严格解析完成": [
+      "QQQ",
+      "SPX"
+    ],
+    "诊断解析完成": [],
+    "组合层已调用": true,
+    "表现信息状态": "已产生",
+    "s21_class": "待核对"
+  }
+}

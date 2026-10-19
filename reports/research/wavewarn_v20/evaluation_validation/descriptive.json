@@ -1,0 +1,141 @@
+{
+  "objects": [
+    {
+      "object": "K=3,θ_P=0.025,h=3",
+      "signal": {
+        "computable": true,
+        "log_wealth": 0.7815149118505949,
+        "max_drawdown": 0.2461572057337823,
+        "final_wealth": 2.1847795081429875
+      },
+      "policy": {
+        "complete": true,
+        "computable": true,
+        "log_wealth": 0.6872651177016452,
+        "max_drawdown": 0.16450524235258335,
+        "final_wealth": 1.988270405209336
+      },
+      "switches": {
+        "count": 181,
+        "magnitude_total": 111.3,
+        "change_total": -1.0999999999999992
+      },
+      "policy_minus_signal": {
+        "difference": -0.09424979414894963,
+        "note": "差异包含整套止损、冷却、重入路径的差异，不归因为任何单项规则"
+      }
+    },
+    {
+      "object": "主参照",
+      "signal": {
+        "computable": true,
+        "log_wealth": 0.8052901015652775,
+        "max_drawdown": 0.2932388520374726,
+        "final_wealth": 2.237345462103426
+      },
+      "policy": {
+        "complete": true,
+        "computable": true,
+        "log_wealth": 0.5491099269081985,
+        "max_drawdown": 0.2679847091307752,
+        "final_wealth": 1.731710982358868
+      },
+      "switches": {
+        "count": 52,
+        "magnitude_total": 33.3,
+        "change_total": -1.0999999999999992
+      },
+      "policy_minus_signal": {
+        "difference": -0.256180174657079,
+        "note": "差异包含整套止损、冷却、重入路径的差异，不归因为任何单项规则"
+      }
+    }
+  ],
+  "hold": {
+    "computable": true,
+    "log_wealth": 0.8723423280297504,
+    "max_drawdown": 0.4163394566613602,
+    "final_wealth": 2.3925083347303495
+  },
+  "averages": [
+    {
+      "name": "200 日均线一级版",
+      "convergence_day": "1999-06-09",
+      "evaluable": true,
+      "note": null,
+      "signal": {
+        "computable": true,
+        "log_wealth": 0.8808601255198796,
+        "max_drawdown": 0.31969261729189324,
+        "final_wealth": 2.4129742748472944
+      },
+      "policy": {
+        "complete": true,
+        "computable": true,
+        "log_wealth": 0.6025282504150561,
+        "max_drawdown": 0.2774034071062128,
+        "final_wealth": 1.8267314014521543
+      },
+      "switches": {
+        "count": 39,
+        "magnitude_total": 31.199999999999996,
+        "change_total": -0.7999999999999999
+      }
+    },
+    {
+      "name": "带缓冲带的 200 日均线二级版（101%/99%）",
+      "convergence_day": "1999-06-10",
+      "evaluable": true,
+      "note": null,
+      "signal": {
+        "computable": true,
+        "log_wealth": 0.8769564252817532,
+        "max_drawdown": 0.2943113399528353,
+        "final_wealth": 2.4035731082028122
+      },
+      "policy": {
+        "complete": true,
+        "computable": true,
+        "log_wealth": 0.6815468331222463,
+        "max_drawdown": 0.24546886803674361,
+        "final_wealth": 1.9769333543454106
+      },
+      "switches": {
+        "count": 28,
+        "magnitude_total": 18.299999999999997,
+        "change_total": -1.0999999999999994
+      }
+    }
+  ],
+  "constants": [
+    {
+      "object": "主参照",
+      "computed": true,
+      "note": "ē 为窗口结束后才知道的平均值，是机会成本参照，不是可实时执行的策略",
+      "core": 0.5298675496688742,
+      "leverage": 0.3014569536423841,
+      "exposure": 1.1327814569536425,
+      "nav": {
+        "computable": true,
+        "log_wealth": 0.7497095070232221,
+        "max_drawdown": 0.34677293420621647,
+        "final_wealth": 2.1163851322901226
+      }
+    },
+    {
+      "object": "K=3,θ_P=0.025,h=3",
+      "computed": true,
+      "note": "ē 为窗口结束后才知道的平均值，是机会成本参照，不是可实时执行的策略",
+      "core": 0.5270860927152318,
+      "leverage": 0.20953642384105964,
+      "exposure": 0.946158940397351,
+      "nav": {
+        "computable": true,
+        "log_wealth": 0.6516992328780382,
+        "max_drawdown": 0.29533259717427807,
+        "final_wealth": 1.9187985459958237
+      }
+    }
+  ],
+  "note": "描述性对照与执行政策研究模拟只作描述，不参与确认性检验，不构成可实盘规则"
+}

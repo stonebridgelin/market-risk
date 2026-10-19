@@ -1,0 +1,365 @@
+{
+ "script": "v20-verify-compare-2",
+ "完成状态": "完整对齐",
+ "对齐断言": {
+  "项目 date_assertions 全部通过": true,
+  "项目 j₀ = 2016-12-30": true,
+  "项目 f = 2016-12-29": true,
+  "工具 window.start == 2016-12-30": true,
+  "工具 window.first_signal_day == 2016-12-29": true,
+  "工具 window.half_split == 场景": true,
+  "工具 registered_settings 为 true": true,
+  "两侧 n 精确相等": true,
+  "E 相同": true,
+  "区间末日集合相同": true,
+  "前一半区间末日集合相同": true,
+  "后一半区间末日集合相同": true
+ },
+ "放行": true,
+ "未放行理由": [],
+ "限制（iv）解除条件成立": true,
+ "工具": {
+  "confirm_exit": 0,
+  "full_exit": 0,
+  "exec_exit": 0,
+  "registered_settings": true
+ },
+ "counts": {
+  "一致": 14009,
+  "不一致": 0,
+  "未比较": 23,
+  "接口差异": 0,
+  "路径差异": 0,
+  "裁决差异（D13-甲）": 0,
+  "容差内": 2,
+  "构造边界差异（D15）": 0
+ },
+ "counts_甲一": {
+  "一致": 158,
+  "不一致": 0,
+  "未比较": 21,
+  "接口差异": 0,
+  "路径差异": 0,
+  "裁决差异（D13-甲）": 0,
+  "容差内": 2,
+  "构造边界差异（D15）": 0
+ },
+ "覆盖": {
+  "甲二": {
+   "工具": {
+    "原始行数": 5932,
+    "唯一键数": 5932
+   },
+   "项目": {
+    "原始行数": 1511,
+    "唯一键数": 1511
+   },
+   "期望日数": 1511,
+   "逐日比较日数": 1511
+  },
+  "甲三": {
+   "期望日数": 1511,
+   "项目数据行": 7555,
+   "K=3,θ_P=0.025,h=3／信号模拟": {
+    "工具": "可用",
+    "项目": "可用",
+    "项目行": {
+     "原始行数": 1511,
+     "唯一键数": 1511
+    },
+    "逐日比较日数": 1511
+   },
+   "一直持有／一直持有": {
+    "工具": "可用",
+    "项目": "可用",
+    "项目行": {
+     "原始行数": 1511,
+     "唯一键数": 1511
+    },
+    "逐日比较日数": 1511
+   }
+  },
+  "甲四": {
+   "SPX": {
+    "confirm": {
+     "原始行数": 115,
+     "唯一键数": 115
+    },
+    "full": {
+     "原始行数": 115,
+     "唯一键数": 115
+    }
+   },
+   "QQQ": {
+    "confirm": {
+     "原始行数": 156,
+     "唯一键数": 156
+    },
+    "full": {
+     "原始行数": 156,
+     "唯一键数": 156
+    }
+   },
+   "项目事件": {
+    "原始行数": 271,
+    "唯一键数": 271
+   },
+   "项目判定": {
+    "原始行数": 271,
+    "唯一键数": 271
+   },
+   "事件比较数": 271,
+   "判定比较数": 271,
+   "工具事件数": 271
+  }
+ },
+ "by_layer": {
+  "检验层": {
+   "annual_relative_growth ↔ annual_growth": {
+    "容差内": 1
+   },
+   "bootstrap 行（b 集合）": {
+    "一致": 1
+   },
+   "bootstrap.delta_star": {
+    "未比较": 5
+   },
+   "bootstrap.p ↔ p_value（精确）": {
+    "一致": 5
+   },
+   "bootstrap.q025 ↔ low": {
+    "一致": 5
+   },
+   "bootstrap.q975 ↔ high": {
+    "一致": 5
+   },
+   "bootstrap.seed ↔ seed": {
+    "一致": 5
+   },
+   "bootstrap.tail": {
+    "未比较": 5
+   },
+   "bootstrap.tail_count": {
+    "未比较": 5
+   },
+   "bootstrap.valid ↔ valid": {
+    "一致": 5
+   },
+   "category ↔ category": {
+    "一致": 1
+   },
+   "conclusion ↔ conclusion（有效结果精确）": {
+    "一致": 1
+   },
+   "delta ↔ delta": {
+    "一致": 1
+   },
+   "delta_min ↔ delta_min": {
+    "容差内": 1
+   },
+   "event_zeroing ↔ zeroed 事件集合（资产、高点）": {
+    "一致": 1
+   },
+   "event_zeroing ↔ zeroed 无 P ≤ f 的事件": {
+    "一致": 1
+   },
+   "event_zeroing.Tr 与置零范围": {
+    "未比较": 1
+   },
+   "event_zeroing.delta_zeroed ↔ zeroed.delta": {
+    "一致": 56
+   },
+   "event_zeroing.not_positive ↔ zeroed.delta ≤ 0": {
+    "一致": 56
+   },
+   "halves.consistent ↔ 由 halves 判定": {
+    "一致": 1
+   },
+   "halves.first ↔ halves.first": {
+    "一致": 1
+   },
+   "halves.second ↔ halves.second": {
+    "一致": 1
+   },
+   "judgement_point_estimate ↔ magnitude_reached": {
+    "一致": 1
+   },
+   "judgement_test_pass ↔ improvement_passed": {
+    "一致": 1
+   },
+   "lnW（项目 confirmatory.json 未输出）": {
+    "未比较": 1
+   },
+   "n ↔ n": {
+    "一致": 1
+   },
+   "own_loss_text ↔ own_result 是否为 null": {
+    "一致": 1
+   },
+   "r1（项目 confirmatory.json 未输出）": {
+    "未比较": 1
+   },
+   "r2_ok（项目 confirmatory.json 未输出）": {
+    "未比较": 1
+   },
+   "r2（项目 confirmatory.json 未输出）": {
+    "未比较": 1
+   },
+   "unstable ↔ unstable": {
+    "一致": 1
+   },
+   "valid ↔ valid": {
+    "一致": 1
+   },
+   "warnings ↔ warnings（文字映射后集合）": {
+    "一致": 1
+   },
+   "候选、参照、一直持有逐日净值路径": {
+    "未比较": 1
+   }
+  },
+  "甲三 净值路径": {
+   "K=3,θ_P=0.025,h=3／信号模拟 W ↔ wealth": {
+    "一致": 1511
+   },
+   "K=3,θ_P=0.025,h=3／信号模拟 工具日期集合（[j₀, E]）": {
+    "一致": 1
+   },
+   "K=3,θ_P=0.025,h=3／信号模拟 项目日期集合（[j₀, E]）": {
+    "一致": 1
+   },
+   "K=3,θ_P=0.025,h=3／信号模拟 项目行 主键唯一": {
+    "一致": 1
+   },
+   "return_to_date": {
+    "未比较": 2
+   },
+   "一直持有／一直持有 W ↔ wealth": {
+    "一致": 1511
+   },
+   "一直持有／一直持有 工具日期集合（[j₀, E]）": {
+    "一致": 1
+   },
+   "一直持有／一直持有 项目日期集合（[j₀, E]）": {
+    "一致": 1
+   },
+   "一直持有／一直持有 项目行 主键唯一": {
+    "一致": 1
+   }
+  },
+  "甲二 逐日状态": {
+   "L ↔ level": {
+    "一致": 1511
+   },
+   "S ↔ risk": {
+    "一致": 1511
+   },
+   "all_valid ↔ all_valid": {
+    "一致": 1511
+   },
+   "c1 ↔ c1": {
+    "一致": 1511
+   },
+   "c2 ↔ c2": {
+    "一致": 1511
+   },
+   "工具逐日记录 主键唯一": {
+    "一致": 1
+   },
+   "工具逐日记录（[f, E−1]）必需键齐全": {
+    "一致": 1
+   },
+   "日期集合（[f, E−1]）": {
+    "一致": 1
+   },
+   "项目冻结候选行 主键唯一": {
+    "一致": 1
+   }
+  },
+  "甲四 事件与逐事件判定": {
+   "C_P ↔ peak_close": {
+    "一致": 271
+   },
+   "C_Tr ↔ trough_close": {
+    "一致": 271
+   },
+   "End ↔ end": {
+    "一致": 271
+   },
+   "T3 ↔ t3": {
+    "一致": 271
+   },
+   "T5 ↔ t5": {
+    "一致": 271
+   },
+   "Tr ↔ trough": {
+    "一致": 271
+   },
+   "category ↔ category": {
+    "一致": 271
+   },
+   "confirm r2.QQQ 事件 主键唯一": {
+    "一致": 1
+   },
+   "confirm r2.SPX 事件 主键唯一": {
+    "一致": 1
+   },
+   "confirm 与 full 对该资产同时给出或同时不给出事件": {
+    "一致": 2
+   },
+   "confirm 事件集合 ↔ full r2_events 事件集合": {
+    "一致": 2
+   },
+   "exec_idx ↔ executable_day": {
+    "一致": 271
+   },
+   "first_new ↔ first_new_day": {
+    "一致": 271
+   },
+   "full r2_events.QQQ 事件 主键唯一": {
+    "一致": 1
+   },
+   "full r2_events.SPX 事件 主键唯一": {
+    "一致": 1
+   },
+   "offset_vs_T3 ↔ executable_offset": {
+    "一致": 271
+   },
+   "peak_new_uncertain ↔ peak_new_uncertain": {
+    "一致": 271
+   },
+   "unfinished ↔ unfinished": {
+    "一致": 271
+   },
+   "事件集合（资产, 高点）": {
+    "一致": 1
+   },
+   "判定事件集合（资产, 高点）": {
+    "一致": 1
+   },
+   "项目 r2_events 主键唯一": {
+    "一致": 1
+   },
+   "项目 r2_judgements 冻结候选行 主键唯一": {
+    "一致": 1
+   }
+  },
+  "顶层键": {
+   "kind": {
+    "一致": 1
+   },
+   "name": {
+    "一致": 1
+   },
+   "params": {
+    "一致": 1
+   },
+   "registered_settings": {
+    "一致": 1
+   },
+   "tool": {
+    "一致": 1
+   }
+  }
+ }
+}

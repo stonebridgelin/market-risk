@@ -1,0 +1,15 @@
+{
+  "argv": [
+    "C:\\Users\\stone\\PycharmProjects\\market-risk\\src\\market_risk\\wavewarn_v20\\validation_run.py"
+  ],
+  "executable": "C:\\Users\\stone\\PycharmProjects\\market-risk\\.venv\\Scripts\\python.exe",
+  "acquired_at": "2026-10-19T05:37:02.930943+00:00",
+  "started_at": "2026-10-19T05:37:02.930943+00:00",
+  "ended_at": "2026-10-19T05:38:04.195922+00:00",
+  "seconds": 61.26599999999962,
+  "host": "DESKTOP-MV5EJ97",
+  "root": "C:\\Users\\stone\\PycharmProjects\\market-risk",
+  "mode": "validation",
+  "staging": "C:\\Users\\stone\\PycharmProjects\\market-risk\\reports\\research\\wavewarn_v20\\.staging_evaluation_validation_20261019T053702Z_630ee25",
+  "formal": "C:\\Users\\stone\\PycharmProjects\\market-risk\\reports\\research\\wavewarn_v20\\evaluation_validation"
+}

@@ -1,0 +1,82 @@
+{
+  "period": "验证期",
+  "passed": true,
+  "checks": [
+    {
+      "item": "j₀（first_return_day）",
+      "expected": "2016-12-30",
+      "actual": "2016-12-30",
+      "passed": true
+    },
+    {
+      "item": "E（last_day）",
+      "expected": "2022-12-30",
+      "actual": "2022-12-30",
+      "passed": true
+    },
+    {
+      "item": "f（候选首条净值模拟信号）",
+      "expected": "2016-12-29",
+      "actual": "2016-12-29",
+      "passed": true
+    },
+    {
+      "item": "f（主参照首条净值模拟信号）",
+      "expected": "2016-12-29",
+      "actual": "2016-12-29",
+      "passed": true
+    },
+    {
+      "item": "R2 状态起日（候选完整记录首日）",
+      "expected": "2016-12-28",
+      "actual": "2016-12-28",
+      "passed": true
+    },
+    {
+      "item": "R2 状态起日（主参照完整记录首日）",
+      "expected": "2016-12-28",
+      "actual": "2016-12-28",
+      "passed": true
+    },
+    {
+      "item": "R2 提示状态首日",
+      "expected": "2016-12-28",
+      "actual": "2016-12-28",
+      "passed": true
+    },
+    {
+      "item": "首个计入收益区间",
+      "expected": [
+        "2016-12-30",
+        "2017-01-03"
+      ],
+      "actual": [
+        "2016-12-30",
+        "2017-01-03"
+      ],
+      "passed": true
+    },
+    {
+      "item": "最后计入收益区间",
+      "expected": [
+        "2022-12-29",
+        "2022-12-30"
+      ],
+      "actual": [
+        "2022-12-29",
+        "2022-12-30"
+      ],
+      "passed": true
+    }
+  ],
+  "d15": {
+    "j0": 6804,
+    "t0": 2383,
+    "offset": 63,
+    "kappa_all": 2386,
+    "j0_min": 2446,
+    "warmup_ok": true,
+    "convergence_ok": true
+  },
+  "n": 1510
+}

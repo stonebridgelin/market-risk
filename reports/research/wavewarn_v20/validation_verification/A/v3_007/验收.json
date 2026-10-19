@@ -1,0 +1,15 @@
+{
+ "checks": {
+  "confirm 输出解析后删除 name，规范化 JSON 文本相同": true,
+  "丁总项数与不一致数与 V3 丁相同": true,
+  "丁退出码 0": true,
+  "场景七键相同": true,
+  "完成状态与对齐断言与 V3 丙相同": true,
+  "甲一 counts 与 V3 丙相同": true,
+  "甲二至甲四覆盖完整": true,
+  "甲层放行": true,
+  "适配后四个输入与 V3 项目导出规范化相同": true
+ },
+ "name": "v3_007",
+ "script": "v20-verify-gate-3"
+}

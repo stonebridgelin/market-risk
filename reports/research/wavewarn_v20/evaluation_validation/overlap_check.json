@@ -1,0 +1,30 @@
+{
+  "baseline": "evaluation_development/daily_signals.csv.gz",
+  "keys": {
+    "K=3,θ_P=0.025,h=3": {
+      "rows": 4359,
+      "first": "1999-09-03",
+      "last": "2016-12-29"
+    },
+    "主参照": {
+      "rows": 4359,
+      "first": "1999-09-03",
+      "last": "2016-12-29"
+    }
+  },
+  "compared_cells": 43590,
+  "outcome": "相同",
+  "passed": true,
+  "problem_count": 0,
+  "problems": [],
+  "mismatches": [],
+  "columns": [
+    "risk",
+    "level",
+    "c1",
+    "c2",
+    "all_valid"
+  ],
+  "scope": "重叠状态比对的证明范围：正式比对只证明冻结候选与主参照的五个已发布字段（risk、level、c1、c2、all_valid）在基准日期上逐日相同；完整状态（五个通道、S、c₁、c₂）跨截止日逐日相同由构造测试 T-OVL 证明，本次运行的比对不证明通道内部状态。",
+  "baseline_sha256": "1af662faba75587f8e947cbb97ed19e23b8f7d55ca95cdb06e794f672185c768"
+}

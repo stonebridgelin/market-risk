@@ -1,0 +1,1224 @@
+{
+  "computed": true,
+  "window": {
+    "first": "2016-12-29",
+    "last": "2022-12-30",
+    "signal_days": 1512
+  },
+  "rule": {
+    "numerator": 3,
+    "denominator": 5
+  },
+  "d1_new_prompt_share": [
+    {
+      "asset": "SPX",
+      "new_achieved": 10,
+      "covered_achieved": 10,
+      "r2_achieved": 20,
+      "denominator": 24,
+      "r2_meets": true,
+      "new_share_at_least_60": false,
+      "integer_check": "5 × 10 ≥ 3 × 24",
+      "statement": "SPX 的 R2 达标部分依赖持续覆盖；只计新提示时未达到 60%。"
+    },
+    {
+      "asset": "QQQ",
+      "new_achieved": 8,
+      "covered_achieved": 16,
+      "r2_achieved": 24,
+      "denominator": 32,
+      "r2_meets": true,
+      "new_share_at_least_60": false,
+      "integer_check": "5 × 8 ≥ 3 × 32",
+      "statement": "QQQ 的 R2 达标部分依赖持续覆盖；只计新提示时未达到 60%。"
+    }
+  ],
+  "d2_abnormal_occupancy": {
+    "window_days": 1512,
+    "abnormal_days": 721,
+    "abnormal_ratio": 0.47685185185185186,
+    "level1_days": 352,
+    "level1_ratio": 0.2328042328042328,
+    "level2_days": 369,
+    "level2_ratio": 0.24404761904761904,
+    "undetermined_days": 0,
+    "normal_days": 791,
+    "note": "状态无法确定的天数计入分母，不计入分子"
+  },
+  "d3_long_hang": [
+    {
+      "asset": "SPX",
+      "segments_count": 53,
+      "segments": [
+        {
+          "start": "2017-04-13",
+          "end": "2017-04-20",
+          "L": 5,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2017-05-17",
+          "end": "2017-05-19",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2017-06-09",
+          "end": "2017-06-16",
+          "L": 6,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2017-06-20",
+          "end": "2017-06-22",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2017-06-27",
+          "end": "2017-07-13",
+          "L": 12,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2017-08-10",
+          "end": "2017-08-24",
+          "L": 11,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2018-02-02",
+          "end": "2018-02-15",
+          "L": 10,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2018-02-20",
+          "end": "2018-02-23",
+          "L": 4,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2018-02-28",
+          "end": "2018-03-05",
+          "L": 4,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2018-03-19",
+          "end": "2018-04-09",
+          "L": 15,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2018-04-19",
+          "end": "2018-04-24",
+          "L": 4,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2018-05-15",
+          "end": "2018-05-22",
+          "L": 6,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2018-05-29",
+          "end": "2018-05-31",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2018-06-25",
+          "end": "2018-07-03",
+          "L": 7,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2018-07-27",
+          "end": "2018-07-31",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2018-09-06",
+          "end": "2018-09-10",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2018-09-17",
+          "end": "2018-09-19",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2018-10-05",
+          "end": "2019-02-13",
+          "L": 89,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 2,
+          "e": 3
+        },
+        {
+          "start": "2019-03-07",
+          "end": "2019-03-12",
+          "L": 4,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2019-03-27",
+          "end": "2019-03-29",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2019-05-07",
+          "end": "2019-06-10",
+          "L": 24,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2019-06-25",
+          "end": "2019-06-27",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2019-08-01",
+          "end": "2019-08-21",
+          "L": 15,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2019-08-23",
+          "end": "2019-08-28",
+          "L": 4,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2019-09-24",
+          "end": "2019-09-26",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2019-10-01",
+          "end": "2019-10-09",
+          "L": 7,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2020-01-27",
+          "end": "2020-01-29",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2020-01-31",
+          "end": "2020-02-06",
+          "L": 5,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2020-02-21",
+          "end": "2020-05-28",
+          "L": 68,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 4,
+          "e": 5
+        },
+        {
+          "start": "2020-06-11",
+          "end": "2020-06-16",
+          "L": 4,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2020-06-24",
+          "end": "2020-06-30",
+          "L": 5,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2020-07-07",
+          "end": "2020-07-09",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2020-07-23",
+          "end": "2020-07-30",
+          "L": 6,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2020-08-11",
+          "end": "2020-08-13",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2020-09-03",
+          "end": "2020-09-15",
+          "L": 8,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2020-09-18",
+          "end": "2020-09-30",
+          "L": 9,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2020-10-06",
+          "end": "2020-10-09",
+          "L": 4,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2020-10-14",
+          "end": "2020-10-22",
+          "L": 7,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2020-10-26",
+          "end": "2020-11-06",
+          "L": 10,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2020-11-10",
+          "end": "2020-11-13",
+          "L": 4,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2021-01-27",
+          "end": "2021-01-29",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2021-02-22",
+          "end": "2021-03-15",
+          "L": 16,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2021-03-18",
+          "end": "2021-03-23",
+          "L": 4,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2021-05-04",
+          "end": "2021-05-21",
+          "L": 14,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2021-05-27",
+          "end": "2021-06-01",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2021-06-03",
+          "end": "2021-06-07",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2021-07-19",
+          "end": "2021-07-21",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2021-09-20",
+          "end": "2021-10-11",
+          "L": 16,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2021-11-26",
+          "end": "2021-12-28",
+          "L": 22,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2022-01-05",
+          "end": "2022-02-08",
+          "L": 24,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 2
+        },
+        {
+          "start": "2022-02-10",
+          "end": "2022-03-25",
+          "L": 31,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2022-03-31",
+          "end": "2022-12-01",
+          "L": 170,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 4,
+          "e": 6
+        },
+        {
+          "start": "2022-12-05",
+          "end": "2022-12-30",
+          "L": 19,
+          "pre_window": false,
+          "open_at_end": true,
+          "flags": [
+            "窗口末未结束"
+          ],
+          "c": 0,
+          "e": 1
+        }
+      ],
+      "e_at_least_2": 4,
+      "c_max": 4,
+      "c_max_segments": [
+        {
+          "start": "2020-02-21",
+          "end": "2020-05-28",
+          "L": 68,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 4
+        },
+        {
+          "start": "2022-03-31",
+          "end": "2022-12-01",
+          "L": 170,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 4
+        }
+      ],
+      "longest_L": 170,
+      "longest": [
+        {
+          "start": "2022-03-31",
+          "end": "2022-12-01",
+          "L": 170,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": []
+        }
+      ],
+      "removal_check": {
+        "r2_meets": true,
+        "result": "否",
+        "triggered": [],
+        "integer_check": "5 × (R2 达标数 20 − c) < 3 × 分母 24"
+      }
+    },
+    {
+      "asset": "QQQ",
+      "segments_count": 53,
+      "segments": [
+        {
+          "start": "2017-04-13",
+          "end": "2017-04-20",
+          "L": 5,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2017-05-17",
+          "end": "2017-05-19",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2017-06-09",
+          "end": "2017-06-16",
+          "L": 6,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2017-06-20",
+          "end": "2017-06-22",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2017-06-27",
+          "end": "2017-07-13",
+          "L": 12,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2017-08-10",
+          "end": "2017-08-24",
+          "L": 11,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2018-02-02",
+          "end": "2018-02-15",
+          "L": 10,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2018-02-20",
+          "end": "2018-02-23",
+          "L": 4,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2018-02-28",
+          "end": "2018-03-05",
+          "L": 4,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2018-03-19",
+          "end": "2018-04-09",
+          "L": 15,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2018-04-19",
+          "end": "2018-04-24",
+          "L": 4,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2018-05-15",
+          "end": "2018-05-22",
+          "L": 6,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2018-05-29",
+          "end": "2018-05-31",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2018-06-25",
+          "end": "2018-07-03",
+          "L": 7,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2018-07-27",
+          "end": "2018-07-31",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2018-09-06",
+          "end": "2018-09-10",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2018-09-17",
+          "end": "2018-09-19",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2018-10-05",
+          "end": "2019-02-13",
+          "L": 89,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 2,
+          "e": 3
+        },
+        {
+          "start": "2019-03-07",
+          "end": "2019-03-12",
+          "L": 4,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2019-03-27",
+          "end": "2019-03-29",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2019-05-07",
+          "end": "2019-06-10",
+          "L": 24,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2019-06-25",
+          "end": "2019-06-27",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2019-08-01",
+          "end": "2019-08-21",
+          "L": 15,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2019-08-23",
+          "end": "2019-08-28",
+          "L": 4,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2019-09-24",
+          "end": "2019-09-26",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2019-10-01",
+          "end": "2019-10-09",
+          "L": 7,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2020-01-27",
+          "end": "2020-01-29",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2020-01-31",
+          "end": "2020-02-06",
+          "L": 5,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2020-02-21",
+          "end": "2020-05-28",
+          "L": 68,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 5,
+          "e": 6
+        },
+        {
+          "start": "2020-06-11",
+          "end": "2020-06-16",
+          "L": 4,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2020-06-24",
+          "end": "2020-06-30",
+          "L": 5,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2020-07-07",
+          "end": "2020-07-09",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2020-07-23",
+          "end": "2020-07-30",
+          "L": 6,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2020-08-11",
+          "end": "2020-08-13",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2020-09-03",
+          "end": "2020-09-15",
+          "L": 8,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2020-09-18",
+          "end": "2020-09-30",
+          "L": 9,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2020-10-06",
+          "end": "2020-10-09",
+          "L": 4,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2020-10-14",
+          "end": "2020-10-22",
+          "L": 7,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2020-10-26",
+          "end": "2020-11-06",
+          "L": 10,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2020-11-10",
+          "end": "2020-11-13",
+          "L": 4,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2021-01-27",
+          "end": "2021-01-29",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2021-02-22",
+          "end": "2021-03-15",
+          "L": 16,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2021-03-18",
+          "end": "2021-03-23",
+          "L": 4,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2021-05-04",
+          "end": "2021-05-21",
+          "L": 14,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2021-05-27",
+          "end": "2021-06-01",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2021-06-03",
+          "end": "2021-06-07",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2021-07-19",
+          "end": "2021-07-21",
+          "L": 3,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 0
+        },
+        {
+          "start": "2021-09-20",
+          "end": "2021-10-11",
+          "L": 16,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 1
+        },
+        {
+          "start": "2021-11-26",
+          "end": "2021-12-28",
+          "L": 22,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 0,
+          "e": 2
+        },
+        {
+          "start": "2022-01-05",
+          "end": "2022-02-08",
+          "L": 24,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 1,
+          "e": 2
+        },
+        {
+          "start": "2022-02-10",
+          "end": "2022-03-25",
+          "L": 31,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 1,
+          "e": 2
+        },
+        {
+          "start": "2022-03-31",
+          "end": "2022-12-01",
+          "L": 170,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 7,
+          "e": 9
+        },
+        {
+          "start": "2022-12-05",
+          "end": "2022-12-30",
+          "L": 19,
+          "pre_window": false,
+          "open_at_end": true,
+          "flags": [
+            "窗口末未结束"
+          ],
+          "c": 0,
+          "e": 1
+        }
+      ],
+      "e_at_least_2": 6,
+      "c_max": 7,
+      "c_max_segments": [
+        {
+          "start": "2022-03-31",
+          "end": "2022-12-01",
+          "L": 170,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": [],
+          "c": 7
+        }
+      ],
+      "longest_L": 170,
+      "longest": [
+        {
+          "start": "2022-03-31",
+          "end": "2022-12-01",
+          "L": 170,
+          "pre_window": false,
+          "open_at_end": false,
+          "flags": []
+        }
+      ],
+      "removal_check": {
+        "r2_meets": true,
+        "result": "是",
+        "triggered": [
+          {
+            "start": "2020-02-21",
+            "end": "2020-05-28",
+            "L": 68,
+            "pre_window": false,
+            "open_at_end": false,
+            "flags": [],
+            "c": 5
+          },
+          {
+            "start": "2022-03-31",
+            "end": "2022-12-01",
+            "L": 170,
+            "pre_window": false,
+            "open_at_end": false,
+            "flags": [],
+            "c": 7
+          }
+        ],
+        "integer_check": "5 × (R2 达标数 24 − c) < 3 × 分母 32"
+      }
+    }
+  ],
+  "statements": [
+    "SPX 的 R2 达标部分依赖持续覆盖；只计新提示时未达到 60%。",
+    "QQQ 的 R2 达标部分依赖持续覆盖；只计新提示时未达到 60%。"
+  ],
+  "warnings": [
+    "**警示：QQQ 的 R2 资格依赖单一提示段（2020-02-21—2020-05-28，68 个信号日）对 5 个事件的持续覆盖；剔除该段的持续覆盖后，R2 比例低于 60%。**",
+    "**警示：QQQ 的 R2 资格依赖单一提示段（2022-03-31—2022-12-01，170 个信号日）对 7 个事件的持续覆盖；剔除该段的持续覆盖后，R2 比例低于 60%。**"
+  ],
+  "reclassification_note": "“剔除单段”是重分类压力诊断：把 c(a, s) 个事件改按不达标计后重算比例；不是删除该段后重跑策略的反事实结果",
+  "effect": "只报告，不设门槛；不改变类别、资格、稳定性标注与后续动作；警示与稳定性警示分开列示"
+}

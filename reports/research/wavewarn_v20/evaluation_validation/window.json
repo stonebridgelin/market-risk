@@ -1,0 +1,42 @@
+{
+  "purpose": "冻结候选评价",
+  "last_day": "2022-12-30",
+  "histories": {
+    "SPX": "1990-01-02",
+    "QQQ": "1999-03-10"
+  },
+  "candidates_requested": 1,
+  "stop": null,
+  "window": {
+    "t0": 2383,
+    "t0_day": "1999-06-08",
+    "j0": 6804,
+    "j0_min": 2446,
+    "kappa_all": 2386,
+    "kappa_all_day": "1999-06-11",
+    "reference_index": 2385,
+    "reference_day": "1999-06-10",
+    "e_index": 8314,
+    "n": 1510,
+    "first_day": "2016-12-30",
+    "last_day": "2022-12-30",
+    "start_basis": "固定起点（锁定记录给出）；预热与收敛前提 j₀_min = 1999-09-07 已核对",
+    "history_first": "1990-01-02",
+    "history_last": "2022-12-30",
+    "convergences": [
+      {
+        "object": "K=3,θ_P=0.025,h=3",
+        "channels": {
+          "P_SPX": 2385,
+          "P_QQQ": 2385,
+          "PR_SPX": 2385,
+          "PR_QQQ": 2385,
+          "MR": 2384
+        },
+        "kappa_channel": 2385,
+        "system_index": 2386,
+        "system_day": "1999-06-11"
+      }
+    ]
+  }
+}
